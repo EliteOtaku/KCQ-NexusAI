@@ -31,7 +31,7 @@
     <span v-if="drawings.length > 1" class="selection-count">已选 {{ drawings.length }}</span>
 
     <Dropdown
-      v-if="templates.length > 0"
+      v-if="(templates?.length ?? 0) > 0"
       label="模板"
       :model-value="''"
       :options="templateOptions"
