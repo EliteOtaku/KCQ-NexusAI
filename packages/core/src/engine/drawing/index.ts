@@ -989,3 +989,16 @@ export type {
   DrawingInteractionCallbacks,
   DrawingLineLabelTarget,
 } from './interaction'
+
+// 导出磁吸模块（setMagnetMode 的档位类型与吸附纯函数）
+export {
+  snapPointerToOhlc,
+  MAGNET_RADIUS_WEAK,
+  MAGNET_RADIUS_STRONG,
+} from './magnetSnapper'
+export type {
+  MagnetMode,
+  ActiveMagnetMode,
+  MagnetSnapConfig,
+  SnappedPoint,
+} from './magnetSnapper'
