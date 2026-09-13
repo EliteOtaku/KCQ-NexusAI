@@ -1,7 +1,7 @@
 // 图表指针事件桥：壳在事件进入引擎前施加 TV 习惯修正——
-// Shift 锁角 45°、测量工具、橡皮擦、Ctrl 拖拽复制（事后在原位重建“原件”）。
-// 磁吸已下沉引擎（setMagnetMode，经 syncMagnet 同步壳偏好），
-// Shift 点选多选为引擎原生语义；其余为壳层实现（引擎缺口 G-02/G-03，见 action-checklist.md）。
+// Shift 锁角 45°、测量工具、Ctrl 拖拽复制（事后在原位重建“原件”）。
+// 磁吸已下沉引擎（setMagnetMode，经 syncMagnet 同步壳偏好），Shift 点选多选为引擎原生
+// 语义，橡皮擦经引擎 hitTestAt 命中删除；测量（G-02）与拖拽复制仍为壳层实现。
 
 import type { ChartController } from '@363045841yyt/klinechart-core/controllers'
 import { DrawingInteractionController } from '@363045841yyt/klinechart-core/controllers'
@@ -141,11 +141,12 @@ export class ChartPointerBridge {
       return
     }
 
-    // 橡皮擦：借用光标点选语义命中图元，命中即删（引擎缺口 G-03 的壳侧组合实现）。
+    // 橡皮擦：引擎 hitTestAt 公开命中查询（与点选同口径），命中即删，不经选中态、无会话副作用。
     if (tool === 'eraser') {
-      this.dic.onPointerDown(event, this.container!)
-      const ids = this.ctrl.getSelectedDrawingIds()
-      if (ids.length > 0) this.ctrl.removeBatch(ids)
+      const container = this.container!
+      const rect = container.getBoundingClientRect()
+      const hit = this.dic.hitTestAt(event.clientX - rect.left, event.clientY - rect.top)
+      if (hit) this.dic.removeDrawing(hit.id)
       return
     }
 
