@@ -6,7 +6,7 @@ import { DrawingToolbar } from './components/DrawingToolbar'
 import { IndicatorPanel } from './components/IndicatorPanel'
 import { TemplatePanel } from './components/TemplatePanel'
 import { TopBar } from './components/TopBar'
-import { NexusShellProvider, useNexusShell } from './shell/NexusShellContext'
+import { NexusShellProvider } from './shell/NexusShellContext'
 
 /** 应用入口组件。 */
 export function App() {
@@ -19,16 +19,9 @@ export function App() {
 
 /** 壳布局：必须在 Provider 内消费上下文。 */
 function AppLayout() {
-  const shell = useNexusShell()
-
   return (
     <div className="nx-app">
-      <TopBar
-        currentPeriod={shell.period}
-        onPeriodChange={shell.setPeriod}
-        theme={shell.theme}
-        onThemeToggle={() => shell.setTheme(shell.theme === 'dark' ? 'light' : 'dark')}
-      />
+      <TopBar />
       <div className="nx-body">
         <DrawingToolbar />
         <div className="nx-body__main">

@@ -78,6 +78,7 @@ export interface NexusShellValue {
   toggleSelectionLock(): void
   bumpTemplateVersion(): void
   setTheme(theme: 'light' | 'dark'): void
+  toggleTheme(): void
   setSymbol(symbol: string): void
   setPeriod(period: string): void
 }
@@ -322,6 +323,11 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
     [ctrl],
   )
 
+  /** 主题切换（顶栏按钮）。 */
+  const toggleTheme = useCallback(() => {
+    setTheme((ctrl?.theme.peek() ?? shellTheme) === 'dark' ? 'light' : 'dark')
+  }, [ctrl, setTheme, shellTheme])
+
   useEffect(() => {
     if (!ctrl) return
     ctrl.applyCustomData(buildMockBundle(symbol, period))
@@ -393,6 +399,7 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
       toggleSelectionLock,
       bumpTemplateVersion,
       setTheme,
+      toggleTheme,
       setSymbol,
       setPeriod,
     }),
@@ -429,6 +436,7 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
       toggleSelectionLock,
       bumpTemplateVersion,
       setTheme,
+      toggleTheme,
     ],
   )
 

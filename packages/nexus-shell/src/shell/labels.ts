@@ -61,4 +61,11 @@ export const SHELL_LABELS = {
 
   // ── 周期 ──
   periodLabel: '周期',
+
+  // ── 品种搜索器 ──
+  symbolSearchTitle: '品种搜索',
+  symbolSearchPlaceholder: '搜索品种代码或名称…',
+  symbolRecentGroup: '最近使用',
+  symbolAllGroup: '全部品种',
+  symbolNoResults: '无匹配品种',
 } as const
