@@ -4,13 +4,13 @@ import { useState } from 'react'
 import { SHELL_LABELS } from '../shell/labels'
 
 /** 面板默认展示的指标条目（主图/副图各一代表，接线后由引擎注册表驱动）。 */
-const DEFAULT_INDICATORS = [
+const DEFAULT_INDICATORS: ReadonlyArray<{ id: string; main: boolean }> = [
   { id: 'MA', main: true },
   { id: 'BOLL', main: true },
   { id: 'VOLUME', main: false },
   { id: 'MACD', main: false },
   { id: 'RSI', main: false },
-] as const
+]
 
 /** 指标管理面板。 */
 export function IndicatorPanel() {
