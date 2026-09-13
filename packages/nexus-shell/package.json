@@ -13,7 +13,6 @@
   },
   "dependencies": {
     "@363045841yyt/klinechart-core": "workspace:*",
-    "@363045841yyt/klinechart-react": "workspace:*",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
@@ -21,7 +20,6 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^6.0.2",
-    "@vitejs/plugin-vue": "^6.0.8",
     "typescript": "~6.0.3",
     "unplugin-icons": "^23.0.1",
     "vite": "^8.2.1",

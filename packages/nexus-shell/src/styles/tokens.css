@@ -1,6 +1,7 @@
 /*
  * NexusAI Shell 主题 token：所有颜色只在此处定义，组件一律消费 CSS 变量。
  * 亮/暗双主题通过 <html data-theme="dark|light"> 切换，默认暗色（TV 习惯）。
+ * 涨跌色按 A 股习惯：红涨绿跌（isAsiaMarket）。
  */
 
 :root,
@@ -14,6 +15,9 @@
   --nx-accent: #2962ff;
   --nx-accent-hover: #1e53e5;
   --nx-danger: #ef5350;
+  --nx-warning: #f0b90b;
+  --nx-up: #ef5350;
+  --nx-down: #26a69a;
 }
 
 [data-theme='light'] {
@@ -26,4 +30,7 @@
   --nx-accent: #2962ff;
   --nx-accent-hover: #1e53e5;
   --nx-danger: #ef5350;
+  --nx-warning: #b8860b;
+  --nx-up: #ef5350;
+  --nx-down: #26a69a;
 }

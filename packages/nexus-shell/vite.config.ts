@@ -1,10 +1,12 @@
-// nexus-shell 开发/构建配置：同时编译 core TS 源（含装饰器）与 Vue Custom Element 入口，
-// 结构照搬 packages/react/preview/vite.config.ts 的已验证组合。
+// nexus-shell 开发/构建配置：
+// - 壳直接消费 core 源码（createChartController 挂载），不再引入 Vue Web Component，
+//   因此仅需 React 插件 + core TS 源（含装饰器）的 Babel 转换。
+// - 图标经 unplugin-icons 以 raw SVG 编译（Tabler；jsx 编译需 @svgr/core，工作区未引入）。
+// - dev server 固定 5273，避开上游 5173/5175。
 
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import vue from '@vitejs/plugin-vue'
 import babel from 'vite-plugin-babel'
 import Icons from 'unplugin-icons/vite'
 
@@ -25,19 +27,19 @@ const decoratorTransform = babel({
 })
 
 const root = fileURLToPath(new URL('../..', import.meta.url))
-const vueRuntime = `${root}/packages/vue/node_modules/vue/dist/vue.esm-bundler.js`
 
 export default defineConfig({
   root: fileURLToPath(new URL('.', import.meta.url)),
-  plugins: [decoratorTransform, vue({ customElement: true }), react(), Icons({ compiler: 'vue3', autoInstall: true })],
+  plugins: [
+    decoratorTransform,
+    react(),
+    Icons({ compiler: 'raw', autoInstall: true }),
+  ],
   resolve: {
-    alias: [
-      ...createCoreSourceAliases(`${root}/packages/core/src`),
-      {
-        find: /^@363045841yyt\/klinechart\/web-component$/,
-        replacement: `${root}/packages/vue/src/web-component.ts`,
-      },
-      { find: /^vue$/, replacement: vueRuntime },
-    ],
+    alias: [...createCoreSourceAliases(`${root}/packages/core/src`)],
+  },
+  server: {
+    port: 5273,
+    strictPort: false,
   },
 })

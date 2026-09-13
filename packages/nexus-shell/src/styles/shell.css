@@ -41,14 +41,17 @@ body {
   min-width: 0;
 }
 
+/* ── 图表舞台 ── */
 .nx-chart-stage {
   position: relative;
   flex: 1;
   min-width: 0;
+  overflow: hidden;
 }
 
-.nx-chart-stage kline-chart {
-  display: block;
+/* 宿主 div：controller 在其内部自建 DOM 脚手架，壳不插入任何子节点。 */
+.nx-chart-stage__host {
+  position: relative;
   width: 100%;
   height: 100%;
 }
@@ -95,27 +98,398 @@ body {
   color: #ffffff;
 }
 
-/* 左侧绘图工具条 */
+.nx-btn--primary {
+  background: var(--nx-accent);
+  color: #ffffff;
+}
+
+.nx-btn--primary:hover {
+  background: var(--nx-accent-hover);
+}
+
+/* ── 左侧绘图工具条 ── */
 .nx-drawing-toolbar {
+  position: relative;
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 2px;
-  width: 40px;
+  width: 44px;
   padding: 8px 4px;
   border-right: 1px solid var(--nx-border);
   background: var(--nx-bg-elevated);
   flex: none;
+  /* flyout 向右展开，工具条不能裁剪浮层。 */
+  overflow: visible;
 }
 
-.nx-drawing-toolbar .nx-btn {
+.nx-toolbar-divider {
+  width: 22px;
+  height: 1px;
+  margin: 4px 0;
+  background: var(--nx-border);
+  flex: none;
+}
+
+/* 图标包装：SVG 原样填充（stroke=currentColor 随外层颜色）。 */
+.nx-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  flex: none;
+}
+
+.nx-icon > svg {
+  width: 100%;
+  height: 100%;
+}
+
+.nx-toolbar-item {
+  position: relative;
+}
+
+.nx-toolbtn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 32px;
   height: 32px;
   padding: 0;
-  font-size: 14px;
-  line-height: 1;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--nx-text-secondary);
+  cursor: pointer;
 }
 
-/* 右侧面板 */
+.nx-toolbtn:hover {
+  background: var(--nx-bg-hover);
+  color: var(--nx-text-primary);
+}
+
+.nx-toolbtn--active {
+  background: var(--nx-accent);
+  color: #ffffff;
+}
+
+.nx-toolbtn__icon {
+  width: 17px;
+  height: 17px;
+}
+
+/* 组按钮角标（flyout 展开提示，TV 风格小三角）。 */
+.nx-toolbtn__corner {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 8px;
+  height: 8px;
+  pointer-events: none;
+}
+
+.nx-toolbtn__corner::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-bottom: 5px solid currentColor;
+  opacity: 0.45;
+}
+
+.nx-toolbtn:hover .nx-toolbtn__corner::after,
+.nx-toolbtn--active .nx-toolbtn__corner::after,
+.nx-toolbtn__corner--open::after {
+  opacity: 0.8;
+}
+
+/* 磁吸三态着色：off 灰、weak 黄、strong 亮色。 */
+.nx-toolbtn--magnet-weak {
+  color: var(--nx-warning);
+}
+
+.nx-toolbtn--magnet-strong {
+  color: var(--nx-accent);
+}
+
+/* flyout：分组子工具横向展开面板。 */
+.nx-flyout {
+  position: absolute;
+  left: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px;
+  background: var(--nx-bg-elevated);
+  border: 1px solid var(--nx-border);
+  border-radius: 4px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
+  z-index: 100;
+}
+
+.nx-flyout__item {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+/* 星标：默认隐藏，悬浮行时浮现（TV 习惯）。 */
+.nx-flyout__star {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: var(--nx-bg-elevated);
+  color: var(--nx-text-secondary);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.nx-flyout__item:hover .nx-flyout__star,
+.nx-flyout__star--starred {
+  opacity: 1;
+}
+
+.nx-flyout__star-icon {
+  width: 11px;
+  height: 11px;
+}
+
+.nx-flyout__star:hover {
+  color: var(--nx-warning);
+}
+
+/* ── 绘图属性浮条 ── */
+.nx-flybar {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--nx-bg-elevated);
+  border: 1px solid var(--nx-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
+  z-index: 60;
+}
+
+.nx-flybar__color {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.nx-flybar__color:hover {
+  background: var(--nx-bg-hover);
+}
+
+.nx-flybar__swatch {
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--nx-border);
+  border-radius: 3px;
+  pointer-events: none;
+}
+
+.nx-flybar__swatch--fill {
+  background-image: linear-gradient(45deg, transparent 45%, #ffffff55 45%, #ffffff55 55%, transparent 55%);
+}
+
+/* 混合态色板：斜杠提示多值。 */
+.nx-flybar__swatch--mixed {
+  background:
+    linear-gradient(
+      to top right,
+      transparent 46%,
+      var(--nx-text-secondary) 46%,
+      var(--nx-text-secondary) 54%,
+      transparent 54%
+    ),
+    var(--nx-bg-hover) !important;
+}
+
+.nx-flybar__color-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.nx-flybar__select {
+  height: 26px;
+  padding: 0 4px;
+  border: 1px solid var(--nx-border);
+  border-radius: 4px;
+  background: var(--nx-bg-elevated);
+  color: var(--nx-text-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.nx-flybar__range {
+  width: 70px;
+  accent-color: var(--nx-accent);
+}
+
+.nx-flybar__count {
+  padding: 0 4px;
+  color: var(--nx-text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.nx-flybar__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--nx-text-secondary);
+  cursor: pointer;
+}
+
+.nx-flybar__btn:hover {
+  background: var(--nx-bg-hover);
+  color: var(--nx-text-primary);
+}
+
+.nx-flybar__btn--active {
+  color: var(--nx-accent);
+}
+
+.nx-flybar__btn--danger:hover {
+  color: var(--nx-danger);
+}
+
+.nx-flybar__icon {
+  width: 15px;
+  height: 15px;
+}
+
+/* ── 测量浮层 ── */
+.nx-measure {
+  position: absolute;
+  border: 1px solid var(--nx-accent);
+  background: color-mix(in srgb, var(--nx-accent) 12%, transparent);
+  pointer-events: none;
+  z-index: 50;
+}
+
+.nx-measure__label {
+  position: absolute;
+  display: flex;
+  gap: 6px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  transform: translate(6px, 6px);
+}
+
+.nx-measure__label--up {
+  background: var(--nx-bg-elevated);
+  color: var(--nx-up);
+}
+
+.nx-measure__label--down {
+  background: var(--nx-bg-elevated);
+  color: var(--nx-down);
+}
+
+.nx-measure__bars {
+  color: var(--nx-text-secondary);
+}
+
+/* ── 对话框（保存模板等） ── */
+.nx-dialog {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 200;
+}
+
+.nx-dialog__panel {
+  width: 300px;
+  padding: 16px;
+  background: var(--nx-bg-elevated);
+  border: 1px solid var(--nx-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+}
+
+.nx-dialog__title {
+  margin: 0 0 12px;
+  font-size: 14px;
+}
+
+.nx-dialog__input {
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--nx-border);
+  border-radius: 4px;
+  background: var(--nx-bg);
+  color: var(--nx-text-primary);
+  font-size: 13px;
+}
+
+.nx-dialog__input:focus {
+  outline: none;
+  border-color: var(--nx-accent);
+}
+
+.nx-dialog__input--error {
+  border-color: var(--nx-danger);
+}
+
+.nx-dialog__error {
+  margin: 6px 0 0;
+  color: var(--nx-danger);
+  font-size: 12px;
+}
+
+.nx-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+/* ── 右侧面板 ── */
 .nx-side-panel {
   display: flex;
   flex-direction: column;
@@ -143,11 +517,89 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 28px;
+  gap: 4px;
+  min-height: 28px;
+}
+
+.nx-side-panel__row--toggle {
+  margin-bottom: 6px;
 }
 
 .nx-side-panel__empty {
   margin: 4px 0;
   color: var(--nx-text-secondary);
   font-size: 12px;
+}
+
+.nx-side-panel__name {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 2px 4px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--nx-text-primary);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.nx-side-panel__name:hover {
+  background: var(--nx-bg-hover);
+}
+
+.nx-side-panel__kind {
+  flex: none;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--nx-bg-hover);
+  color: var(--nx-text-secondary);
+  font-size: 11px;
+}
+
+.nx-side-panel__indicator-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nx-side-panel__rename {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--nx-accent);
+  border-radius: 3px;
+  background: var(--nx-bg);
+  color: var(--nx-text-primary);
+  font-size: 12px;
+}
+
+/* 小图标按钮（面板行内操作）。 */
+.nx-iconbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--nx-text-secondary);
+  cursor: pointer;
+}
+
+.nx-iconbtn:hover {
+  background: var(--nx-bg-hover);
+  color: var(--nx-text-primary);
+}
+
+.nx-iconbtn__icon {
+  width: 13px;
+  height: 13px;
 }
