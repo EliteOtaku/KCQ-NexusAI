@@ -989,3 +989,24 @@ export type {
   DrawingInteractionCallbacks,
   DrawingLineLabelTarget,
 } from './interaction'
+
+// 导出工具锚点数表（宿主 UI 借此渲染分步提示与完成状态）
+export {
+  getAnchorCountForTool,
+  SINGLE_ANCHOR_TOOLS,
+  DOUBLE_ANCHOR_TOOLS,
+  TRIPLE_ANCHOR_TOOLS,
+} from './toolConfig'
+
+// 导出磁吸模块（setMagnetMode 的档位类型与吸附纯函数）
+export {
+  snapPointerToOhlc,
+  MAGNET_RADIUS_WEAK,
+  MAGNET_RADIUS_STRONG,
+} from './magnetSnapper'
+export type {
+  MagnetMode,
+  ActiveMagnetMode,
+  MagnetSnapConfig,
+  SnappedPoint,
+} from './magnetSnapper'
