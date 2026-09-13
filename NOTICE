@@ -1,0 +1,12 @@
+KCQ-NexusAI
+Copyright (c) 2026 EliteOtaku
+
+This repository is a fork of KLineChartQuant
+(https://github.com/363045841/KLineChartQuant) by 363045841,
+licensed under the MIT License (see LICENSE, retained from upstream).
+
+Fork additions (NexusAI Shell, engine enhancements on the nexus/main
+integration line) are also released under the MIT License.
+
+The charting engine itself is developed upstream; engine changes in
+this fork are kept minimal and offered back upstream in small batches.
