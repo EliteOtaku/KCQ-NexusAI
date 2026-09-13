@@ -1,8 +1,7 @@
 // 图表指针事件桥：壳在事件进入引擎前施加 TV 习惯修正——
-// Shift 锁角 45°、Shift 点选归一化为 Ctrl 多选、
-// 测量工具、橡皮擦、Ctrl 拖拽复制（事后在原位重建“原件”）。
-// 磁吸已下沉引擎（setMagnetMode，经 syncMagnet 同步壳偏好）；
-// 其余为壳层实现（引擎缺口 G-02/G-03，见 action-checklist.md）。
+// Shift 锁角 45°、测量工具、橡皮擦、Ctrl 拖拽复制（事后在原位重建“原件”）。
+// 磁吸已下沉引擎（setMagnetMode，经 syncMagnet 同步壳偏好），
+// Shift 点选多选为引擎原生语义；其余为壳层实现（引擎缺口 G-02/G-03，见 action-checklist.md）。
 
 import type { ChartController } from '@363045841yyt/klinechart-core/controllers'
 import { DrawingInteractionController } from '@363045841yyt/klinechart-core/controllers'
@@ -161,9 +160,6 @@ export class ChartPointerBridge {
     let forwarded = event
     if (this.ctrlDragArmed) {
       forwarded = clonePointerEvent(event, { ctrlKey: false, metaKey: false })
-    } else if (tool === 'cursor' && event.shiftKey && !event.ctrlKey) {
-      // 光标模式下 Shift 点选 → Ctrl 多选语义归一化（引擎缺口 G-06）。
-      forwarded = clonePointerEvent(event, { shiftKey: false, ctrlKey: true })
     }
     // 绘制模式：Shift 锁角改写落点；磁吸在引擎侧执行，与锁角的互斥由引擎 Shift 判定保证。
     if (
@@ -371,7 +367,6 @@ function clonePointerEvent(
   overrides: {
     clientX?: number
     clientY?: number
-    shiftKey?: boolean
     ctrlKey?: boolean
     metaKey?: boolean
   },
@@ -392,7 +387,7 @@ function clonePointerEvent(
     screenX: event.screenX,
     screenY: event.screenY,
     altKey: event.altKey,
-    shiftKey: overrides.shiftKey ?? event.shiftKey,
+    shiftKey: event.shiftKey,
     ctrlKey: overrides.ctrlKey ?? event.ctrlKey,
     metaKey: overrides.metaKey ?? event.metaKey,
   })
