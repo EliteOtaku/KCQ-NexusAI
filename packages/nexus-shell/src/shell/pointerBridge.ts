@@ -1,7 +1,7 @@
 // 图表指针事件桥：壳在事件进入引擎前施加 TV 习惯修正——
-// 磁吸（OHLC 吸附）、Shift 锁角 45°、Shift 点选归一化为 Ctrl 多选、
-// 测量工具、橡皮擦、Ctrl 拖拽复制（事后在原位重建“原件”）。
-// 引擎无对应能力（见 action-checklist.md 引擎缺口 G-01/G-02/G-03/G-06），全部壳层实现。
+// Shift 锁角 45°、测量工具、Ctrl 拖拽复制（事后在原位重建“原件”）。
+// 磁吸已下沉引擎（setMagnetMode，经 syncMagnet 同步壳偏好），Shift 点选多选为引擎原生
+// 语义，橡皮擦经引擎 hitTestAt 命中删除；测量（G-02）与拖拽复制仍为壳层实现。
 
 import type { ChartController } from '@363045841yyt/klinechart-core/controllers'
 import { DrawingInteractionController } from '@363045841yyt/klinechart-core/controllers'
@@ -33,10 +33,6 @@ export interface BridgeHooks {
   /** 引擎完成一次图元创建（stay/模板自动套用在此接线）。 */
   onDrawingCreated(drawing: DrawingObject): void
 }
-
-/** 磁吸吸附半径（px）：weak 只吸高低点，strong 吸 OHLC 四值。 */
-const MAGNET_RADIUS_WEAK = 8
-const MAGNET_RADIUS_STRONG = 15
 
 /** 锁角/拖拽的最小位移阈值。 */
 const ANGLE_LOCK_MIN_DELTA = 2
@@ -108,6 +104,14 @@ export class ChartPointerBridge {
     this.lastAnchorClient = null
   }
 
+  /**
+   * 把壳侧磁吸偏好同步到引擎交互控制器（吸附执行方已下沉引擎）。
+   * 桥初始化与偏好变化时由壳调用；引擎侧 Shift 互斥、Ctrl 升级均为原生语义。
+   */
+  syncMagnet(): void {
+    this.dic.setMagnetMode(this.state.getMagnet())
+  }
+
   /** 清除测量结果。 */
   clearMeasure(): void {
     if (this.measure === null) return
@@ -137,11 +141,12 @@ export class ChartPointerBridge {
       return
     }
 
-    // 橡皮擦：借用光标点选语义命中图元，命中即删（引擎缺口 G-03 的壳侧组合实现）。
+    // 橡皮擦：引擎 hitTestAt 公开命中查询（与点选同口径），命中即删，不经选中态、无会话副作用。
     if (tool === 'eraser') {
-      this.dic.onPointerDown(event, this.container!)
-      const ids = this.ctrl.getSelectedDrawingIds()
-      if (ids.length > 0) this.ctrl.removeBatch(ids)
+      const container = this.container!
+      const rect = container.getBoundingClientRect()
+      const hit = this.dic.hitTestAt(event.clientX - rect.left, event.clientY - rect.top)
+      if (hit) this.dic.removeDrawing(hit.id)
       return
     }
 
@@ -156,17 +161,15 @@ export class ChartPointerBridge {
     let forwarded = event
     if (this.ctrlDragArmed) {
       forwarded = clonePointerEvent(event, { ctrlKey: false, metaKey: false })
-    } else if (tool === 'cursor' && event.shiftKey && !event.ctrlKey) {
-      // 光标模式下 Shift 点选 → Ctrl 多选语义归一化（引擎缺口 G-06）。
-      forwarded = clonePointerEvent(event, { shiftKey: false, ctrlKey: true })
     }
-    // 绘制模式：先磁吸后锁角（Shift 优先于磁吸，二者互斥使用）。
-    if (isEngineDrawingTool(tool)) {
-      if (forwarded.shiftKey && this.lastAnchorClient && isMultiAnchorTool(tool)) {
-        forwarded = this.applyAngleLock(forwarded)
-      } else {
-        forwarded = this.applyMagnet(forwarded)
-      }
+    // 绘制模式：Shift 锁角改写落点；磁吸在引擎侧执行，与锁角的互斥由引擎 Shift 判定保证。
+    if (
+      isEngineDrawingTool(tool) &&
+      forwarded.shiftKey &&
+      this.lastAnchorClient &&
+      isMultiAnchorTool(tool)
+    ) {
+      forwarded = this.applyAngleLock(forwarded)
     }
 
     let drawingConsumed = false
@@ -196,12 +199,13 @@ export class ChartPointerBridge {
     }
 
     let forwarded = event
-    if (isEngineDrawingTool(tool)) {
-      if (forwarded.shiftKey && this.lastAnchorClient && isMultiAnchorTool(tool)) {
-        forwarded = this.applyAngleLock(forwarded)
-      } else {
-        forwarded = this.applyMagnet(forwarded)
-      }
+    if (
+      isEngineDrawingTool(tool) &&
+      forwarded.shiftKey &&
+      this.lastAnchorClient &&
+      isMultiAnchorTool(tool)
+    ) {
+      forwarded = this.applyAngleLock(forwarded)
     }
 
     this.ctrl.handlePointerEvent(forwarded, {
@@ -297,53 +301,6 @@ export class ChartPointerBridge {
     this.lastAnchorClient = { x: event.clientX, y: event.clientY }
   }
 
-  /**
-   * 磁吸：把指针坐标吸附到最近 K 线的 OHLC 极值与 Bar 中心。
-   * weak 只吸 high/low，strong 吸 OHLC 四值；Ctrl/Meta 临时强吸。
-   */
-  private applyMagnet(event: PointerEvent): PointerEvent {
-    const mode = event.ctrlKey || event.metaKey ? 'strong' : this.state.getMagnet()
-    if (mode === 'off') return event
-
-    const container = this.container
-    if (container === null) return event
-    const rect = container.getBoundingClientRect()
-    const localX = event.clientX - rect.left
-    const localY = event.clientY - rect.top
-
-    const logicalIndex = this.ctrl.getLogicalIndexAtX(localX)
-    if (logicalIndex === null) return event
-    const data = this.ctrl.getData()
-    const barIndex = Math.min(Math.max(Math.round(logicalIndex), 0), data.length - 1)
-    const bar = data[barIndex]
-    if (bar === undefined) return event
-
-    const pane = this.ctrl.getPaneAtY(localY)
-    if (pane === undefined) return event
-
-    const candidates =
-      mode === 'weak' ? [bar.high, bar.low] : [bar.high, bar.low, bar.open, bar.close]
-    const radius = mode === 'weak' ? MAGNET_RADIUS_WEAK : MAGNET_RADIUS_STRONG
-    const paneLocalY = localY - pane.top
-
-    let bestY: number | null = null
-    let bestDistance = radius
-    for (const price of candidates) {
-      const candidateY = this.ctrl.priceToY(pane.paneId, price)
-      const distance = Math.abs(candidateY - paneLocalY)
-      if (distance <= bestDistance) {
-        bestDistance = distance
-        bestY = candidateY
-      }
-    }
-
-    const snappedX = this.ctrl.getScreenXAtLogicalIndex(barIndex)
-    const nextClientX = snappedX === null ? event.clientX : rect.left + snappedX
-    const nextClientY = bestY === null ? event.clientY : rect.top + pane.top + bestY
-    if (nextClientX === event.clientX && nextClientY === event.clientY) return event
-    return clonePointerEvent(event, { clientX: nextClientX, clientY: nextClientY })
-  }
-
   /** Shift 锁角：把指针约束到上一锚点的 8 方向（45° 步进）射线上。 */
   private applyAngleLock(event: PointerEvent): PointerEvent {
     const anchor = this.lastAnchorClient
@@ -411,7 +368,6 @@ function clonePointerEvent(
   overrides: {
     clientX?: number
     clientY?: number
-    shiftKey?: boolean
     ctrlKey?: boolean
     metaKey?: boolean
   },
@@ -432,7 +388,7 @@ function clonePointerEvent(
     screenX: event.screenX,
     screenY: event.screenY,
     altKey: event.altKey,
-    shiftKey: overrides.shiftKey ?? event.shiftKey,
+    shiftKey: event.shiftKey,
     ctrlKey: overrides.ctrlKey ?? event.ctrlKey,
     metaKey: overrides.metaKey ?? event.metaKey,
   })

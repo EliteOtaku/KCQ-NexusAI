@@ -69,17 +69,17 @@
 | B4-04 | 方向键微调选中图元（nudge） | 未做 | |
 | B4-05 | nexus.* localStorage 持久化（收藏/模板/最近品种/面板/主题） | 部分 | 收藏/偏好（磁吸/stay/自动套用/组记忆）/模板/最近品种已在批1/2 落键；面板开关与主题持久化未做 |
 
-## 引擎缺口（只记不修）
+## 引擎缺口（历史登记；已关闭项在"壳侧对策"列标注）
 
 | ID | 缺口 | 壳侧对策 |
 |----|------|----------|
-| G-01 | 引擎无磁吸/吸附实现（简报称"引擎已有磁吸"不属实） | 壳层指针坐标重写在先于转发 |
+| G-01 | 引擎无磁吸/吸附实现（简报称"引擎已有磁吸"不属实） | ✅ 已关闭：引擎原生磁吸（fb5392de，档位语义见 docs/design/drawing-interaction-hardening.md）；壳侧已切换 setMagnetMode 并删除 applyMagnet（fork/shell-engine-magnet-migration） |
 | G-02 | 无测量工具 | 壳层 overlay 实现 |
-| G-03 | 无橡皮擦工具；HitTester 未公开 | 壳层用"光标点击选中→读选中→删"组合实现 |
-| G-04 | `locked` 字段交互层不强制（可继续拖拽） | 壳写字段；强制待引擎修复 |
+| G-03 | 无橡皮擦工具；HitTester 未公开 | ✅ 已关闭：hitTestAt 公开命中查询（fb5392de）；橡皮擦改 hitTestAt 直接删除（fork/shell-engine-magnet-migration） |
+| G-04 | `locked` 字段交互层不强制（可继续拖拽） | ✅ 已关闭：locked 三重强制引擎落地（fb5392de） |
 | G-05 | 无 FVG 工具且 DrawingKind 为封闭联合 | 记录；FVG 需引擎扩展 |
-| G-06 | Shift 点选多选不支持（仅 Ctrl） | 壳层 Shift→Ctrl 归一化 |
-| G-07 | getAnchorCountForTool 未从公共出口导出 | 壳内维护锚点数表 |
-| G-08 | 通道/矩形类默认样式无 fill 色键（填充色由 stroke 派生），updateBatch 字段交集守卫拒绝新增 fill 键 | 壳侧浮条只暴露 fillOpacity；模板合并式写入可带 fill（updateDrawing 路径） |
-| G-09 | nexus/main 根 `pnpm type-check`（vue-tsc）在 packages/vue/src/features/agent/use-agent-workspace.ts 存量报错（agent-contracts 缺 5 个导出 + 2 处隐式 any），与本分支无关 | 已在干净主工作区复验；待上游修复 |
+| G-06 | Shift 点选多选不支持（仅 Ctrl） | ✅ 已关闭：引擎原生 Shift 多选（fb5392de）；壳侧 Shift→Ctrl 归一化已删（fork/shell-engine-magnet-migration） |
+| G-07 | getAnchorCountForTool 未从公共出口导出 | ✅ 已关闭：锚点数表自 drawing 模块与 controllers facade 导出（fb5392de） |
+| G-08 | 通道/矩形类默认样式无 fill 色键（填充色由 stroke 派生），updateBatch 字段交集守卫拒绝新增 fill 键 | ✅ 已关闭：全通道类选中集 getBatchStyleKeys 无条件含 fill（fb5392de）；浮条填充色控件随之可用 |
+| G-09 | nexus/main 根 `pnpm type-check`（vue-tsc）在 packages/vue/src/features/agent/use-agent-workspace.ts 存量报错（agent-contracts 缺 5 个导出 + 2 处隐式 any），与本分支无关 | ✅ 已关闭：root tsconfig.app.json paths 映射 agent-runtime 源码（fb5392de） |
 | G-10 | KLineChart.vue 内嵌整套 Vue 工具条（TopToolbar/LeftToolbar/DrawingStyleToolbar/WatchlistPanel），react 包 WC 适配器无 controller 通道——宿主无法经 WC 获得引擎控制权 | nexus-shell 改为直接持有 createChartController（本批架构决策） |
