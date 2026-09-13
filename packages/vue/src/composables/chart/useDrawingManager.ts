@@ -106,6 +106,16 @@ export function useDrawingManager(ctrl: Ref<ChartController | null>) {
     unsubSelected = null
   })
 
+  /** 模板套用：合并式写入（可新增样式键）；updateBatch 的字段交集守卫会拒绝新键。 */
+  function applyTemplateToSelected(style: Partial<DrawingStyle>) {
+    const ids = new Set(selectedDrawingIds.value)
+    if (ids.size === 0) return
+    for (const drawing of drawings.value) {
+      if (!ids.has(drawing.id)) continue
+      ctrl.value?.updateDrawing({ ...drawing, style: { ...drawing.style, ...style } })
+    }
+  }
+
   return {
     drawingController,
     selectedDrawingIds: readonlySelectedDrawingIds,
@@ -114,6 +124,7 @@ export function useDrawingManager(ctrl: Ref<ChartController | null>) {
     drawings: readonlyDrawings,
     handleSelectTool,
     onUpdateDrawingStyle,
+    applyTemplateToSelected,
     updateDrawingLabel,
     onDeleteDrawing,
     setupDrawing,

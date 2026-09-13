@@ -30,6 +30,16 @@
 
     <span v-if="drawings.length > 1" class="selection-count">已选 {{ drawings.length }}</span>
 
+    <Dropdown
+      v-if="templates.length > 0"
+      label="模板"
+      :model-value="''"
+      :options="templateOptions"
+      size="sm"
+      title="模板"
+      @update:model-value="onTemplatePick(String($event))"
+    />
+
     <button
       type="button"
       class="toolbar-btn toolbar-btn--delete"
@@ -57,7 +67,6 @@
 <script setup lang="ts">
   import type { DrawingObject, DrawingStyle } from '@363045841yyt/klinechart-core/plugin'
   import { computed, onMounted, onUnmounted } from 'vue'
-
   import Dropdown from './Dropdown.vue'
   import CanvasToolbar from './common/CanvasToolbar.vue'
 
@@ -77,12 +86,28 @@
   const props = defineProps<{
     drawings: ReadonlyArray<DrawingObject>
     editableStyleKeys: ReadonlyArray<keyof DrawingStyle>
+    /** 当前 kind 可用的模板名（父层按 tool 过滤后传入）。 */
+    templates?: ReadonlyArray<string>
   }>()
 
   const emit = defineEmits<{
     (e: 'updateStyle', style: Partial<DrawingStyle>): void
     (e: 'delete'): void
+    (e: 'applyTemplate', name: string): void
+    (e: 'saveTemplate'): void
   }>()
+
+  const SAVE_SENTINEL = '__save__'
+
+  const templateOptions = computed(() => [
+    ...props.templates?.map((name) => ({ label: name, value: name })) ?? [],
+    { label: '＋保存为模板', value: SAVE_SENTINEL },
+  ])
+
+  function onTemplatePick(value: string) {
+    if (value === SAVE_SENTINEL) emit('saveTemplate')
+    else if (value) emit('applyTemplate', value)
+  }
 
   function onKeyDown(e: KeyboardEvent) {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
