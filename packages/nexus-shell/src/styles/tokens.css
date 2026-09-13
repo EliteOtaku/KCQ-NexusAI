@@ -1,0 +1,29 @@
+/*
+ * NexusAI Shell 主题 token：所有颜色只在此处定义，组件一律消费 CSS 变量。
+ * 亮/暗双主题通过 <html data-theme="dark|light"> 切换，默认暗色（TV 习惯）。
+ */
+
+:root,
+[data-theme='dark'] {
+  --nx-bg: #131722;
+  --nx-bg-elevated: #1e222d;
+  --nx-bg-hover: #2a2e39;
+  --nx-border: #2a2e39;
+  --nx-text-primary: #d1d4dc;
+  --nx-text-secondary: #787b86;
+  --nx-accent: #2962ff;
+  --nx-accent-hover: #1e53e5;
+  --nx-danger: #ef5350;
+}
+
+[data-theme='light'] {
+  --nx-bg: #ffffff;
+  --nx-bg-elevated: #f0f3fa;
+  --nx-bg-hover: #e0e3eb;
+  --nx-border: #e0e3eb;
+  --nx-text-primary: #131722;
+  --nx-text-secondary: #787b86;
+  --nx-accent: #2962ff;
+  --nx-accent-hover: #1e53e5;
+  --nx-danger: #ef5350;
+}
