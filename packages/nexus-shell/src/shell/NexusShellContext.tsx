@@ -135,6 +135,11 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
     writeJson(STORAGE_KEYS.favorites, favorites)
   }, [favorites])
 
+  // 磁吸档位同步到引擎交互控制器（吸附执行方已下沉引擎）；桥挂载与偏好变化时各跑一次。
+  useEffect(() => {
+    bridge?.syncMagnet()
+  }, [bridge, prefs.magnet])
+
   // ── 供桥读取的 ref 视图（桥持有稳定访问器，避免重建） ──
   const activeToolRef = useRef(activeTool)
   activeToolRef.current = activeTool
