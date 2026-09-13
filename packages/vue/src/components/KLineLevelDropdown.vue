@@ -20,6 +20,7 @@
     | '15min'
     | '30min'
     | '60min'
+    | '4h'
     | 'daily'
     | 'weekly'
     | 'monthly'
@@ -37,6 +38,7 @@
     { label: '15min', value: '15min' },
     { label: '30min', value: '30min' },
     { label: '1小时', value: '60min' },
+    { label: '4小时', value: '4h' },
     { label: '1周', value: 'weekly' },
     { label: '1月', value: 'monthly' },
     { label: '3月', value: 'quarterly' },

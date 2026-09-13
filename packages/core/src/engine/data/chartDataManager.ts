@@ -84,6 +84,7 @@ const KLINE_PERIODS = new Set<KLinePeriod>([
   '15min',
   '30min',
   '60min',
+  '4h',
   'daily',
   'weekly',
   'monthly',
