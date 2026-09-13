@@ -458,8 +458,10 @@ export class DrawingInteractionController {
         },
       ],
     })
-    this.callbacks.onDrawingCreated?.(drawing)
+    // 先重置工具再通知宿主：applyToolSession 会清空选中，若先发 onDrawingCreated
+    // （宿主通常在此选中新图元），选中立即被工具重置清掉——画完应保持选中（浮条出现）
     this.adapter.setDrawingToolId('cursor')
+    this.callbacks.onDrawingCreated?.(drawing)
   }
 
   private createMultiAnchorDrawing(
@@ -478,8 +480,9 @@ export class DrawingInteractionController {
         price: anchor.price,
       })),
     })
-    this.callbacks.onDrawingCreated?.(drawing)
+    // 同 createSingleAnchorDrawing：保持画完选中
     this.adapter.setDrawingToolId('cursor')
+    this.callbacks.onDrawingCreated?.(drawing)
   }
 }
 
