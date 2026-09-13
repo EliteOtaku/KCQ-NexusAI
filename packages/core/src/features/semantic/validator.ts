@@ -44,6 +44,7 @@ function getMaxDateRangeDays(period: DataConfig['period']): number {
     '15min': 60,
     '30min': 90,
     '60min': 180,
+    '4h': 180,
     daily: 365 * 3,
     weekly: 365 * 5,
     monthly: 365 * 10,
