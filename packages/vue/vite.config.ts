@@ -27,7 +27,7 @@ export default defineConfig({
     cssCodeSplit: !isWC,
     lib: isWC
       ? {
-          entry: fileURLToPath(new URL('./src/web-component.ts', import.meta.url)),
+          entry: fileURLToPath(new URL('./src/web-component-with-sources.ts', import.meta.url)),
           name: 'KLineChartWC',
           formats: ['es'],
           fileName: () => 'kline-chart.js',
