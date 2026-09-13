@@ -6,6 +6,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import vue from '@vitejs/plugin-vue'
 import babel from 'vite-plugin-babel'
+import Icons from 'unplugin-icons/vite'
 
 import { createCoreSourceAliases } from '../../scripts/core-source-aliases.mjs'
 
@@ -28,7 +29,7 @@ const vueRuntime = `${root}/packages/vue/node_modules/vue/dist/vue.esm-bundler.j
 
 export default defineConfig({
   root: fileURLToPath(new URL('.', import.meta.url)),
-  plugins: [decoratorTransform, vue({ customElement: true }), react()],
+  plugins: [decoratorTransform, vue({ customElement: true }), react(), Icons({ compiler: 'vue3', autoInstall: true })],
   resolve: {
     alias: [
       ...createCoreSourceAliases(`${root}/packages/core/src`),
