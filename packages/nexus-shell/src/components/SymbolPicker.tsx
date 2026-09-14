@@ -45,6 +45,17 @@ export function SymbolPicker() {
     }
   }, [open])
 
+  // 键盘唤起请求（B4-01）：带入首字母打开。声明在 open 副作用之后，
+  // 同一提交内后执行，关键字不被上面的清空覆盖。
+  const request = shell.symbolPickerRequest
+  useEffect(() => {
+    if (request !== null) {
+      setQuery(request.query)
+      setOpen(true)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [request])
+
   const current = MOCK_SYMBOLS.find((item) => item.symbol === shell.symbol)
 
   const recents = useMemo(() => {

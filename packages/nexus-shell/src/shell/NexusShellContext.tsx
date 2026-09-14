@@ -17,6 +17,7 @@ import type {
 } from '@363045841yyt/klinechart-core/controllers'
 import type { DrawingObject, DrawingStyle } from '@363045841yyt/klinechart-core/plugin'
 import { buildMockBundle, MOCK_SYMBOLS } from './mockData'
+import { ALL_PERIODS } from './periods'
 import { ChartPointerBridge, type MeasureSession, type MagnetMode } from './pointerBridge'
 import type { ShellToolId } from './drawingTools'
 import { loadLastUsedTemplate, markTemplateUsed } from './drawingTemplates'
@@ -84,6 +85,13 @@ export interface NexusShellValue {
   toggleTheme(): void
   setSymbol(symbol: string): void
   setPeriod(period: string): void
+
+  /** 键盘唤起品种搜索的请求（nonce 递增，重复字母也触发重开）。 */
+  symbolPickerRequest: { query: string; nonce: number } | null
+  requestSymbolPicker(query: string): void
+  /** 快捷键表浮层可见性（? 键切换）。 */
+  shortcutsVisible: boolean
+  toggleShortcuts(): void
 }
 
 const NexusShellContext = createContext<NexusShellValue | null>(null)
@@ -112,6 +120,13 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
   const [templateVersion, setTemplateVersion] = useState(0)
   const [symbol, setSymbol] = useState(MOCK_SYMBOLS[0]!.symbol)
   const [period, setPeriod] = useState('daily')
+  // 键盘唤起品种搜索（B4-01）与快捷键表（B4-03）。
+  const symbolPickerNonce = useRef(0)
+  const [symbolPickerRequest, setSymbolPickerRequest] = useState<{
+    query: string
+    nonce: number
+  } | null>(null)
+  const [shortcutsVisible, setShortcutsVisible] = useState(false)
   // 主题持久化（B4-05）：初值读 nexus.theme，变更写回。
   const [shellTheme, setShellTheme] = useState<'light' | 'dark'>(() =>
     readJson<'light' | 'dark'>(STORAGE_KEYS.theme, 'dark'),
@@ -326,6 +341,14 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
     // 锚点会话属桥内部状态，React 侧无需镜像；保留空实现以稳定桥回调形状。
   }, [])
 
+  /** 键盘唤起品种搜索：nonce 递保证同字母重复按键也重开并刷新关键字。 */
+  const requestSymbolPicker = useCallback((query: string) => {
+    symbolPickerNonce.current += 1
+    setSymbolPickerRequest({ query, nonce: symbolPickerNonce.current })
+  }, [])
+
+  const toggleShortcuts = useCallback(() => setShortcutsVisible((prev) => !prev), [])
+
   // ── 主题 / 数据 ──
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -354,7 +377,7 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
     ctrl.applyCustomData(buildMockBundle(symbol, period))
   }, [ctrl, symbol, period])
 
-  // ── 键盘：Delete/Backspace 删除选中，Esc 分级取消 ──
+  // ── 键盘：Delete/Backspace 删除选中，Esc 分级取消，字母/数字/?/方向键（B4-01..04） ──
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
@@ -366,6 +389,10 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
         return
       }
       if (event.key === 'Escape') {
+        if (shortcutsVisible) {
+          toggleShortcuts()
+          return
+        }
         if (bridge?.hasPendingAnchors()) {
           selectTool('cursor')
           return
@@ -379,11 +406,61 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
           return
         }
         if (activeToolRef.current !== 'cursor') selectTool('cursor')
+        return
+      }
+      const bareKey = !event.ctrlKey && !event.metaKey && !event.altKey
+      // B4-01：字母键呼出品种搜索（带入首字母）。
+      if (bareKey && /^[a-zA-Z]$/.test(event.key)) {
+        event.preventDefault()
+        requestSymbolPicker(event.key)
+        return
+      }
+      // B4-02：数字键 1-9 按 ALL_PERIODS 顺序切周期。
+      if (bareKey && /^[1-9]$/.test(event.key)) {
+        const target = ALL_PERIODS[Number(event.key) - 1]
+        if (target !== undefined && target.value !== period) setPeriod(target.value)
+        return
+      }
+      // B4-03：? 呼出/收起快捷键表。
+      if (event.key === '?') {
+        event.preventDefault()
+        toggleShortcuts()
+        return
+      }
+      // B4-04：方向键微调选中图元价格（±品种 tick）。
+      if ((event.key === 'ArrowUp' || event.key === 'ArrowDown') && ctrl !== null) {
+        const ids = ctrl.selectedDrawingIds.peek()
+        if (ids.length === 0) return
+        event.preventDefault()
+        const direction = event.key === 'ArrowUp' ? 1 : -1
+        const tick = MOCK_SYMBOLS.find((item) => item.symbol === symbol)?.tick ?? 0.01
+        for (const drawing of ctrl.drawings.peek()) {
+          if (!ids.includes(drawing.id)) continue
+          ctrl.updateDrawing({
+            ...drawing,
+            anchors: drawing.anchors.map((anchor) => ({
+              ...anchor,
+              price: Math.round((anchor.price + direction * tick) * 1000) / 1000,
+            })),
+          })
+        }
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [bridge, clearSelection, ctrl, deleteSelection, measureSession, selectTool])
+  }, [
+    bridge,
+    clearSelection,
+    ctrl,
+    deleteSelection,
+    measureSession,
+    period,
+    requestSymbolPicker,
+    selectTool,
+    shortcutsVisible,
+    symbol,
+    toggleShortcuts,
+  ])
 
   const value = useMemo<NexusShellValue>(
     () => ({
@@ -425,6 +502,10 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
       toggleTheme,
       setSymbol,
       setPeriod,
+      symbolPickerRequest,
+      requestSymbolPicker,
+      shortcutsVisible,
+      toggleShortcuts,
     }),
     [
       ctrl,
@@ -462,7 +543,11 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
       bumpTemplateVersion,
       setTheme,
       toggleTheme,
-    ],
+      symbolPickerRequest,
+      requestSymbolPicker,
+      shortcutsVisible,
+      toggleShortcuts,
+    ]
   )
 
   return <NexusShellContext.Provider value={value}>{children}</NexusShellContext.Provider>

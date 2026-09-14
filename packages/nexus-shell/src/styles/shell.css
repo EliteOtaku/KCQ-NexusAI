@@ -1048,3 +1048,53 @@ body {
 .nx-side-panel__chevron {
   font-size: 10px;
 }
+
+/* ── 快捷键表浮层（B4-03） ── */
+.nx-shortcuts {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 45%);
+}
+
+.nx-shortcuts__panel {
+  min-width: 320px;
+  max-width: 420px;
+  padding: 14px 18px;
+  background: var(--nx-bg-elevated);
+  border: 1px solid var(--nx-border);
+  border-radius: 8px;
+  box-shadow: 0 10px 40px rgb(0 0 0 / 45%);
+}
+
+.nx-shortcuts__title {
+  margin: 0 0 10px;
+  font-size: 14px;
+  color: var(--nx-text-primary);
+}
+
+.nx-shortcuts__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 3px 0;
+}
+
+.nx-shortcuts__keys {
+  min-width: 120px;
+  padding: 1px 8px;
+  background: var(--nx-bg);
+  border: 1px solid var(--nx-border);
+  border-radius: 4px;
+  color: var(--nx-text-primary);
+  font-size: 11px;
+  text-align: center;
+}
+
+.nx-shortcuts__action {
+  color: var(--nx-text-secondary);
+  font-size: 12px;
+}

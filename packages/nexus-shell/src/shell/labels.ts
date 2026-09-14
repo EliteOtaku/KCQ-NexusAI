@@ -109,4 +109,5 @@ export const SHELL_LABELS = {
   settingsStayLabel: '画完保持绘图工具',
   settingsAutoApplyLabel: '新绘制自动套用模板',
   settingsClose: '关闭',
+  shortcutsTitle: '快捷键',
 } as const
