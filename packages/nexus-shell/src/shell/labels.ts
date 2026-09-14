@@ -89,4 +89,24 @@ export const SHELL_LABELS = {
   ctxThemeTitle: '切换主题',
   ctxPeriodTitle: '周期',
   ctxAddIndicatorTitle: '添加指标',
+
+  // ── 右栏面板 ──
+  watchlistSectionTitle: '自选',
+  objectSectionTitle: '对象树',
+  objectShowTitle: '显示',
+  objectHideTitle: '隐藏',
+  objectEmpty: '暂无图元',
+
+  // ── 设置对话框 ──
+  settingsTitle: '设置',
+  settingsThemeLabel: '主题',
+  settingsThemeDark: '暗色',
+  settingsThemeLight: '亮色',
+  settingsMagnetLabel: '磁吸',
+  settingsMagnetOff: '关闭',
+  settingsMagnetWeak: '弱',
+  settingsMagnetStrong: '强',
+  settingsStayLabel: '画完保持绘图工具',
+  settingsAutoApplyLabel: '新绘制自动套用模板',
+  settingsClose: '关闭',
 } as const

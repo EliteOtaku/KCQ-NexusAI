@@ -42,6 +42,8 @@ export interface NexusShellValue {
   ctrl: ChartController | null
   /** 当前选中图元 id 列表（kernel 信号镜像）。 */
   selectedIds: ReadonlyArray<string>
+  /** 全部图元（kernel 信号镜像，对象树/导出类消费）。 */
+  drawings: ReadonlyArray<DrawingObject>
   /** 当前选中图元对象。 */
   selectedDrawings: ReadonlyArray<DrawingObject>
   /** 生效工具（伪工具优先，否则 kernel drawingTool）。 */
@@ -68,6 +70,7 @@ export interface NexusShellValue {
   selectTool(toolId: ShellToolId): void
   setGroupLastTool(groupId: string, toolId: string): void
   cycleMagnet(): void
+  setMagnet(mode: MagnetMode): void
   toggleStay(): void
   toggleAutoApply(): void
   toggleFavorite(toolId: string): void
@@ -223,6 +226,11 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
     }))
   }, [])
 
+  /** 直接设置磁吸档位（设置对话框用）。 */
+  const setMagnet = useCallback((mode: MagnetMode) => {
+    setPrefs((prev) => (prev.magnet === mode ? prev : { ...prev, magnet: mode }))
+  }, [])
+
   const toggleStay = useCallback(() => {
     setPrefs((prev) => ({ ...prev, stay: !prev.stay }))
   }, [])
@@ -373,6 +381,7 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
     () => ({
       ctrl,
       selectedIds,
+      drawings,
       selectedDrawings,
       activeTool,
       magnet: prefs.magnet,
@@ -394,6 +403,7 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
       selectTool,
       setGroupLastTool,
       cycleMagnet,
+      setMagnet,
       toggleStay,
       toggleAutoApply,
       toggleFavorite,
@@ -411,6 +421,7 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
     [
       ctrl,
       selectedIds,
+      drawings,
       selectedDrawings,
       activeTool,
       prefs.magnet,
@@ -431,6 +442,7 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
       selectTool,
       setGroupLastTool,
       cycleMagnet,
+      setMagnet,
       toggleStay,
       toggleAutoApply,
       toggleFavorite,

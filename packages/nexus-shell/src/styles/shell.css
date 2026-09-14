@@ -884,3 +884,148 @@ body {
 .nx-ctx-menu__item--sub:hover > .nx-ctx-menu__submenu {
   display: block;
 }
+
+/* ── 自选列表（B3-01） ── */
+.nx-watchlist__row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--nx-text-primary);
+  cursor: pointer;
+  padding: 5px 8px;
+  border-radius: 4px;
+  text-align: left;
+}
+
+.nx-watchlist__row:hover {
+  background: var(--nx-bg-hover);
+}
+
+.nx-watchlist__row--active {
+  background: var(--nx-bg-hover);
+  color: var(--nx-accent);
+}
+
+.nx-watchlist__code {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.nx-watchlist__name {
+  font-size: 11px;
+  color: var(--nx-text-secondary);
+}
+
+/* ── 对象树（B3-03） ── */
+.nx-object__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--nx-text-primary);
+}
+
+.nx-object__row:hover {
+  background: var(--nx-bg-hover);
+}
+
+.nx-object__row--selected {
+  background: var(--nx-bg-hover);
+  color: var(--nx-accent);
+}
+
+.nx-object__kind {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nx-object__id {
+  font-size: 10px;
+  color: var(--nx-text-secondary);
+}
+
+.nx-object__actions {
+  display: none;
+  gap: 2px;
+}
+
+.nx-object__row:hover .nx-object__actions,
+.nx-object__row--selected .nx-object__actions {
+  display: inline-flex;
+}
+
+.nx-object__action {
+  border: none;
+  background: transparent;
+  color: var(--nx-text-secondary);
+  cursor: pointer;
+  padding: 0 3px;
+  font-size: 11px;
+}
+
+.nx-object__action:hover {
+  color: var(--nx-text-primary);
+}
+
+.nx-object__action--active {
+  color: var(--nx-warning);
+}
+
+/* ── 设置对话框（B3-02） ── */
+.nx-settings__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+}
+
+.nx-settings__row--check {
+  justify-content: flex-start;
+  cursor: pointer;
+  color: var(--nx-text-primary);
+}
+
+.nx-settings__label {
+  color: var(--nx-text-primary);
+  font-size: 13px;
+}
+
+.nx-settings__segment {
+  display: inline-flex;
+  border: 1px solid var(--nx-border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.nx-settings__segment-btn {
+  border: none;
+  background: transparent;
+  color: var(--nx-text-secondary);
+  cursor: pointer;
+  padding: 4px 12px;
+  font-size: 12px;
+}
+
+.nx-settings__segment-btn--active {
+  background: var(--nx-accent);
+  color: #ffffff;
+}
+
+.nx-settings__select {
+  background: var(--nx-bg);
+  border: 1px solid var(--nx-border);
+  color: var(--nx-text-primary);
+  border-radius: 4px;
+  padding: 3px 6px;
+}

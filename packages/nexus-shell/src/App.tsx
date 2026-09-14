@@ -4,8 +4,10 @@
 import { ChartStage } from './components/ChartStage'
 import { DrawingToolbar } from './components/DrawingToolbar'
 import { IndicatorPanel } from './components/IndicatorPanel'
+import { ObjectTreePanel } from './components/ObjectTreePanel'
 import { TemplatePanel } from './components/TemplatePanel'
 import { TopBar } from './components/TopBar'
+import { WatchlistPanel } from './components/WatchlistPanel'
 import { NexusShellProvider } from './shell/NexusShellContext'
 
 /** 应用入口组件。 */
@@ -28,6 +30,8 @@ function AppLayout() {
           <ChartStage />
         </div>
         <aside className="nx-side-panel">
+          <WatchlistPanel />
+          <ObjectTreePanel />
           <IndicatorPanel />
           <TemplatePanel />
         </aside>

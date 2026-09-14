@@ -1,15 +1,18 @@
 // 顶栏：品牌 + 品种搜索器 + 分组周期下拉 + 主题切换。
 // 状态全部经壳上下文读写（批2 数据接线完成）。
 
+import { useState } from 'react'
 import { useNexusShell } from '../shell/NexusShellContext'
 import { PERIOD_GROUPS } from '../shell/periods'
 import { SHELL_LABELS } from '../shell/labels'
+import { SettingsDialog } from './SettingsDialog'
 import { SymbolPicker } from './SymbolPicker'
 import type { ChangeEvent } from 'react'
 
 /** 壳顶栏组件。 */
 export function TopBar() {
   const shell = useNexusShell()
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   /** 周期切换：写壳状态（数据经 provider 重新注入）。 */
   function onPeriodChange(event: ChangeEvent<HTMLSelectElement>) {
@@ -39,9 +42,19 @@ export function TopBar() {
         ))}
       </select>
       <span className="nx-topbar__spacer" />
+      <button
+        type="button"
+        className="nx-btn"
+        title={SHELL_LABELS.settingsTitle}
+        aria-label={SHELL_LABELS.settingsTitle}
+        onClick={() => setSettingsOpen(true)}
+      >
+        ⚙
+      </button>
       <button type="button" className="nx-btn" onClick={shell.toggleTheme}>
         {shell.theme === 'dark' ? SHELL_LABELS.themeLight : SHELL_LABELS.themeDark}
       </button>
+      {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
     </header>
   )
 }
