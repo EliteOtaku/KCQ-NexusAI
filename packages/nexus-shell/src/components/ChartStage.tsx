@@ -11,6 +11,7 @@ import { ChartPointerBridge } from '../shell/pointerBridge'
 import { useNexusShell } from '../shell/NexusShellContext'
 import { SHELL_LABELS } from '../shell/labels'
 import { DrawingStyleFlybar } from './DrawingStyleFlybar'
+import { LegendBar } from './LegendBar'
 
 /** 图表舞台组件：每实例挂载一个图表。 */
 export function ChartStage() {
@@ -44,6 +45,10 @@ export function ChartStage() {
         void ctrl.dispose()
         return
       }
+
+      // 图例由壳 DOM 图例栏（LegendBar）接管，关闭引擎 canvas 图例绘制；
+      // legendTemplateContext 信号仍每帧更新，作为图例数据源。
+      ctrl.updateRendererConfig('mainIndicatorLegend', { visible: false })
 
       const dic = new DrawingInteractionController(ctrl)
       ctrl.registerDrawingSession(dic)
@@ -82,6 +87,7 @@ export function ChartStage() {
   return (
     <div className="nx-chart-stage">
       <div ref={hostRef} className="nx-chart-stage__host" />
+      <LegendBar />
       {shell.selectedDrawings.length > 0 && <DrawingStyleFlybar />}
       {shell.measureSession !== null && <MeasureOverlay hostRef={hostRef} />}
     </div>

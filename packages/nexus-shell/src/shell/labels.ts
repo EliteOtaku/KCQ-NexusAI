@@ -68,4 +68,16 @@ export const SHELL_LABELS = {
   symbolRecentGroup: '最近使用',
   symbolAllGroup: '全部品种',
   symbolNoResults: '无匹配品种',
+
+  // ── 图例栏 ──
+  legendOhlcOpen: 'O',
+  legendOhlcHigh: 'H',
+  legendOhlcLow: 'L',
+  legendOhlcClose: 'C',
+  legendVolumeLabel: '量',
+  legendEyeHide: '隐藏指标',
+  legendEyeShow: '显示指标',
+  legendSettingsTitle: '指标参数',
+  legendDeleteTitle: '删除指标',
+  legendParamsConfirm: '确定',
 } as const

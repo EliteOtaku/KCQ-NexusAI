@@ -721,3 +721,110 @@ body {
   width: 13px;
   height: 13px;
 }
+
+/* ── 图例栏（B2-03/B2-04）：替代引擎 canvas 图例，覆盖在图表左上 ── */
+.nx-legend {
+  position: absolute;
+  top: 6px;
+  left: 12px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  font-size: 12px;
+  line-height: 18px;
+  user-select: none;
+}
+
+.nx-legend__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.nx-legend__row--hidden {
+  opacity: 0.45;
+}
+
+.nx-legend__symbol {
+  font-weight: 600;
+  color: var(--nx-text-primary);
+}
+
+.nx-legend__period,
+.nx-legend__indicator-params {
+  color: var(--nx-text-secondary);
+}
+
+.nx-legend__ohlc {
+  display: inline-flex;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.nx-legend__indicator-name {
+  color: var(--nx-text-primary);
+}
+
+.nx-legend__value {
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* hover 动作按钮：默认隐藏，悬停行时出现 */
+.nx-legend__actions {
+  display: none;
+  gap: 2px;
+}
+
+.nx-legend__row:hover .nx-legend__actions {
+  display: inline-flex;
+}
+
+.nx-legend__action {
+  border: none;
+  background: transparent;
+  color: var(--nx-text-secondary);
+  cursor: pointer;
+  padding: 0 4px;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.nx-legend__action:hover {
+  color: var(--nx-text-primary);
+}
+
+/* 参数编辑器：占满整行（行容器 flex-wrap） */
+.nx-legend__editor {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  padding: 6px 8px;
+  background: var(--nx-bg-elevated);
+  border: 1px solid var(--nx-border);
+  border-radius: 4px;
+}
+
+.nx-legend__editor-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--nx-text-secondary);
+}
+
+.nx-legend__editor-row input[type='number'],
+.nx-legend__editor-row input[type='text'],
+.nx-legend__editor-row select {
+  width: 64px;
+  background: var(--nx-bg);
+  border: 1px solid var(--nx-border);
+  color: var(--nx-text-primary);
+  border-radius: 3px;
+  padding: 2px 4px;
+}
