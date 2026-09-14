@@ -89,6 +89,8 @@ export interface NexusShellValue {
   /** 键盘唤起品种搜索的请求（nonce 递增，重复字母也触发重开）。 */
   symbolPickerRequest: { query: string; nonce: number } | null
   requestSymbolPicker(query: string): void
+  /** 消费完请求后清除（搜索器关闭时调用，避免下次手动打开残留关键字）。 */
+  clearSymbolPickerRequest(): void
   /** 快捷键表浮层可见性（? 键切换）。 */
   shortcutsVisible: boolean
   toggleShortcuts(): void
@@ -347,6 +349,8 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
     setSymbolPickerRequest({ query, nonce: symbolPickerNonce.current })
   }, [])
 
+  const clearSymbolPickerRequest = useCallback(() => setSymbolPickerRequest(null), [])
+
   const toggleShortcuts = useCallback(() => setShortcutsVisible((prev) => !prev), [])
 
   // ── 主题 / 数据 ──
@@ -504,6 +508,7 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
       setPeriod,
       symbolPickerRequest,
       requestSymbolPicker,
+      clearSymbolPickerRequest,
       shortcutsVisible,
       toggleShortcuts,
     }),
@@ -545,6 +550,7 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
       toggleTheme,
       symbolPickerRequest,
       requestSymbolPicker,
+      clearSymbolPickerRequest,
       shortcutsVisible,
       toggleShortcuts,
     ]

@@ -30,9 +30,25 @@ interface IndicatorStash {
   params: Record<string, unknown>
 }
 
-/** 运行时实例可能携带 source（分时模式注入的实例不归壳管理），公开类型未收录。 */
+/** 用户实例过滤：分时等模式注入的实例 id 带 'mode:' 前缀（公开类型未含 source 字段，按 id 前缀判定）。 */
 function isUserInstance(item: IndicatorInstance): boolean {
-  return (item as IndicatorInstance & { source?: string }).source !== 'mode'
+  return !item.id.startsWith('mode:')
+}
+
+/**
+ * 实例寻址：引擎 removeIndicator/updateIndicatorParams 的主图分支按 definitionId
+ * 解析，不接受 addIndicator 返回的 'main:*' 实例 id（契约缺陷已登记 [pr] 候选）；
+ * 副图实例按 instanceId 寻址。
+ */
+function instanceAddress(instance: IndicatorInstance): string {
+  return instance.role === 'main' ? instance.definitionId : instance.id
+}
+
+/** 量能缩写（无十字线时引擎 currentBar 为空，用原始 volume 本地格式化）。 */
+function formatVolumeShort(v: number): string {
+  if (v >= 1e8) return `${(v / 1e8).toFixed(2)}亿`
+  if (v >= 1e4) return `${(v / 1e4).toFixed(2)}万`
+  return v.toFixed(2)
 }
 
 /** 参数按定义顺序格式化为括号文本；无参数定义时返回空串。 */
@@ -63,8 +79,18 @@ export function LegendBar() {
   const userMain = instances.filter((item) => item.role === 'main' && isUserInstance(item))
   const subInstances = instances.filter((item) => item.role === 'sub' && isUserInstance(item))
   const legendRows = legend?.indicators ?? []
+  // 十字线悬停显示指向 Bar；无十字线时回退到最新 Bar（引擎 currentBar 仅十字线时非空）。
   const bar = legend?.currentBar ?? null
+  const rawBar = legend?.bar ?? null
+  const displayBar = bar ?? rawBar
   const barColor = bar?.color ?? 'var(--nx-text-primary)'
+  const volumeText =
+    bar !== null
+      ? bar.volumeText
+      : displayBar !== null && typeof displayBar.volume === 'number'
+        ? formatVolumeShort(displayBar.volume)
+        : null
+  const ohlc = displayBar as { open: number; high: number; low: number; close: number } | null
 
   /** 眼睛切换：隐藏→stash+移除；已隐藏→按 stash 重加。 */
   function toggleEye(key: string) {
@@ -89,7 +115,7 @@ export function LegendBar() {
         params: { ...instance.params },
       },
     ])
-    ctrl.removeIndicator(instance.id)
+    ctrl.removeIndicator(instanceAddress(instance))
   }
 
   /** 删除：真移除实例并清掉同名 stash，避免幽灵暂存。 */
@@ -98,7 +124,7 @@ export function LegendBar() {
     const key = `${instance.definitionId}:${instance.role}`
     setStashed((prev) => prev.filter((item) => item.key !== key))
     setEditingKey((prev) => (prev === key ? null : prev))
-    ctrl.removeIndicator(instance.id)
+    ctrl.removeIndicator(instanceAddress(instance))
   }
 
   /** 行渲染：label + 参数括号 + 可选值序列 + hover 动作。 */
@@ -166,32 +192,33 @@ export function LegendBar() {
       <div className="nx-legend__row">
         <span className="nx-legend__symbol">{shell.symbol}</span>
         <span className="nx-legend__period">{periodLabel(shell.period)}</span>
-        {bar !== null && (
+        {ohlc !== null && (
           <span className="nx-legend__ohlc" style={{ color: barColor }}>
             <span>
-              {SHELL_LABELS.legendOhlcOpen} {bar.open.toFixed(2)}
+              {SHELL_LABELS.legendOhlcOpen} {ohlc.open.toFixed(2)}
             </span>
             <span>
-              {SHELL_LABELS.legendOhlcHigh} {bar.high.toFixed(2)}
+              {SHELL_LABELS.legendOhlcHigh} {ohlc.high.toFixed(2)}
             </span>
             <span>
-              {SHELL_LABELS.legendOhlcLow} {bar.low.toFixed(2)}
+              {SHELL_LABELS.legendOhlcLow} {ohlc.low.toFixed(2)}
             </span>
             <span>
-              {SHELL_LABELS.legendOhlcClose} {bar.close.toFixed(2)}
+              {SHELL_LABELS.legendOhlcClose} {ohlc.close.toFixed(2)}
             </span>
-            {bar.volumeText !== null && (
+            {volumeText !== null && (
               <span>
-                {SHELL_LABELS.legendVolumeLabel} {bar.volumeText}
+                {SHELL_LABELS.legendVolumeLabel} {volumeText}
               </span>
             )}
           </span>
         )}
       </div>
-      {userMain.map((instance, index) => {
+      {userMain.map((instance) => {
         const key = `${instance.definitionId}:${instance.role}`
         const definition = ctrl?.catalog.find((item) => item.id === instance.definitionId)
-        const row = legendRows[index]
+        // 引擎图例行顺序在删除/重加后不稳定，按 name ↔ definitionId 匹配，禁止按序拉链。
+        const row = legendRows.find((item) => item.name === instance.definitionId)
         return renderIndicatorRow({
           key,
           label: instance.label,
@@ -320,7 +347,7 @@ function ParamsEditor({
   }
 
   function confirm() {
-    if (shell.ctrl !== null) shell.ctrl.updateIndicatorParams(instance.id, draft)
+    if (shell.ctrl !== null) shell.ctrl.updateIndicatorParams(instanceAddress(instance), draft)
     onDone()
   }
 

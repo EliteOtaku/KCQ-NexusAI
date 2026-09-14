@@ -78,29 +78,26 @@ async function main() {
   check('B2-01：最近使用写入 localStorage', recentStored !== null && recentStored.includes('MOCK-SH501'))
   // 再次打开应显示最近使用分组
   await page.click('.nx-symbol-picker__trigger')
-  const recentGroupVisible = await page
-    .locator('.nx-symbol-picker__group', { hasText: '最近使用' })
-    .isVisible()
+  const recentGroupVisible = await waitFor(page, () =>
+    page.locator('.nx-symbol-picker__group', { hasText: '最近使用' }).isVisible(),
+  )
   check('B2-01：最近使用分组展示', recentGroupVisible)
   await page.keyboard.press('Escape')
   await page.click('.nx-chart-stage__host', { position: { x: 700, y: 300 } })
 
-  // ── B2-03：图例查证（引擎画布图例，左上角文字像素采样） ──
-  const legendPainted = await page.evaluate(() => {
-    const canvas = document.querySelector('canvas.main-canvas.main')
-    if (!(canvas instanceof HTMLCanvasElement)) return false
-    const ctx = canvas.getContext('2d')
-    if (ctx === null) return false
-    // 图例区在左上角；采样前 340x22 区域内是否有文字类像素（与背景差异）。
-    const sample = ctx.getImageData(0, 0, Math.min(340, canvas.width), 22).data
-    let textPixels = 0
-    for (let i = 0; i < sample.length; i += 4) {
-      const alpha = sample[i + 3]
-      if (alpha > 40) textPixels++
-    }
-    return textPixels > 60
-  })
-  check('B2-03：主图画布左上角图例渲染（引擎默认）', legendPainted)
+  // ── B2-03：图例改由壳 DOM 图例栏渲染（引擎 canvas 图例关闭，B2 批2 收尾） ──
+  const legendVisible = await page.locator('.nx-legend').isVisible()
+  check('B2-03：DOM 图例栏渲染', legendVisible)
+  const legendSymbol = await page.locator('.nx-legend__symbol').textContent()
+  check('B2-03：图例行显示当前品种', legendSymbol === 'MOCK-SH501', `symbol=${legendSymbol}`)
+  const legendPeriod = await page.locator('.nx-legend__period').textContent()
+  check('B2-03：图例行显示周期', legendPeriod === '日线', `period=${legendPeriod}`)
+  const ohlcText = await page.locator('.nx-legend__ohlc').textContent().catch(() => '')
+  check(
+    'B2-03：图例 OHLC 行渲染',
+    ohlcText !== null && ohlcText.includes('O') && ohlcText.includes('C'),
+    `text=${ohlcText?.slice(0, 40)}`,
+  )
 
   // ── 收尾 ──
   check('收尾：无页面错误', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '))
