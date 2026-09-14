@@ -9,16 +9,18 @@ export interface MockSymbol {
   symbol: string
   name: string
   basePrice: number
+  /** 最小变动价位（B4-04 方向键微调用）：指数 0.2、个股 0.01、ETF 0.001。 */
+  tick: number
 }
 
 /** demo 品种目录：覆盖指数/个股/ETF 风格命名，供搜索与自选列表消费。 */
 export const MOCK_SYMBOLS: ReadonlyArray<MockSymbol> = [
-  { symbol: 'MOCK-SZ300', name: '示例·沪深300', basePrice: 3580 },
-  { symbol: 'MOCK-SH501', name: '示例·上证50', basePrice: 2740 },
-  { symbol: 'MOCK-CSI500', name: '示例·中证500', basePrice: 5320 },
-  { symbol: 'MOCK-TECH', name: '示例·科技成长', basePrice: 86.5 },
-  { symbol: 'MOCK-ENERGY', name: '示例·能源周期', basePrice: 128.4 },
-  { symbol: 'MOCK-BOND', name: '示例·国债ETF', basePrice: 104.2 },
+  { symbol: 'MOCK-SZ300', name: '示例·沪深300', basePrice: 3580, tick: 0.2 },
+  { symbol: 'MOCK-SH501', name: '示例·上证50', basePrice: 2740, tick: 0.2 },
+  { symbol: 'MOCK-CSI500', name: '示例·中证500', basePrice: 5320, tick: 0.2 },
+  { symbol: 'MOCK-TECH', name: '示例·科技成长', basePrice: 86.5, tick: 0.01 },
+  { symbol: 'MOCK-ENERGY', name: '示例·能源周期', basePrice: 128.4, tick: 0.01 },
+  { symbol: 'MOCK-BOND', name: '示例·国债ETF', basePrice: 104.2, tick: 0.001 },
 ]
 
 /** 支持的周期（与 core KLinePeriod 对齐；4h 为 fork 补丁能力）。 */

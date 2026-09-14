@@ -32,6 +32,8 @@ export interface BridgeHooks {
   onMeasureChange(session: MeasureSession | null): void
   /** 引擎完成一次图元创建（stay/模板自动套用在此接线）。 */
   onDrawingCreated(drawing: DrawingObject): void
+  /** 容器内右键：桥已 preventDefault，事件坐标未改写，供宿主弹出上下文菜单。 */
+  onContextMenu?(event: PointerEvent): void
 }
 
 /** 锁角/拖拽的最小位移阈值。 */
@@ -79,7 +81,10 @@ export class ChartPointerBridge {
     add('pointermove', (event) => this.onPointerMove(event))
     add('pointerup', (event) => this.onPointerUp(event))
     add('pointerleave', (event) => this.onPointerLeave(event))
-    add('contextmenu', (event) => event.preventDefault())
+    add('contextmenu', (event) => {
+      event.preventDefault()
+      this.hooks.onContextMenu?.(event)
+    })
     add('wheel', this.onWheel, { passive: false })
   }
 

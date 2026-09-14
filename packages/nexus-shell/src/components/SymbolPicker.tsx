@@ -30,20 +30,34 @@ export function SymbolPicker() {
     if (!open) return
     const onDocumentPointerDown = (event: PointerEvent) => {
       if (rootRef.current !== null && !rootRef.current.contains(event.target as Node)) {
-        setOpen(false)
+        closePicker()
       }
     }
     document.addEventListener('pointerdown', onDocumentPointerDown, true)
     return () => document.removeEventListener('pointerdown', onDocumentPointerDown, true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
-  // 打开时聚焦搜索框并清空上次关键字。
+  // 打开时聚焦搜索框；关键字取当前唤起请求（键盘字母键）或清空（手动打开）。
   useEffect(() => {
     if (open) {
-      setQuery('')
+      setQuery(shell.symbolPickerRequest?.query ?? '')
       inputRef.current?.focus()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
+
+  // 键盘唤起请求（B4-01）：带入首字母打开。
+  const request = shell.symbolPickerRequest
+  useEffect(() => {
+    if (request !== null) setOpen(true)
+  }, [request])
+
+  /** 关闭并消费唤起请求（避免下次手动打开残留关键字）。 */
+  function closePicker() {
+    setOpen(false)
+    shell.clearSymbolPickerRequest()
+  }
 
   const current = MOCK_SYMBOLS.find((item) => item.symbol === shell.symbol)
 
@@ -66,7 +80,7 @@ export function SymbolPicker() {
       shell.setSymbol(symbol)
       pushRecent(symbol)
     }
-    setOpen(false)
+    closePicker()
   }
 
   function renderRow(symbol: string, name: string) {
@@ -90,7 +104,7 @@ export function SymbolPicker() {
         type="button"
         className="nx-btn nx-symbol-picker__trigger"
         title={SHELL_LABELS.symbolSearchTitle}
-        onClick={() => setOpen((prev) => !prev)}
+        onClick={() => (open ? closePicker() : setOpen(true))}
       >
         <span className="nx-symbol-picker__code">{shell.symbol}</span>
         <span className="nx-symbol-picker__name">{current?.name ?? ''}</span>
@@ -106,7 +120,7 @@ export function SymbolPicker() {
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === 'Escape') setOpen(false)
+              if (event.key === 'Escape') closePicker()
               if (event.key === 'Enter' && matched.length > 0) select(matched[0]!.symbol)
             }}
           />

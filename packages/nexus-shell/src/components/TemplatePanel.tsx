@@ -1,5 +1,6 @@
 // 模板管理面板：列出全部绘图模板，支持套用到当前选中（同 kind）、
 // 行内重命名、删除；顶部开关控制“下次绘制自动套用最近模板”。
+// 外壳（分区标题/折叠）由 PanelSection 提供。
 
 import { useMemo, useState } from 'react'
 import { useNexusShell } from '../shell/NexusShellContext'
@@ -48,9 +49,7 @@ export function TemplatePanel() {
   }
 
   return (
-    <section className="nx-side-panel__section">
-      <h2 className="nx-side-panel__title">{SHELL_LABELS.templateSectionTitle}</h2>
-
+    <>
       <label className="nx-side-panel__row nx-side-panel__row--toggle">
         <span>{SHELL_LABELS.templateAutoApply}</span>
         <input
@@ -123,6 +122,6 @@ export function TemplatePanel() {
           )
         })
       )}
-    </section>
+    </>
   )
 }
