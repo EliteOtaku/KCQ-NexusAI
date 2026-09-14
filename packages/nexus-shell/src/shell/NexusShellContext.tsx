@@ -112,7 +112,10 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
   const [templateVersion, setTemplateVersion] = useState(0)
   const [symbol, setSymbol] = useState(MOCK_SYMBOLS[0]!.symbol)
   const [period, setPeriod] = useState('daily')
-  const [shellTheme, setShellTheme] = useState<'light' | 'dark'>('dark')
+  // 主题持久化（B4-05）：初值读 nexus.theme，变更写回。
+  const [shellTheme, setShellTheme] = useState<'light' | 'dark'>(() =>
+    readJson<'light' | 'dark'>(STORAGE_KEYS.theme, 'dark'),
+  )
 
   // 内核工具信号：引擎侧 SSOT（画完自动回 cursor 等）。
   const kernelTool = useSignal(ctrl?.drawingTool ?? null, 'cursor' as DrawingToolId)
@@ -327,6 +330,11 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     document.documentElement.dataset.theme = theme
   }, [theme])
+
+  // 主题持久化写回（B4-05）。
+  useEffect(() => {
+    writeJson(STORAGE_KEYS.theme, shellTheme)
+  }, [shellTheme])
 
   const setTheme = useCallback(
     (next: 'light' | 'dark') => {

@@ -1029,3 +1029,22 @@ body {
   border-radius: 4px;
   padding: 3px 6px;
 }
+
+/* ── 右栏分区折叠（B4-05 面板开关） ── */
+.nx-side-panel__title-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--nx-text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0;
+}
+
+.nx-side-panel__chevron {
+  font-size: 10px;
+}

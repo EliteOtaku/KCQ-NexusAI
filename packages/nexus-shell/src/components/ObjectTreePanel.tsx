@@ -1,6 +1,7 @@
-// 右侧对象树（B3-03）：列出全部图元，行点击定位（选中高亮 + 属性浮条），
+// 对象树（B3-03）：列出全部图元，行点击定位（选中高亮 + 属性浮条），
 // 行内 显隐/锁定/删除。注：简报所引 scrollToDataIndex 在 core 不存在，
 // 定位以选中高亮实现；滚动定位待引擎补 API（见 backlog）。
+// 外壳（分区标题/折叠）由 PanelSection 提供。
 
 import { useNexusShell } from '../shell/NexusShellContext'
 import { kindToolLabel } from '../shell/drawingTools'
@@ -13,17 +14,11 @@ export function ObjectTreePanel() {
   const drawings = shell.drawings
 
   if (drawings.length === 0) {
-    return (
-      <section className="nx-side-panel__section">
-        <h2 className="nx-side-panel__title">{SHELL_LABELS.objectSectionTitle}</h2>
-        <p className="nx-side-panel__empty">{SHELL_LABELS.objectEmpty}</p>
-      </section>
-    )
+    return <p className="nx-side-panel__empty">{SHELL_LABELS.objectEmpty}</p>
   }
 
   return (
-    <section className="nx-side-panel__section">
-      <h2 className="nx-side-panel__title">{SHELL_LABELS.objectSectionTitle}</h2>
+    <>
       {drawings.map((drawing) => {
         const selected = shell.selectedIds.includes(drawing.id)
         return (
@@ -77,6 +72,6 @@ export function ObjectTreePanel() {
           </div>
         )
       })}
-    </section>
+    </>
   )
 }

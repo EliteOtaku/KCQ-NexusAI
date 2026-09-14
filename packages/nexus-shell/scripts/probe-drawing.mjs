@@ -427,13 +427,13 @@ async function main() {
   )
 
   // 重命名 + 删除（面板）
-  await page.click('.nx-side-panel__section:nth-of-type(2) .nx-iconbtn[title="重命名"]')
+  await page.click('.nx-side-panel__section--templates .nx-iconbtn[title="重命名"]')
   await page.fill('.nx-side-panel__rename', 'probe-tpl-2')
   await page.keyboard.press('Enter')
   await page.waitForTimeout(150)
   const renamed = await page.evaluate(() => localStorage.getItem('nexus.drawing-templates'))
   check('B1-27：模板重命名', renamed !== null && renamed.includes('probe-tpl-2'))
-  await page.click('.nx-side-panel__section:nth-of-type(2) .nx-iconbtn[title="删除"]')
+  await page.click('.nx-side-panel__section--templates .nx-iconbtn[title="删除"]')
   await page.waitForTimeout(150)
   const removed = await page.evaluate(() => localStorage.getItem('nexus.drawing-templates'))
   check('B1-27：模板删除', removed !== null && !removed.includes('probe-tpl-2'))

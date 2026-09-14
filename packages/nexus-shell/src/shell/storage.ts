@@ -13,6 +13,10 @@ export const STORAGE_KEYS = {
   prefs: 'nexus.shell.prefs',
   /** 最近使用的品种（批2 消费）。 */
   recentSymbols: 'nexus.shell.recent-symbols',
+  /** 主题（'light' | 'dark'，B4-05 持久化）。 */
+  theme: 'nexus.theme',
+  /** 右栏分区折叠状态（B4-05 持久化）。 */
+  panel: 'nexus.panel',
 } as const
 
 /** 读取 JSON；解析失败或键不存在时返回 fallback，不向上抛错。 */

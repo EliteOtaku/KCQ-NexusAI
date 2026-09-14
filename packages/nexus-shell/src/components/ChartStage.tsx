@@ -29,8 +29,9 @@ export function ChartStage() {
     void (async () => {
       const ctrl = await createChartController({
         container: host,
-        theme: 'dark',
-        settings: { theme: 'dark', isAsiaMarket: true },
+        // 初值取壳持久化主题（B4-05）；后续切换经 setTheme 同步引擎。
+        theme: shell.theme,
+        settings: { theme: shell.theme, isAsiaMarket: true },
         // mock 市场会话：与 A 股同时段（引擎内置会话未含 'mock' 市场 id）。
         marketSessions: {
           mock: {

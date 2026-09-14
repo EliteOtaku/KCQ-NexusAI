@@ -1,5 +1,6 @@
 // 右侧指标管理面板：清单来自引擎 catalog，勾选状态镜像 kernel indicators 信号，
 // 切换即 addIndicator/removeIndicator（真正接线，非本地状态）。
+// 外壳（分区标题/折叠）由 PanelSection 提供。
 
 import { useMemo } from 'react'
 import type { IndicatorDefinition, IndicatorInstance } from '@363045841yyt/klinechart-core/controllers'
@@ -39,27 +40,24 @@ export function IndicatorPanel() {
   const isActive = (definitionId: string) =>
     instances.some((item) => item.definitionId === definitionId)
 
+  if (ctrl === null || catalog.length === 0) {
+    return <p className="nx-side-panel__empty">{SHELL_LABELS.indicatorEmpty}</p>
+  }
+
   return (
-    <section className="nx-side-panel__section">
-      <h2 className="nx-side-panel__title">{SHELL_LABELS.indicatorSectionTitle}</h2>
-      {ctrl === null || catalog.length === 0 ? (
-        <p className="nx-side-panel__empty">{SHELL_LABELS.indicatorEmpty}</p>
-      ) : (
-        <>
-          {[...grouped.main, ...grouped.sub].map((definition) => (
-            <label key={definition.id} className="nx-side-panel__row">
-              <span className="nx-side-panel__indicator-name" title={definition.description ?? definition.label}>
-                {definition.label}
-              </span>
-              <input
-                type="checkbox"
-                checked={isActive(definition.id)}
-                onChange={() => toggle(definition)}
-              />
-            </label>
-          ))}
-        </>
-      )}
-    </section>
+    <>
+      {[...grouped.main, ...grouped.sub].map((definition) => (
+        <label key={definition.id} className="nx-side-panel__row">
+          <span className="nx-side-panel__indicator-name" title={definition.description ?? definition.label}>
+            {definition.label}
+          </span>
+          <input
+            type="checkbox"
+            checked={isActive(definition.id)}
+            onChange={() => toggle(definition)}
+          />
+        </label>
+      ))}
+    </>
   )
 }
