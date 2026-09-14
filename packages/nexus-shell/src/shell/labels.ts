@@ -80,4 +80,13 @@ export const SHELL_LABELS = {
   legendSettingsTitle: '指标参数',
   legendDeleteTitle: '删除指标',
   legendParamsConfirm: '确定',
+
+  // ── 图表右键菜单 ──
+  ctxStyleTitle: '样式',
+  ctxLockTitle: '锁定',
+  ctxUnlockTitle: '解锁',
+  ctxDeleteTitle: '删除',
+  ctxThemeTitle: '切换主题',
+  ctxPeriodTitle: '周期',
+  ctxAddIndicatorTitle: '添加指标',
 } as const

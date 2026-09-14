@@ -2,7 +2,7 @@
 // 指针/滚轮事件经 ChartPointerBridge 改写后转发引擎。
 // 属性浮条与测量浮层是舞台内的覆盖层，不参与引擎 DOM。
 
-import { useEffect, useRef, type RefObject } from 'react'
+import { useEffect, useRef, useState, type RefObject } from 'react'
 import {
   createChartController,
   DrawingInteractionController,
@@ -10,6 +10,7 @@ import {
 import { ChartPointerBridge } from '../shell/pointerBridge'
 import { useNexusShell } from '../shell/NexusShellContext'
 import { SHELL_LABELS } from '../shell/labels'
+import { ChartContextMenu, type ContextMenuState } from './ChartContextMenu'
 import { DrawingStyleFlybar } from './DrawingStyleFlybar'
 import { LegendBar } from './LegendBar'
 
@@ -17,6 +18,7 @@ import { LegendBar } from './LegendBar'
 export function ChartStage() {
   const shell = useNexusShell()
   const hostRef = useRef<HTMLDivElement>(null)
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
 
   useEffect(() => {
     const host = hostRef.current
@@ -60,6 +62,18 @@ export function ChartStage() {
       const bridge = new ChartPointerBridge(ctrl, dic, shell.bridgeAccessors, {
         onMeasureChange: shell.setMeasureSession,
         onDrawingCreated: shell.handleDrawingCreated,
+        // 右键菜单：hitTestAt 命中口径与点选一致；坐标按舞台尺寸收边防裁剪。
+        onContextMenu: (event) => {
+          const rect = host.getBoundingClientRect()
+          const localX = event.clientX - rect.left
+          const localY = event.clientY - rect.top
+          const hit = dic.hitTestAt(localX, localY)
+          setContextMenu({
+            x: Math.min(localX, Math.max(rect.width - 170, 0)),
+            y: Math.min(localY, Math.max(rect.height - 200, 0)),
+            drawing: hit === null ? null : { id: hit.id, locked: hit.locked === true },
+          })
+        },
       })
       bridge.attach(host)
       shell.attachChart(ctrl, bridge)
@@ -90,6 +104,9 @@ export function ChartStage() {
       <LegendBar />
       {shell.selectedDrawings.length > 0 && <DrawingStyleFlybar />}
       {shell.measureSession !== null && <MeasureOverlay hostRef={hostRef} />}
+      {contextMenu !== null && (
+        <ChartContextMenu state={contextMenu} onClose={() => setContextMenu(null)} />
+      )}
     </div>
   )
 }
