@@ -72,3 +72,58 @@
   - 引擎图例行顺序在删除/重加后不稳定 → 图例行必须按 name↔definitionId 匹配，禁止按序拉链
   - legendTemplateContext.currentBar 仅十字线时非空（无十字线回退 legend.bar）
 - Remaining risks: 见 risks.md（handoff 文件未跟踪待用户决定；类型债；引擎契约归一待 [pr]）
+
+## 2026-09-15（第二会话·上游 PR 合并确认 + MT5 数据源调研打包）
+
+- Objective: 确认回传 PR #174 被上游合并；调研并打包 MT5 本地数据源任务（提示词 B）
+- 确认结果: PR #174 MERGED（f730530a，上游 integrate/pr174 分支，原 SHA 零改动合入；upstream/main 未快进）；已清理本地与 origin 的 pr 分支，worktree detached 至 nexus/main
+- MT5 调研（两个 Explore 代理并行 + deepseek-flash/v4-pro 双顾问评审）:
+  - KCQ 侧: V1 行情协议（probe/instruments/bars）+ connecter 模式（connecters.mjs/setup-backends）+ Provider 装配模板（gotdx ~30 行）+ 写入即联动链（DataBuffer→IndicatorScheduler→重绘）+ 唯一 SSE 先例（depth/binance.ts）
+  - cloudtradeagent 侧: MetaTrader5 Python IPC 本机终端、时间戳为服务器墙钟伪 UTC（实测偏移转真 UTC）、Europe/Athens EET-EEST 锚重采样吸收周日短棒、WaveTrader 16 个可移植对齐用例
+  - 顾问一致结论: 架构 A+E（连接器轮询+SSE 推帧+core 消费器）；⚠️ core 无 upsert 原语（merge 保旧弃新、updateData=setData 别名）——forming 更新会被静默吞，必须先补 updateBars
+- 决策: D13（新建同级连接器仓库）D14（SSE 实时链路）D15（周日短棒不剔除，重采样吸收）D16（连接器配置+probe 上报开关）D17（updateBars 前置原语）
+- 交付: AGENT_SESSION_PROMPTS.md 新增提示词 B（自包含）；decisions/snapshot/backlog 同步
+- Remaining risks: 提示词 B 待闲时任务执行；真机 E2E 需用户 MT5 终端配合
+
+## 2026-09-15（第三会话·提示词 B 执行：MT5 数据源接入实施）
+
+- Objective: 执行 AGENT_SESSION_PROMPTS.md 提示词 B（连接器 + core 实时链路 + 壳接线）
+- Phase A — 连接器仓库（独立 git 历史）:
+  - app/: config（env）clock（偏移实测/复测/覆盖）align（锚时区重采样纯函数）gateway（单工作线程串行 IPC、全路径 initialize、Exness/登录校验、限流心跳重连）aggregator（tick 探针分级轮询 + ChangeDetector 收线判定 + 静默退避封顶 30s）hub（每流环形缓冲 500 + 单调 seq + Last-Event-ID 重放）routes（V1 三端点 + SSE）main（CORS 放开）
+  - tests/: 对齐（冬夏 4h/日线/DST 切换日/周月锚/偏移换算，语义移植自 WaveTrader）+ 检测器 + Hub + 路由（FakeGateway 无需终端）
+- Phase B — core（worktree fork/mt5-source）:
+  - KLineDataStore.updateBars（replace-on-conflict 末 2 根窗口、陈旧拒绝、批原子写）→ DataBuffer/KLineBuffer → ChartDataManager → Chart → ChartController 全链暴露；语义测试 8 用例先行（红线：forming 更新不被 merge 吞）
+  - sourceRegistry 加 mt5（:8090 + 7x24 UTC 会话 MT5）+ sources/mt5.ts Provider；data/live/mt5BarsLive.ts（EventSource 封装 + RealtimeBarsConnector：closed 暂存随 forming 合并一次原子写、快照直写、断流冲刷）；controllers 出口补 searchInstruments/mt5 系列
+- Phase C — nexus-shell:
+  - 设置对话框"数据源"段（点击时才 probe——挂载探测会给 mock 路径引入 ERR_CONNECTION_REFUSED 噪声，b234 探针收尾门拦截后修正）；SymbolPicker 双模式（mt5 走 searchInstruments 防抖 + AbortSignal，recent 存品种描述）；数据接线 effect + SSE live effect（品种/周期变化重连、离开即断）
+  - probe-mt5.mjs 冒烟探针（桩连接器内嵌 :8090）8/8：切源/跨源搜索/历史 60 根/SSE forming 写末根/切回断流
+- Phase D — 文档 + 登记与验收: docs/data-sources/mt5.zh-CN.md + docs/design/mt5-exness-alignment.md + connecters/setup-backends 登记
+- 实施中发现（关键坑，全部已修复并记录）:
+  - 探针谓词坑：`page.locator().count() > 0` 是 Promise 与 0 比较（恒 false），必须 async/await
+  - starlette TestClient/httpx ASGITransport 均不支持无限 SSE 流消费：测试用裸 ASGI send/receive 收首帧；receive 桩必须阻塞（立即返回会饿死事件循环）
+  - SourceRouter 依赖 probe 响应的 capabilities 字段筛选流转候选——连接器 probe 必须带能力声明
+  - pandas 2.x：tz-aware 索引取毫秒须 tz_localize(None)→astype ns；ms 精度索引的 astype int64 返回 ms 非 ns
+  - 服务器偏移实测字段名错配（TickProbe.time_seconds 而非 time）会让实测静默失败回落 0
+  - vue-tsc 走 package exports→dist：worktree 陈旧 dist 会造成 type-check 假阳性（+5），先 `pnpm --filter core build` 重建再对基线
+
+## 2026-09-15（第四会话·MT5 批次收尾：改名 + OpenSpec + merge push）
+
+- Objective: 用户指示——先提交；连接器归用户名下、命名 KCQ-MT5-connector；用 OpenSpec 建立连接器规范文档；上游 PR 等用户测试
+- 改名: KCQ 侧全部引用同步（connecters.mjs/setup-backends.mjs/sourceRegistry/docs/core 注释），commit 1de4a6eb（曾漏 [fork] 前缀，已 amend+rebase 修正后重做 merge）
+- 连接器仓: 目录定名 D:\AI\KCQ-MT5-connector；README/pyproject/server title 同步；remote=EliteOtaku/KCQ-MT5-connector（GitHub 未建仓未 push）
+- OpenSpec: openspec init（CLI 1.8，spec-driven schema，tools=zcode）+ config.yaml 项目上下文 + 五能力规格（v1-market-data-rest/realtime-bars-stream/exness-alignment/terminal-gateway/symbol-catalog）strict 校验 5/5 全绿 + AGENTS.md（约定/命令/domain invariants）
+- ⚠️ 事故与恢复（详见 risks.md）：① mv 连接器目录因残留 pytest 进程占用失败后误发 rm -rf——凭会话上下文逐文件全量重建，pytest 34/34 验证与删除前等价（新仓 commits: 2d599fc feat + docs OpenSpec commit）；旧 git 历史未还原。② 主工作区 `git reset --hard`（重做 merge 时）把已入库的 handoff 文件未提交更新退回旧版——已全量恢复（snapshot/decisions D12-D18/risks/backlog/work-log/PROMPTS/HANDOFF）
+- merge/push: nexus/main = e0425948（9 commits no-ff merge，含改名修正链），已 push origin；merge 后主工作区 MT5 相关测试 18/18 复验通过
+- Remaining: 真机 E2E 待用户；连接器建仓 push 待用户；上游 PR 待用户测试后再议
+
+## 2026-09-16（cloudtradeagent 消费方主线核验 + 下一阶段规划同步）
+
+- 消费方主线（cloudtradeagent worktree /?view=kcq）核验本仓：批1-4 状态与
+  checklist 一致（b1 扎实 39/39、b2 收尾项/批3/批4 由后续会话完成——legend
+  DOM 接管/右键菜单/watchlist/对象树/键盘全落地，与主线简报方案吻合）；
+  MT5 集成（nexus/main=e0425948）与连接器仓确认在位。
+- snapshot Immediate next actions 扩为完整下一阶段规划：MT5 真机 E2E（用户）→
+  上游 PR 批次（绘图交互强化+MT5+已推三分支）→ 业务 overlay 搬家（闭源主导）→
+  agent 面板；壳尾项单列。
+- 交接文档由消费方主线按 /agent-handoff 刷新并入库（本 commit）；fork 开发转向
+  「真机验证 + PR 整理 + 配合业务搬家」阶段。
