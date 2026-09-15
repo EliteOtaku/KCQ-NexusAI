@@ -4,7 +4,7 @@ import { createSignal, type ReadonlySignal, type WritableSignal } from '../../fo
 import type { OlderDataStatus } from '../provider/types'
 
 import type { DataChange, KLineBuffer, LoadedTimeRange } from './dataBufferTypes'
-import { KLineDataStore } from './kLineDataStore'
+import { KLineDataStore, type UpdateBarsResult } from './kLineDataStore'
 import { TimeKeyIndex } from './timeKeyIndex'
 
 /** 图表消费的 K 线快照；不负责 Provider 请求、重试或分页策略。 */
@@ -101,6 +101,17 @@ export class DataBuffer implements KLineBuffer {
     this.keyIndex.recompute(this.store.getRawData())
     this.errorSignal.set(null)
     this.loadingSignal.set(false)
+  }
+
+  /** 实时帧写入：末尾窗口 replace-on-conflict 合并（SSE forming/closed 链路）。 */
+  updateBars(bars: ReadonlyArray<KLineData>): UpdateBarsResult {
+    if (this.disposed) return { appendedCount: 0, replacedCount: 0, rejected: [...bars] }
+    const result = this.store.updateBars(bars)
+    if (result.appendedCount > 0 || result.replacedCount > 0) {
+      this.keyIndex.recompute(this.store.getRawData())
+      this.errorSignal.set(null)
+    }
+    return result
   }
 
   /** 发布缓存查询加载状态。 */
