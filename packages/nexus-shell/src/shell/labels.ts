@@ -68,6 +68,8 @@ export const SHELL_LABELS = {
   symbolRecentGroup: '最近使用',
   symbolAllGroup: '全部品种',
   symbolNoResults: '无匹配品种',
+  symbolSearchLoading: '搜索中…',
+  symbolSearchFailed: '搜索失败，请检查 MT5 连接器',
 
   // ── 图例栏 ──
   legendOhlcOpen: 'O',
@@ -102,6 +104,11 @@ export const SHELL_LABELS = {
   settingsThemeLabel: '主题',
   settingsThemeDark: '暗色',
   settingsThemeLight: '亮色',
+  settingsSourceLabel: '数据源',
+  settingsSourceMock: 'Mock',
+  settingsSourceMt5: 'MT5 (Exness)',
+  settingsSourceMt5Unavailable: 'MT5 不可达（连接器未启动或终端未登录），已保持 Mock',
+  settingsSourceMt5Fallback: 'MT5 连接中断，已回退 Mock',
   settingsMagnetLabel: '磁吸',
   settingsMagnetOff: '关闭',
   settingsMagnetWeak: '弱',

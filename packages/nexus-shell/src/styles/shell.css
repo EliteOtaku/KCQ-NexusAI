@@ -1031,6 +1031,13 @@ body {
   padding: 3px 6px;
 }
 
+/* 数据源切换失败/不可达的行内提示 */
+.nx-settings__hint {
+  color: var(--nx-text-secondary);
+  font-size: 12px;
+  margin: -4px 0 8px;
+}
+
 /* ── 右栏分区折叠（B4-05 面板开关） ── */
 .nx-side-panel__title-btn {
   display: flex;

@@ -17,6 +17,10 @@ export const STORAGE_KEYS = {
   theme: 'nexus.theme',
   /** 右栏分区折叠状态（B4-05 持久化）。 */
   panel: 'nexus.panel',
+  /** 当前数据源（'mock' | 'mt5'）。 */
+  dataSource: 'nexus.shell.data-source',
+  /** MT5 模式最近使用的品种描述（InstrumentDescriptor JSON 数组）。 */
+  recentMt5Instruments: 'nexus.shell.recent-mt5-instruments',
 } as const
 
 /** 读取 JSON；解析失败或键不存在时返回 fallback，不向上抛错。 */
