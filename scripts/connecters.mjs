@@ -2,7 +2,7 @@
  * connecters.mjs
  *
  * 数据源后端（connecter）的启动逻辑，供 `scripts/dev.mjs` 与 `scripts/start-connecter.mjs` 复用。
- * 支持名称与别名：gotdx（别名 tdx / g）、binance（别名 bnb）、baostock（别名 b）、all（全部）。
+ * 支持名称与别名：gotdx（别名 tdx / g）、binance（别名 bnb）、baostock（别名 b）、mt5（别名 m）、all（全部）。
  */
 
 import { spawn } from 'node:child_process'
@@ -40,6 +40,14 @@ const CONNECTERS = {
     cmd: 'uv',
     args: ['run', 'python', './server.py'],
   },
+  mt5: {
+    label: 'mt5（Exness 本地终端，:8090）',
+    logLabel: 'mt5',
+    logColor: LOG_COLORS.mt5,
+    dir: 'MT5-Connecter',
+    cmd: 'uv',
+    args: ['run', 'python', './server.py'],
+  },
 }
 
 export const CONNECTER_NAMES = Object.keys(CONNECTERS)
@@ -53,6 +61,8 @@ const ALIASES = {
   bnb: 'binance',
   baostock: 'baostock',
   b: 'baostock',
+  mt5: 'mt5',
+  m: 'mt5',
 }
 
 // 解析用户输入的名称列表，返回去重后的标准 connecter 名称数组
@@ -66,7 +76,7 @@ export function resolveConnecters(names) {
     }
     const target = ALIASES[key]
     if (!target) {
-      console.error(`  ✗ 未知 connecter：${raw}（可用：gotdx / binance / baostock / all）`)
+      console.error(`  ✗ 未知 connecter：${raw}（可用：gotdx / binance / baostock / mt5 / all）`)
       continue
     }
     resolved.add(target)
