@@ -345,20 +345,8 @@ export interface ChartMountOptions {
   minKWidth?: number
   maxKWidth?: number
 
-  // Initial chart settings (partial, merged with DEFAULT_SETTINGS)
+  // Initial chart settings (overrides > stored preferences > DEFAULT_SETTINGS)
   settings?: Partial<ChartSettings>
-
-  // MCP / AI runtime bridge
-  mcp?: {
-    wsUrl?: string
-    onToolCall?: (call: {
-      name: string
-      input: Record<string, unknown>
-    }) =>
-      | Promise<{ success: boolean; error?: string; data?: unknown }>
-      | { success: boolean; error?: string; data?: unknown }
-    autoReconnect?: boolean
-  }
 }
 
 export interface ChartController extends DrawingChartAdapter {

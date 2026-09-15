@@ -32,12 +32,6 @@ import { getAnchorCountForTool, getDrawingKind } from './toolConfig'
 export type { DrawingToolId } from './toolConfig'
 export type { InteractionDrawingAnchor } from './coordinateUtils'
 
-export interface DrawingInteractionCallbacks {
-  onDrawingCreated?: (drawing: DrawingObject) => void
-  onToolChange?: (toolId: DrawingToolId) => void
-  onDrawingSelected?: (drawings: ReadonlyArray<DrawingObject>) => void
-}
-
 /** 命中线段标签后供宿主渲染就地文本编辑器的几何快照。 */
 export interface DrawingLineLabelTarget {
   readonly drawingId: string
@@ -61,8 +55,6 @@ type DrawingPointerSession =
  */
 export class DrawingInteractionController {
   private adapter: DrawingChartAdapter
-  private callbacks: DrawingInteractionCallbacks = {}
-
   private drawingState: DrawingState
   private anchorCollector: AnchorCollector
   private previewRenderer: PreviewRenderer
@@ -92,12 +84,6 @@ export class DrawingInteractionController {
     return this.pointerSession.kind === 'marquee' ? this.pointerSession.marquee : null
   }
 
-  // ============ 配置 ============
-
-  setCallbacks(callbacks: DrawingInteractionCallbacks) {
-    this.callbacks = callbacks
-  }
-
   // ============ 工具状态 ============
 
   getActiveTool(): DrawingToolId {
@@ -107,13 +93,12 @@ export class DrawingInteractionController {
   /**
    * 会话副作用：清锚点/预览/拖拽/选中。仅 Chart 在写完 kernel 后调用。
    */
-  applyToolSession(toolId: DrawingToolId): void {
+  applyToolSession(): void {
     this.anchorCollector.reset()
     this.pendingPaneId = null
     this.resetPointerSession()
     this.drawingState.removePreview()
     this.setSelected([])
-    this.callbacks.onToolChange?.(toolId)
   }
 
   setTool(toolId: DrawingToolId) {
@@ -505,10 +490,9 @@ export class DrawingInteractionController {
     this.setSelectedIds(drawings.map((drawing) => drawing.id))
   }
 
-  /** 将选中 ID 写回唯一状态，并通知交互宿主。 */
+  /** 将选中 ID 写回唯一状态。 */
   private setSelectedIds(ids: ReadonlyArray<string>): void {
     this.adapter.setSelectedDrawingIds(ids)
-    this.callbacks.onDrawingSelected?.(this.drawingState.getSelectedDrawings())
   }
 
   /** 清空当前选择；光标和框选的空白点击共用此入口。 */
@@ -526,10 +510,10 @@ export class DrawingInteractionController {
     )
   }
 
-  private createSingleAnchorDrawing(anchor: DrawingPointerAnchor, activeTool: DrawingToolId) {
-    this.drawingState.removePreview()
-
-    const drawing = this.adapter.createDrawing({
+  private createSingleAnchorDrawing(anchor: DrawingPointerAnchor, activeTool: DrawingToolId): void {
+    // 先复位工具：切回 cursor 会清空选中，必须在创建前完成，创建会原子选中新图元。
+    this.adapter.setDrawingToolId('cursor')
+    this.adapter.createDrawing({
       kind: getDrawingKind(activeTool),
       paneId: anchor.paneId,
       anchors: [
@@ -540,20 +524,16 @@ export class DrawingInteractionController {
         },
       ],
     })
-    // 先重置工具再通知宿主：applyToolSession 会清空选中，若先发 onDrawingCreated
-    // （宿主通常在此选中新图元），选中立即被工具重置清掉——画完应保持选中（浮条出现）
-    this.adapter.setDrawingToolId('cursor')
-    this.callbacks.onDrawingCreated?.(drawing)
   }
 
   private createMultiAnchorDrawing(
     anchors: ResolvedInteractionAnchor[],
     activeTool: DrawingToolId,
     paneId: string,
-  ) {
-    this.drawingState.removePreview()
-
-    const drawing = this.adapter.createDrawing({
+  ): void {
+    // 先复位工具：切回 cursor 会清空选中，必须在创建前完成，创建会原子选中新图元。
+    this.adapter.setDrawingToolId('cursor')
+    this.adapter.createDrawing({
       kind: getDrawingKind(activeTool),
       paneId,
       anchors: anchors.map((anchor) => ({
@@ -562,9 +542,6 @@ export class DrawingInteractionController {
         price: anchor.price,
       })),
     })
-    // 同 createSingleAnchorDrawing：保持画完选中
-    this.adapter.setDrawingToolId('cursor')
-    this.callbacks.onDrawingCreated?.(drawing)
   }
 }
 

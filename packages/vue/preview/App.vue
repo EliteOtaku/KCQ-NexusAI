@@ -22,13 +22,11 @@
         <template #chart>
           <KlineChart
             ref="chartRef"
-            :mcp="mcpConfig"
             :left-axis-width="60"
             :custom-data="customData"
-            :settings="chartSettings"
             @update:is-fullscreen="isFullscreen = $event"
             @theme-change="onThemeChange"
-            @controller-ready="(controller) => agentBridge.bindChartAgent(controller.agent)"
+            @controller-ready="onControllerReady"
           >
             <!-- 自定义 Tooltip -->
             <!-- <template #kline-tooltip="{ hoverData, upColor, downColor }">
@@ -76,15 +74,14 @@
   import DebugControls from './DebugControls.vue'
   import { AgentWorkbenchShell, KlineChart, type AgentPanelWidthStorage } from '../src/index'
   import { BrowserAgentBridge } from '../src/features/agent/browser-agent-bridge'
-  import type { ChartSettings } from '@363045841yyt/klinechart-core/config'
   import {
     type KLineData,
     type CustomDataSource,
+    type ChartController,
     BinanceSSESource,
     DepthConnector,
     createHeatmapController,
   } from '@363045841yyt/klinechart-core/controllers'
-  import { executeTool } from '@363045841yyt/klinechart-ai-runtime'
   import { formatTimestamp } from '@363045841yyt/klinechart-core'
 
   /** 硬编码演示数据：主品种 CUSTOM.DEMO（15 根日 K） */
@@ -536,16 +533,6 @@
       window.localStorage.setItem('agent.panelWidth', String(width))
     },
   }
-  const mcpConfig = {
-    wsUrl: 'ws://localhost:8081',
-    autoReconnect: true,
-    onToolCall: (call: { name: string; input: Record<string, unknown> }) => {
-      const ctrl = chartRef.value?.getController?.()
-      if (!ctrl) return { success: false, error: 'Controller not ready yet' }
-      return executeTool(ctrl, call)
-    },
-  }
-
   const showModal = ref(false)
 
   const sizeIndex = ref(0)
@@ -566,27 +553,17 @@
   const isFullscreen = ref(false)
   const embedContainerRef = ref<HTMLElement | null>(null)
 
-  // ── settings prop 演示
-  const chartSettings: ChartSettings = {
-    showGridLines: true,
-    isAsiaMarket: true,
-    showVolumePriceMarkers: false,
-    mainLeftAxisDisplaySetting: 'none',
-    theme: 'dark',
-    /* colorPresetSettings: {
-      dark: {
-        candleUpBody: '#e85d04', // 橙色阳线
-        candleDownBody: '#1b4332', // 墨绿阴线
-        crosshairLine: '#faa307', // 金色十字线
-        gridMajor: '#3e2723', // 主网格线
-      },
-    }, */
-  }
-
-  const currentTheme = ref<'light' | 'dark'>(chartSettings.theme as 'light' | 'dark')
+  // 产品内不传 settings prop，图表内部以 localStorage 偏好 + 默认值自行接管
+  const currentTheme = ref<'light' | 'dark'>('dark')
 
   function onThemeChange(theme: 'light' | 'dark') {
     currentTheme.value = theme
+  }
+
+  /** 控制器就绪后用内部解析出的有效主题初始化外壳主题。 */
+  function onControllerReady(controller: ChartController) {
+    agentBridge.bindChartAgent(controller.agent)
+    currentTheme.value = controller.theme.peek()
   }
 
   provideFullscreenTeleportTarget(embedContainerRef)

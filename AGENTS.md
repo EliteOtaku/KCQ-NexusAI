@@ -66,6 +66,7 @@ All READMEs are generated from `docs/fragments/` (reusable Markdown snippets) + 
 - Root 测试使用 `pnpm test:unit`；packages 被其排除，跨包测试使用 `pnpm test:packages`。
 - `*.integration.test.ts` 不会被默认测试收集。
 - 日期测试依赖 `TZ=Asia/Shanghai`；本地跨年失败时先设置该环境变量。
+- 测试用例禁止重复抄写同一套构造/夹具；可复用的 setup 必须抽成 helper 或表驱动（`it.each`），用例内只声明差异。
 
 ## Code Conventions
 
@@ -96,7 +97,7 @@ All READMEs are generated from `docs/fragments/` (reusable Markdown snippets) + 
 - **Layer roles**: background / primary / indicator / component / drawing / overlay; UpdateLevel Main|Overlay|All for dual-canvas incremental paint.
 - **StateKernel** is the single source of truth for chart business state (sub-state modules include options, zoom, data, dataManager, comparison, indicator, subPane, marker, viewport, pane, settings, mode, drawing, interaction, systemTheme). Preference theme is `settings.theme` (`light|dark|auto`); **effective** theme is `computed` from preference + `systemTheme` (exposed as flat `signals.theme`). Each sub-state module exposes `readonly` (ReadonlySignal bag) + semantic `actions`. WritableSignal bag (`signals`) is never part of the public return — all mutations flow through actions. Derived state lives in computed(); DOM side-effects in effect(). See `docs/state-kernel-migration-plan.md`.
 - **Core Native Agent Tools** Agent 和用户等权,用户UI调用的入口就是Agent工具的入口,Agent就是用户,用户就是Agent.
-- ai-runtime是废弃包,不用维护,现在的实现都在agent-runtime中
+- ai-runtime 包及其 MCP 桥接已移除,Agent 实现统一在 agent-runtime 中,工具通过 core 原生 `@Tool` 注册.
 
 ### StateKernel Reactive Kernel Design Principles
 

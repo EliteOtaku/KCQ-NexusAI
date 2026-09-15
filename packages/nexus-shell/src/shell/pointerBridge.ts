@@ -30,8 +30,6 @@ export interface BridgeStateAccessors {
 export interface BridgeHooks {
   /** 测量会话变化（null 表示清除）。 */
   onMeasureChange(session: MeasureSession | null): void
-  /** 引擎完成一次图元创建（stay/模板自动套用在此接线）。 */
-  onDrawingCreated(drawing: DrawingObject): void
   /** 容器内右键：桥已 preventDefault，事件坐标未改写，供宿主弹出上下文菜单。 */
   onContextMenu?(event: PointerEvent): void
 }

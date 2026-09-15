@@ -55,14 +55,9 @@ export function ChartStage() {
 
       const dic = new DrawingInteractionController(ctrl)
       ctrl.registerDrawingSession(dic)
-      dic.setCallbacks({
-        onDrawingCreated: shell.handleDrawingCreated,
-        onDrawingSelected: (list) => ctrl.setSelectedDrawingIds(list.map((item) => item.id)),
-      })
 
       const bridge = new ChartPointerBridge(ctrl, dic, shell.bridgeAccessors, {
         onMeasureChange: shell.setMeasureSession,
-        onDrawingCreated: shell.handleDrawingCreated,
         // 右键菜单：hitTestAt 命中口径与点选一致；坐标按舞台尺寸收边防裁剪。
         onContextMenu: (event) => {
           const rect = host.getBoundingClientRect()

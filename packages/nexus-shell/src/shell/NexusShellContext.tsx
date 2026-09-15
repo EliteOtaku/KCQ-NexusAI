@@ -64,7 +64,6 @@ export interface NexusShellValue {
   attachChart(ctrl: ChartController, bridge: ChartPointerBridge): void
   detachChart(): void
   bridgeAccessors: { getActiveTool(): string; getMagnet(): MagnetMode }
-  handleDrawingCreated(drawing: DrawingObject): void
   onAnchorSessionReset(): void
   setMeasureSession(session: MeasureSession | null): void
 
@@ -182,8 +181,8 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
   const autoApplyRef = useRef(prefs.autoApply)
   autoApplyRef.current = prefs.autoApply
   const lastDrawingToolRef = useRef<ShellToolId>('cursor')
-  // ctrl 也走 ref：ChartStage 在挂载期就把 handleDrawingCreated 接到交互控制器上，
-  // 那一刻 ctrl 尚为 null，闭包里的 state 会永久过期。
+  // ctrl 也走 ref：新建图元副作用（stay/模板）在 drawings 信号监听里读取，
+  // 图表挂载期 ctrl 尚为 null，闭包里的 state 会永久过期。
   const ctrlRef = useRef<ChartController | null>(null)
 
   // ── 挂载 / 卸载 ──
@@ -314,13 +313,20 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
     setTemplateVersion((version) => version + 1)
   }, [])
 
-  // ── 引擎回调（ChartStage 在交互控制器上接线） ──
-  const handleDrawingCreated = useCallback(
-    (drawing: DrawingObject) => {
-      // 读取 ref 而非 state：本回调在图表挂载期就被固定到交互控制器上。
-      const chartCtrl = ctrlRef.current
-      if (!chartCtrl) return
-      // stay：画完立刻恢复工具（先切工具再选中，避开会话重置清选中）。
+  // ── 新建图元副作用 ──
+  // 上游创建流已原子"创建+选中"（addDrawingAndSelect），stay/模板自动套用改为
+  // 监听 drawings 信号增量：出现新增 id 即触发，不再依赖引擎创建回调。
+  const prevDrawingIdsRef = useRef<ReadonlySet<string>>(new Set())
+  useEffect(() => {
+    const prev = prevDrawingIdsRef.current
+    prevDrawingIdsRef.current = new Set(drawings.map((drawing) => drawing.id))
+    const added = drawings.filter((drawing) => !prev.has(drawing.id))
+    if (added.length === 0) return
+    // 读取 ref 而非 state：图表挂载期闭包即固定。
+    const chartCtrl = ctrlRef.current
+    if (!chartCtrl) return
+    for (const drawing of added) {
+      // stay：画完立刻恢复上次绘图工具（引擎创建流已先复位为 cursor）。
       if (stayRef.current) {
         chartCtrl.setDrawingToolId(lastDrawingToolRef.current as DrawingToolId)
       }
@@ -334,10 +340,8 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
           })
         }
       }
-      chartCtrl.setSelectedDrawingIds([drawing.id])
-    },
-    [],
-  )
+    }
+  }, [drawings])
 
   const onAnchorSessionReset = useCallback(() => {
     // 锚点会话属桥内部状态，React 侧无需镜像；保留空实现以稳定桥回调形状。
@@ -486,7 +490,6 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
       attachChart,
       detachChart,
       bridgeAccessors,
-      handleDrawingCreated,
       onAnchorSessionReset,
       setMeasureSession,
       selectTool,
@@ -531,7 +534,6 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
       attachChart,
       detachChart,
       bridgeAccessors,
-      handleDrawingCreated,
       onAnchorSessionReset,
       selectTool,
       setGroupLastTool,

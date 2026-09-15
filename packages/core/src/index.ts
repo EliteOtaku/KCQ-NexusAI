@@ -1,6 +1,5 @@
 export * from './foundation/reactivity'
 export * from './controllers'
-export * from './features/mcp'
 export * from './features/agent'
 export { VERSION } from './version'
 export * from './foundation/tokens'
@@ -24,6 +23,7 @@ export * from './features/input'
 export * from './scale'
 export * from './rendering/scheduler'
 export type * from './rendering/render'
+export * from './foundation/utils/rendererCapability'
 export * from './rendering/renderer-tier'
 
 // ── Batch 3: Scene abstraction (depends on render) ────────────────────────
