@@ -30,6 +30,11 @@ const BACKENDS = [
     repo: 'https://github.com/363045841/Baostock-Tradingview-Connecter.git',
     purpose: 'BaoStock（A 股）与 TradingView（全球品种）后端，FastAPI 默认端口 8000',
   },
+  {
+    name: 'KCQ-MT5-connector',
+    repo: 'https://github.com/EliteOtaku/KCQ-MT5-connector.git',
+    purpose: 'MT5（Exness 本地终端）行情后端，FastAPI 默认端口 8090，`pnpm connecter mt5` 需要',
+  },
 ]
 
 function cloneOne({ name, repo }) {

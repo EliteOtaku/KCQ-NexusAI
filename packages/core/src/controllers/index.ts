@@ -111,6 +111,17 @@ export {
   baostockMarketDataProvider,
   finshareMarketDataProvider,
   tradingviewMarketDataProvider,
+  mt5MarketDataProvider,
+  Mt5LiveSource,
+  RealtimeBarsConnector,
+  DEFAULT_MT5_SSE_URL,
+  searchInstruments,
+} from '../data'
+export type {
+  Mt5LiveFrame,
+  Mt5LiveBar,
+  Mt5LiveStatus,
+  RealtimeBarsSink,
 } from '../data'
 export type {
   LoadedTimeRange,

@@ -1,7 +1,9 @@
-// 图表设置对话框（B3-02）：主题切换 + 壳偏好（磁吸/stay/自动套用）。
+// 图表设置对话框（B3-02）：数据源（Mock/MT5）+ 主题切换 + 壳偏好（磁吸/stay/自动套用）。
 // 偏好经 NexusShellContext 读写并持久化于 nexus.shell.prefs；无引擎写入。
+// MT5 可达性在点击切换时才探测（不在挂载时发请求，保持 mock 路径零网络噪声）；
+// 探测失败保持 Mock 并行内提示。
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import type { MagnetMode } from '../shell/pointerBridge'
 import { useNexusShell } from '../shell/NexusShellContext'
 import { SHELL_LABELS } from '../shell/labels'
@@ -9,6 +11,9 @@ import { SHELL_LABELS } from '../shell/labels'
 /** 设置对话框组件。 */
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const shell = useNexusShell()
+  // MT5 切换中 / 上次切换失败（探测不可达）
+  const [checking, setChecking] = useState(false)
+  const [switchFailed, setSwitchFailed] = useState(false)
 
   // Esc 关闭（窗口级；壳级 Esc 逻辑互不干扰）。
   useEffect(() => {
@@ -18,6 +23,16 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [onClose])
+
+  /** 切换数据源：切 MT5 时探测连接器可达性，失败保持现状并提示。 */
+  async function handleSelect(next: 'mock' | 'mt5') {
+    if (next === shell.dataSource || checking) return
+    setChecking(true)
+    setSwitchFailed(false)
+    const ok = await shell.selectDataSource(next)
+    setChecking(false)
+    setSwitchFailed(!ok)
+  }
 
   return (
     <div
@@ -31,6 +46,31 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     >
       <div className="nx-dialog__panel">
         <h3 className="nx-dialog__title">{SHELL_LABELS.settingsTitle}</h3>
+
+        <div className="nx-settings__row">
+          <span className="nx-settings__label">{SHELL_LABELS.settingsSourceLabel}</span>
+          <div className="nx-settings__segment">
+            <button
+              type="button"
+              disabled={checking}
+              className={`nx-settings__segment-btn${shell.dataSource === 'mock' ? ' nx-settings__segment-btn--active' : ''}`}
+              onClick={() => void handleSelect('mock')}
+            >
+              {SHELL_LABELS.settingsSourceMock}
+            </button>
+            <button
+              type="button"
+              disabled={checking}
+              className={`nx-settings__segment-btn${shell.dataSource === 'mt5' ? ' nx-settings__segment-btn--active' : ''}`}
+              onClick={() => void handleSelect('mt5')}
+            >
+              {SHELL_LABELS.settingsSourceMt5}
+            </button>
+          </div>
+        </div>
+        {switchFailed && (
+          <div className="nx-settings__hint">{SHELL_LABELS.settingsSourceMt5Unavailable}</div>
+        )}
 
         <div className="nx-settings__row">
           <span className="nx-settings__label">{SHELL_LABELS.settingsThemeLabel}</span>
