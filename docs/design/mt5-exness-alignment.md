@@ -13,7 +13,7 @@
 MetaTrader5 终端（Windows 本机，Exness 已登录）
    │  MetaTrader5 Python 包（IPC，单工作线程串行队列）
    ▼
-MT5-Connecter（同级独立仓库，FastAPI :8090）
+KCQ-MT5-connector（同级独立仓库，FastAPI :8090）
    ├─ V1 协议 REST：probe / instruments/search / bars（游标分页）
    ├─ 采样循环：tick 探针 1s → 变化才取 K 线；静默指数退避封顶 30s
    └─ SSE 单连接推帧：snapshot / forming / closed / status（Last-Event-ID 补帧）
@@ -32,7 +32,7 @@ RealtimeBarsConnector → controller.updateBars → DataBuffer → 指标重算 
 - **4h/日线**：自 H1 按锚时区重采样；**周/月**：自 D1 重采样。加密品种锚 UTC（币安标准），传统品种锚 Europe/Athens（EET/EEST 自动 DST）。周日短棒在重采样中自然并入周一首根——显示、指标计算、存储三层数据同源一致。
 - **开关**：连接器 env `ALIGN_TZ=auto|gmt2|gmt3|off`；probe 响应上报对齐状态与实测偏移。图表 UI 开关后续再加。
 
-对齐语义的行为基准（冬夏 4h/日线边界、DST 切换日 23 小时周日、周月锚、偏移换算）由 MT5-Connecter 的 pytest 纯函数用例固化，无需终端即可回归。
+对齐语义的行为基准（冬夏 4h/日线边界、DST 切换日 23 小时周日、周月锚、偏移换算）由 KCQ-MT5-connector 的 pytest 纯函数用例固化，无需终端即可回归。
 
 ## updateBars 原语（D17）
 
@@ -69,7 +69,7 @@ RealtimeBarsConnector → controller.updateBars → DataBuffer → 指标重算 
 
 ## 验证
 
-- MT5-Connecter pytest 全绿（对齐/去重/收线判定/帧协议/路由，FakeGateway 无需终端）。
+- KCQ-MT5-connector pytest 全绿（对齐/去重/收线判定/帧协议/路由，FakeGateway 无需终端）。
 - core vitest：updateBars 语义 8 用例 + mt5 provider/live 10 用例。
 - nexus-shell：typecheck 绿 + 三探针回归（mock 路径 39/15/49）+ `probe-mt5.mjs` 冒烟 8 断言（桩连接器，全链路含断流）。
 - 真机 E2E（Windows + Exness 终端已登录）：`pnpm connecter mt5` → 壳切 MT5 → forming 实时刷新 / 日线与 4h 无周日棒——由用户执行。

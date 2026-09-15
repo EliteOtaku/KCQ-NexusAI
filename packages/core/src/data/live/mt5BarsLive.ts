@@ -16,7 +16,7 @@ export interface Mt5LiveBar {
   turnover?: number
 }
 
-/** MT5-Connecter SSE 帧协议：snapshot/forming/closed/status。 */
+/** KCQ-MT5-connector SSE 帧协议：snapshot/forming/closed/status。 */
 export type Mt5LiveFrame =
   | { type: 'snapshot'; symbol: string; period: string; bars: Mt5LiveBar[] }
   | { type: 'forming'; symbol: string; period: string; bar: Mt5LiveBar }
@@ -26,7 +26,7 @@ export type Mt5LiveFrame =
 /** 连接器生命周期状态（EventSource 驱动）。 */
 export type Mt5LiveStatus = 'connecting' | 'connected' | 'disconnected'
 
-/** 本地 MT5-Connecter 默认地址。 */
+/** 本地 KCQ-MT5-connector 默认地址。 */
 export const DEFAULT_MT5_SSE_URL = 'http://127.0.0.1:8090'
 
 /** 单连接固定订阅一个 (symbol, period)；切品种 = 断开重连。 */

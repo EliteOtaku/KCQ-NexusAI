@@ -44,7 +44,7 @@ const CONNECTERS = {
     label: 'mt5（Exness 本地终端，:8090）',
     logLabel: 'mt5',
     logColor: LOG_COLORS.mt5,
-    dir: 'MT5-Connecter',
+    dir: 'KCQ-MT5-connector',
     cmd: 'uv',
     args: ['run', 'python', './server.py'],
   },

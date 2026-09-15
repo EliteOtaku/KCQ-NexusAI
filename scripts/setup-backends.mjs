@@ -31,9 +31,8 @@ const BACKENDS = [
     purpose: 'BaoStock（A 股）与 TradingView（全球品种）后端，FastAPI 默认端口 8000',
   },
   {
-    name: 'MT5-Connecter',
-    // GitHub URL 占位：仓库发布前该克隆地址不可用，届时由项目拥有者更新
-    repo: 'https://github.com/363045841/MT5-Connecter.git',
+    name: 'KCQ-MT5-connector',
+    repo: 'https://github.com/EliteOtaku/KCQ-MT5-connector.git',
     purpose: 'MT5（Exness 本地终端）行情后端，FastAPI 默认端口 8090，`pnpm connecter mt5` 需要',
   },
 ]

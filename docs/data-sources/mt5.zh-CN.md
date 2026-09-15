@@ -1,18 +1,18 @@
-# MT5（`MT5-Connecter`，Exness 本地终端）
+# MT5（`KCQ-MT5-connector`，Exness 本地终端）
 
 ## 简介
 
-MT5 数据源读取本机已登录的 MetaTrader 5 终端（Exness 账户）的 K 线与品种目录，并经 SSE 推送实时帧。后端为同级仓库 `MT5-Connecter`（Python + FastAPI + MetaTrader5 包 IPC），实现本仓 market-data V1 协议（probe / instruments/search / bars）+ 实时流端点。
+MT5 数据源读取本机已登录的 MetaTrader 5 终端（Exness 账户）的 K 线与品种目录，并经 SSE 推送实时帧。后端为同级仓库 `KCQ-MT5-connector`（Python + FastAPI + MetaTrader5 包 IPC），实现本仓 market-data V1 协议（probe / instruments/search / bars）+ 实时流端点。
 
-本地仓库与 `MT5-Connecter` 保持同级目录：
+本地仓库与 `KCQ-MT5-connector` 保持同级目录：
 
 ```
 workspace/
 ├── KCQ-NexusAI/        # 本仓库
-└── MT5-Connecter/      # MT5 数据后端（:8090）
+└── KCQ-MT5-connector/      # MT5 数据后端（:8090）
 ```
 
-> GitHub 仓库地址为占位（`https://github.com/363045841/MT5-Connecter`），发布前 `pnpm setup` 的克隆步骤不可用；可先手动放置本地仓库到同级目录。
+> 后端仓库：`https://github.com/EliteOtaku/KCQ-MT5-connector`。仓库发布前 `pnpm setup` 的克隆步骤不可用；可先手动放置本地仓库到同级目录。
 
 ## 使用方法
 
@@ -29,11 +29,11 @@ workspace/
 前置：Windows + 已安装并登录的 MT5 终端（Exness）+ Python 3.12 + [uv](https://docs.astral.sh/uv/)。
 
 ```bash
-# 在本仓库根目录执行（等价于 cd ../MT5-Connecter && uv run python ./server.py）
+# 在本仓库根目录执行（等价于 cd ../KCQ-MT5-connector && uv run python ./server.py）
 pnpm connecter mt5
 
-# 或在 MT5-Connecter 目录手动启动
-cd ../MT5-Connecter
+# 或在 KCQ-MT5-connector 目录手动启动
+cd ../KCQ-MT5-connector
 uv sync
 uv run python ./server.py
 ```
