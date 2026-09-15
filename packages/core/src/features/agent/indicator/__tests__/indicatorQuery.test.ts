@@ -275,6 +275,7 @@ BOS 向上 5 @ 1970-01-01 08:00`)
       data: [{ timestamp: 1_000, price: 10, average: 10 }],
       loading: false,
       error: null,
+      timezone: 'UTC',
       timeShareRange: null,
       timeSharePreClose: 9,
     })

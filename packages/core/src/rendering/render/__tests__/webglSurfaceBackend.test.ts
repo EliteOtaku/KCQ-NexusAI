@@ -51,7 +51,7 @@ describe('WebGL SurfaceBackend adapter', () => {
 
   it('exposes the shared canvas for direct DOM composition', () => {
     const { backend, mock } = makeBackend()
-    expect((backend as { canvas: HTMLCanvasElement }).canvas).toBe(mock.getCanvas())
+    expect((backend as unknown as { canvas: HTMLCanvasElement }).canvas).toBe(mock.getCanvas())
   })
 
   it('resize delegates to the underlying surface', () => {
