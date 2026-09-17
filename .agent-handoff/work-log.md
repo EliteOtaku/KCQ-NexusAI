@@ -147,3 +147,9 @@
 - 根因: 5173 被 **KCQ preview 旧 dev 进程**（merge 前启动）占用——用户访问 5173 的任意 query（含 ?view=kcq）都命中该旧进程服务的 preview 首页（旧模块缓存），MT5 不可见；cloudtradeagent WebUI 的 vite 写死 port 5173，后启动只能挪走。webui 前端实际没有 view=kcq 视图（App.tsx 只认 view=options）
 - 处置: 杀旧进程；preview/vite.config.ts 固定 server.port=5175 + strictPort（5173 还给 WebUI）；5175 实测聚合源列表 = BaoStock/FinShare/GOTDX/TradingView/MT5 (Exness)/Mock ✓（连接器未跑时 MT5 显示"离线·原因"）
 - 端口约定: **5173=cloudtradeagent WebUI / 5175=KCQ Vue preview（strictPort）/ 5273=nexus-shell / 8090=MT5-Connecter**
+
+## 2026-09-18（第二会话·提交推送 + 上游 PR #197 + TV 对齐拍板）
+
+- 提交推送: nexus/main 4 commits（数据源管理统一化 3275d7c6 / vue probe message 透传 5f31c8cb / preview 端口+connector 拼法 9e519b3c / handoff 209f56dc）push origin；连接器仓 probe message commit 5c796de push
+- 上游 PR #197（363045841/KLineChartQuant）: 分支 pr/mt5-source 基于 upstream/main（已前进至 e4b6fdfe，import 全面 .js 后缀化）cherry-pick 4 commits（updateBars/mt5 provider+live/测试修复/vue message），冲突两处（dataBuffer.ts、data/index.ts——均按上游 .js 风格手工合并）；controllers/index.ts 补 mt5/searchInstruments 导出（.js 风格）；PR 分支全量 core 测试 223 文件/2519 绿；PR 说明 temp/pr-mt5-source.md
+- TV 对齐拍板（用户）: ①浏览器方案采纳（Edge 采集 TV 网页版参考，替代手动截图；红线：不登录/限速/不拷资产）②新短板登记：**KCQ 光标不能越过最新 K 线右缘**（TV 可自由右移并显示外推时间/价格）——列入 T1 ③多布局上限三分屏、每格独立品种 ④任务拆分：闲时 C（参考采集）→用户复核→闲时 D（T1 实施）

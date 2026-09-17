@@ -6,6 +6,7 @@
 - [ ] MT5 真机 E2E（用户执行）：Windows + Exness 终端已登录 → 连接器放同级目录 → `pnpm connecter mt5` → 壳切 MT5 源 → forming 实时刷新 / 日线与 4h 无周日棒 / probe 上报对齐状态
 - [x] 连接器 GitHub 建仓并推送（2026-09-15，https://github.com/EliteOtaku/KCQ-MT5-connector，PUBLIC，main 已推）；`pnpm setup` 克隆链路已可用
 - [ ] 用户测试通过后再议：MT5 相关 core 改动是否回传上游 PR
+- [ ] TV 对齐批次（提示词 C/D，2026-09-18 拍板）：①闲时任务 C=用 Edge 浏览器采集 TradingView 网页版界面参考（截图+DOM 结构笔记+差距比对清单 → temp/tv-reference/，红线：不登录/限速<30页/不拷 CSS 图标资产/不碰数据接口）→ 用户复核；②闲时任务 D=T1 实施（顶栏形态重做+图表属性大设置含对数/百分比/自动缩放+撤销重做先绘图域+底部周期条）+ **右缘空白扩展**（光标可越过最新 K 线、空白区显示外推时间/价格信息——用户明确短板）+ **多布局上限三分屏**（每格独立品种）。后续批次 T2+：告警/Replay/chartTypes 接线（引擎已有）、数据窗口、绘图工具按频率补
 - [ ] 上游 main 快进包含 #174 后：nexus/main 常规同步（预期无内容冲突，历史已共享）
 - [ ] 引擎指标寻址归一（[pr] 候选，2026-09-14 发现）：removeIndicator/updateIndicatorParams 不接受 addIndicator 返回的 'main:*' 实例 id，只按 displayName 寻址——壳侧已按 definitionId 绕开，引擎层应兼容双寻址（09-16 拍板：随 MT5 后大礼包一并提交）
 - [ ] 引擎补 scrollToDataIndex 公开 API（对象树滚动定位用；cloudtradeagent 简报误引为已有；09-16 拍板随大礼包一并提交）
