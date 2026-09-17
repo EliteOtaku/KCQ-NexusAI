@@ -160,3 +160,82 @@ timeshare/depth 能力；quarterly/yearly 周期；EA socket 桥（登记演进�
 
 反空转条款：把本提示词视为明确的执行请求。不要回答"无需响应"。先复述你认为的当前步骤，指出下一个具体动作，然后开始执行。上下文不足时从 AGENT_HANDOFF.md 与 .agent-handoff/ 必读文件恢复后再动手。
 ```
+
+---
+
+## 提示词 C：TradingView 界面参考采集（TV 对齐批次 Phase 0）
+
+> 前置状态：本任务**只采集参考、不写任何业务代码**。执行前 `.agent-handoff/snapshot.md` 的
+> "提示词 C 上下文要点"节已面向本任务写好；完成后 snapshot 应切换到"等待用户复核参考库 → 提示词 D"。
+
+```text
+0. 身份与目标
+你是 KCQ-NexusAI 仓库（D:\AI\KCQ-NexusAI）的界面参考采集代理。
+第一步：使用 /agent-handoff 技能读取仓库交接文档（AGENT_HANDOFF.md → .agent-handoff/snapshot.md →
+risks.md → backlog.md），充分理解仓库背景、端口约定与本任务红线后再动手。
+任务：用 Edge 浏览器访问 TradingView 网页版（免费未登录态，界面切中文），系统性采集图表界面的
+参考物料，产出三样东西：
+(A) 截图库 temp/tv-reference/（整页 + 关键局部特写）；
+(B) 结构笔记 temp/tv-reference/notes.md（每界面的面板组成、按钮/菜单项文字清单、布局层次）；
+(C) 差距比对清单 temp/tv-reference/gap-analysis.md（TV 元素 ↔ KCQ 现状 ↔ 归属批次 T1/T2/T3/T4/不做）。
+产出供用户复核后，作为提示词 D（T1 实施）的工作清单与视觉基准。
+
+1. 已查证事实（勿重复调研）
+- TV 桌面版是 Electron 套壳，网页版 tradingview.com 与桌面版 UI 同源，看网站即看 app。
+- 图表页直链：https://www.tradingview.com/chart/（免费未登录可用；站点支持 ?lang=zh 或界面内切中文）。
+- 图表本体是 canvas（DOM 提取拿不到内部实现）——不需要；要复刻的是 chrome（工具栏/面板/对话框/菜单），均为 DOM。
+- 免费未登录可见：图表页全套 chrome、绘图工具全集（左侧栏展开态）、图表属性对话框、右键菜单、
+  对象树、数据窗口、基础回放、1-2 格布局。受限：3+ 格布局、高级告警管理、screener 部分——
+  这些域在笔记里如实标注 UNAVAILABLE，不猜。
+- 本仓现状（比对基准）：nexus-shell（React 壳）已有顶栏简版/绘图工具 16 种/对象树/图例栏/
+  自选/设置对话框/数据源管理；引擎已有 features/alerts、features/replay、chartTypes
+  （Renko/RangeBars/PnF）未接壳。KCQ 自己的界面参考：起 dev server 即可看
+  （5273=nexus-shell、5175=packages/vue preview，见 .agent-handoff/snapshot.md 端口约定）。
+- 浏览器能力：用 browser-use 技能（Edge 通道）逐步导航/截图/提取 DOM；临时脚本可放
+  temp/tv-reference/ 内，用完即删。
+
+2. 用户红线（已拍板，违反即失败）
+- R1 不登录任何账号（全程未登录态）；不用用户已登录的浏览器 profile。
+- R2 人工速度：每页停留浏览后再操作，总页面数 <30，不并发、不批量爬取；不触控行情数据接口。
+- R3 不复制资产：禁止保存/拷贝 TV 的 CSS、SVG 图标、图片、字体与成段文案；截图仅作本地
+  参考不入库（temp/ 已 gitignore）；产出物只有结构认知与功能文字清单。
+- R4 不改任何 KCQ 业务代码；不 commit/push（temp/ 产出不入库）。
+- R5 45 分钟止损：单个界面卡死（弹窗/验证码/加载失败）→ 记录后跳下一个，最后统一汇报。
+
+3. 范围（界面清单，逐项产出 截图 + notes 结构笔记）
+[1] 顶栏：品种搜索框（含徽章结构）、周期快捷、K线类型下拉、指标入口、告警/回放/撤重做/
+    布局/截图/设置按钮的组织方式
+[2] 左侧绘图工具栏：收起态 + 展开态全部工具分组与工具名文字清单（这是 T4+ 工具扩展的基准）
+[3] 图表属性对话框（右键→设置 或齿轮）：逐 tab 打开截图并记录每 tab 的设置项文字清单
+[4] 图表右键菜单：完整菜单项与子菜单层次
+[5] 对象树/对象管理器：入口、列表结构、每对象的操作项
+[6] 数据窗口（Data Window）：入口、十字线联动时的信息组织
+[7] 告警面板/创建告警弹层：免费版可见部分；受限则标注 UNAVAILABLE
+[8] 回放（Bar Replay）：控制条形态、按钮与速度控制
+[9] 底部周期条与时间轴工具
+[10] 品种比较/新增商品弹层
+[11] 布局切换入口（免费版 1-2 格可见，3+ 标注 UNAVAILABLE）
+[12] （加分项）Watchlist 详情、图标lib 组织——免费可见就采
+每个界面在 notes.md 记：入口路径、面板组成、控件清单（文字）、布局层次、交互要点（悬停/右键/快捷键提示）。
+
+4. gap-analysis.md 格式
+逐 TV 元素一行：TV 能力 | KCQ 现状（有/简版/无，指明文件或探针依据） | 归属（T1/T2/T3/T4+/不做/需引擎扩展）。
+现状基准以 nexus-shell 实际代码与 .agent-handoff/snapshot.md 的 T1 范围为准，可起 5273/5175 对照截图（可选）。
+
+5. 明确不做
+不实施任何 T1+ 代码；不抓取行情/历史数据；不登录；不动 KCQ 业务代码与依赖；不 push 任何分支。
+
+6. 验收门
+- temp/tv-reference/ 含 ≥10 个界面的截图（整页+关键局部）且图像可读
+- notes.md 覆盖范围清单全部 12 项（受限项标注 UNAVAILABLE + 原因）
+- gap-analysis.md 覆盖 T1 全部范围域（顶栏/图表属性/撤重做/周期条/右缘空白）且每行有归属结论
+- 全程未登录、未修改任何业务代码、未产生 git 提交
+
+7. 收尾
+- 使用 /agent-handoff 技能更新交接文档：snapshot 切换为"参考库已产出，等待用户复核 → 提示词 D"，
+  记录采集页面数、遗漏域、UNAVAILABLE 清单；work-log 追加当日节；运行 maintain_handoff.py --compact-if-needed。
+- 汇报格式：采集界面数 / 截图与笔记清单 / UNAVAILABLE 域 / 止损跳过项 / gap-analysis 关键结论（T1 归属统计）。
+
+反空转条款：把本提示词视为明确的执行请求。不要回答"无需响应"。先复述你认为的当前步骤，
+指出下一个具体动作，然后开始执行。上下文不足时先用 /agent-handoff 技能读取交接文档恢复。
+```
