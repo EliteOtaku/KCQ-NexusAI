@@ -22,7 +22,8 @@ workspace/
 - 复权：仅 `none`（外汇/CFD 无复权概念）
 - 能力声明：仅 bars + SSE 实时流（无 timeshare / depth）
 - 品种会话：`MT5`（7x24，UTC 时区，供时区解析，不裁剪 K 线）
-- nexus-shell：设置 → 数据源 → MT5（切换时探测连接器可达性，失败保持 Mock 并提示）；品种搜索走跨源 `searchInstruments`
+- 数据源管理：与其他源统一入口——Vue 版在 图表设置 → 数据源 → 聚合源管理；nexus-shell 在 设置 → 当前数据源 → 管理数据源。均支持拨测状态（在线·延迟/离线原因）、聚合搜索开关、地址与端口覆盖、设为当前源；MT5 条目状态行附对齐摘要（如「对齐 Europe/Athens · 偏移 +3h（实测）」）
+- 品种搜索：选中数据源后搜索即限定该源（`searchInstruments`），选中品种走 fetcher 管线加载历史；MT5 另接 SSE 实时帧
 
 ## 启动方式
 
@@ -30,7 +31,7 @@ workspace/
 
 ```bash
 # 在本仓库根目录执行（等价于 cd ../KCQ-MT5-connector && uv run python ./server.py）
-pnpm connecter mt5
+pnpm connector mt5
 
 # 或在 KCQ-MT5-connector 目录手动启动
 cd ../KCQ-MT5-connector

@@ -33,7 +33,7 @@ const BACKENDS = [
   {
     name: 'KCQ-MT5-connector',
     repo: 'https://github.com/EliteOtaku/KCQ-MT5-connector.git',
-    purpose: 'MT5（Exness 本地终端）行情后端，FastAPI 默认端口 8090，`pnpm connecter mt5` 需要',
+    purpose: 'MT5（Exness 本地终端）行情后端，FastAPI 默认端口 8090，`pnpm connector mt5` 需要',
   },
 ]
 
