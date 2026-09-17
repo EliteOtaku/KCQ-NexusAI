@@ -26,6 +26,7 @@
     验证 4 工具全 success）+执行器映射 controller API
   - 引擎契约缺陷 [pr] 候选：removeIndicator/updateIndicatorParams 不接受 'main:*'
     实例 id；scrollToDataIndex 不存在（对象树滚动定位被阻）
+    **（09-16 用户拍板：等 MT5 真机 E2E 通过后随大礼包一并提交，勿提前）**
   - 壳尾项：B2-05 十字线数据窗（stretch）；B3-02 网格/坐标轴设置；B2-06 轴菜单
     （stretch）；测试文件类型债专项（root type-check 基线 52 存量）
   - 上游 main 快进包含 #174 后：nexus/main 常规同步（预期零冲突）

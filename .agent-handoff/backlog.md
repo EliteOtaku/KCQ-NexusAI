@@ -7,8 +7,8 @@
 - [x] 连接器 GitHub 建仓并推送（2026-09-15，https://github.com/EliteOtaku/KCQ-MT5-connector，PUBLIC，main 已推）；`pnpm setup` 克隆链路已可用
 - [ ] 用户测试通过后再议：MT5 相关 core 改动是否回传上游 PR
 - [ ] 上游 main 快进包含 #174 后：nexus/main 常规同步（预期无内容冲突，历史已共享）
-- [ ] 引擎指标寻址归一（[pr] 候选，2026-09-14 发现）：removeIndicator/updateIndicatorParams 不接受 addIndicator 返回的 'main:*' 实例 id，只按 displayName 寻址——壳侧已按 definitionId 绕开，引擎层应兼容双寻址
-- [ ] 引擎补 scrollToDataIndex 公开 API（对象树滚动定位用；cloudtradeagent 简报误引为已有）
+- [ ] 引擎指标寻址归一（[pr] 候选，2026-09-14 发现）：removeIndicator/updateIndicatorParams 不接受 addIndicator 返回的 'main:*' 实例 id，只按 displayName 寻址——壳侧已按 definitionId 绕开，引擎层应兼容双寻址（09-16 拍板：随 MT5 后大礼包一并提交）
+- [ ] 引擎补 scrollToDataIndex 公开 API（对象树滚动定位用；cloudtradeagent 简报误引为已有；09-16 拍板随大礼包一并提交）
 - [ ] 整线拖拽吸附（2026-09-14 登记，编辑路径磁吸后续）：水平线/垂直线整线拖拽时价格/时间吸附——delta→snap 语义需先定义（吸到指针所在 Bar 的 OHLC？），且需查证 TV 实际行为；另立 [pr]
 - [ ] 测试文件类型债专项：root type-check 剩余 52 错（基线存量，stateComposer.test 36 + 零星），建议独立 [pr] 分支清理
 - [ ] B2-05 十字线数据窗（stretch，未做）

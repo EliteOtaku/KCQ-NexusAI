@@ -127,3 +127,23 @@
   agent 面板；壳尾项单列。
 - 交接文档由消费方主线按 /agent-handoff 刷新并入库（本 commit）；fork 开发转向
   「真机验证 + PR 整理 + 配合业务搬家」阶段。
+
+## 2026-09-15（第五会话·数据源管理统一化：MT5 收编进聚合源管理）
+
+- Objective: 用户建议——MT5 接口和设置放进"聚合源管理"统一管理（用户提供了 Vue 图表设置/聚合源管理截图）
+- 查证结论: 聚合源管理（Vue AggregationSourceDialog + useAggregationSources）完全注册表驱动（marketDataProviderRegistry.getAll()）——MT5 已注册，自动出现在列表（用户截图系 merge 前旧代码）；Vue demo 选品种链路（toSymbolSpec → source: item.sourceId → setSymbols fetcher 管线）对 MT5 全链可用，零改动
+- nexus-shell 统一化（主工作量）:
+  - 新增 SourceManagerDialog（React 版聚合源管理）：registry 驱动列全部源（mock 沉底）、并发拨测（5s 超时 + 地址变更防抖重拨）、聚合搜索开关（setConfig enabled）、地址与端口折叠编辑（setConfig baseUrl，与默认同则清覆盖）、"设为当前"（probe 门控，成功自动关框）；当前源高亮描边
+  - SettingsDialog "数据源"段改为 当前源展示 + "管理数据源"入口（子对话框叠加）
+  - NexusShellContext：ShellDataSource 泛化为 string（'mock' 或任意 sourceId）；selectDataSource 改 registry.get(next).probe() 通用门控；mt5Instrument → sourceInstrument；storage 键 recent-mt5-instruments → recent-source-instruments；数据接线 effect 泛化（非 mock 且有品种 → setSymbols(source=dataSource)），SSE live 仍仅 mt5
+  - SymbolPicker：isMt5 → isNetworkSource，搜索限定当前源（sourceIds=[dataSource]）
+- 连接器/Vue 补强: 连接器 probe 正常态 message 填对齐摘要（「对齐 Europe/Athens · 偏移 +3h（实测/配置/默认）」，离线时为诊断原因）；Vue useAggregationSources.probeAggregationResult 透传 message、AggregationSourceDialog 状态行拼接展示（在线=对齐摘要、离线=原因截断 40 字）——通用机制，其他源 message 为空无影响
+- 验证: nexus-shell typecheck 绿；root type-check 52=基线（先重建主工作区 core dist）；probe-mt5 更新为管理对话框路径 10/10；三探针 39/15/49；连接器 pytest 34/34
+- 未提交：等待用户确认后 commit/push（本轮改动在主工作区工作树）
+
+## 2026-09-18（端口混乱排查：MT5 不可见根因与端口约定）
+
+- 现象: 用户访问 5173/?view=kcq 强制刷新后仍看不到 MT5
+- 根因: 5173 被 **KCQ preview 旧 dev 进程**（merge 前启动）占用——用户访问 5173 的任意 query（含 ?view=kcq）都命中该旧进程服务的 preview 首页（旧模块缓存），MT5 不可见；cloudtradeagent WebUI 的 vite 写死 port 5173，后启动只能挪走。webui 前端实际没有 view=kcq 视图（App.tsx 只认 view=options）
+- 处置: 杀旧进程；preview/vite.config.ts 固定 server.port=5175 + strictPort（5173 还给 WebUI）；5175 实测聚合源列表 = BaoStock/FinShare/GOTDX/TradingView/MT5 (Exness)/Mock ✓（连接器未跑时 MT5 显示"离线·原因"）
+- 端口约定: **5173=cloudtradeagent WebUI / 5175=KCQ Vue preview（strictPort）/ 5273=nexus-shell / 8090=MT5-Connecter**

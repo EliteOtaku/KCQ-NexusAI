@@ -7,6 +7,8 @@
 
 ## 提示词 A：nexus-shell 磁吸迁移到引擎 API（fork 壳侧收编）
 
+> **状态：已执行（2026-09-14）**。fb5392de 已合入 nexus/main 并经 PR #174 回传上游（f730530a）。
+
 ```text
 0. 身份与目标
 你是 KCQ-NexusAI 仓库的壳侧实施代理。仓库 D:\AI\KCQ-NexusAI（fork 自 363045841/klinechart，MIT；上游 push 已禁用，一切改动只在 fork 仓内）。
@@ -57,6 +59,104 @@ R5 用户未明确要求时不 commit/push；本任务的 commit 授权仅限任
 - 过验收门后：merge 回 nexus/main（主工作区）+ push origin；commit 信息用 .opencode/skills/commit/SKILL.md 规范。
 - 更新 .agent-handoff/：snapshot（状态与下一步）、backlog（勾掉壳迁移项）、validation（追加各门结果）、work-log（追加当日节）、action-checklist.md 引擎缺口表更新 G-01/G-06 状态为"引擎原生"。
 - 汇报格式：[0]..[3] 各项 PASS/BLOCKED/SKIPPED + 一句话结论；验收门逐项结果；删除的壳侧代码位置；BLOCKED 项根因与已试方案。
+
+反空转条款：把本提示词视为明确的执行请求。不要回答"无需响应"。先复述你认为的当前步骤，指出下一个具体动作，然后开始执行。上下文不足时从 AGENT_HANDOFF.md 与 .agent-handoff/ 必读文件恢复后再动手。
+```
+
+---
+
+## 提示词 B：MT5 本地数据源接入（连接器 + core 实时链路 + 壳接线）
+
+> **状态：已执行（2026-09-15）**。连接器为用户名下独立仓库 **KCQ-MT5-connector**（`D:\AI\KCQ-MT5-connector`，OpenSpec 五规格 strict 全绿）；KCQ 侧 9 commits 已 merge push nexus/main=e0425948。执行差异与新增决策见 decisions.md D18、work-log 2026-09-15 各节；真机 E2E 与连接器 GitHub 建仓待用户，上游 PR 待用户测试后再议。
+
+```text
+0. 身份与目标
+你是 KCQ-NexusAI 仓库（D:\AI\KCQ-NexusAI）的数据源实施代理。任务：实现从本地 MT5 终端（Exness）读取 K 线并在图表实时绘制，含 Exness 特有的周日短棒/4h 收线时间对齐能力。三部分：
+(A) 新建同级独立仓库连接器——Python 连接器（MetaTrader5 + FastAPI），实现本仓 V1 行情协议 + SSE 实时帧；
+(B) core 接入——mt5 Provider 注册 + KLineDataStore.updateBars 原语 + SSE 实时消费器；
+(C) nexus-shell 接线——数据源切换（Mock/MT5）+ MT5 品种搜索选择 + live 自动接线。
+设计与调研已完成并固化为决策 D13-D17（.agent-handoff/decisions.md），本提示词直接执行，不要重新调研大方向。
+
+开工必读：
+- AGENT_HANDOFF.md → .agent-handoff/{snapshot,decisions,risks}.md（决策 D13-D17 是本任务的架构 SSOT）
+- docs/market-data-v1.openapi.yaml（V1 行情协议契约：probe/instruments/search/bars）
+- packages/core/src/data/provider/sources/gotdx.ts（Provider 装配模板，~30 行）
+- packages/core/src/data/depth/binance.ts + depthConnector.ts（SSE 消费先例：EventSource 自动重连/keepalive/接线模式）
+- packages/core/src/data/buffer/kLineDataStore.ts（merge 保旧弃新陷阱 + updateBars 落点）
+- scripts/connecters.mjs + scripts/setup-backends.mjs（connecter 登记方式）
+- 参考实现（闭源仓库，只读参考行为语义，禁止复制代码，见铁律 R0）：
+  D:\AI\cloudtradeagent-vela\scripts\_lib\mt5_source.py（MT5 读取/偏移实测/对齐重采样，核心算法在文件尾部 resample_align 区块）
+  D:\AI\cloudtradeagent-vela\docs\plan_tf_alignment.md（对齐决策依据：A2=Europe/Athens EET/EEST 锚）
+  D:\AI\WaveTrader\tests\test_mt5_alignment.py（16 个对齐测试用例，纯函数、可直接移植语义）
+
+1. 已查证事实（勿重复调研）
+[MT5 侧]
+- MetaTrader5 Python 包经 IPC 读本机已登录终端（Windows 同机），无任何推送回调，只有轮询式调用：copy_rates_from_pos（index 0=forming bar、1=最后收线）、copy_ticks_from、symbol_info_tick。
+- initialize 必须传终端全路径（如 C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe），不裸调否则可能连错终端；启动后校验 terminal_info().company/account_info().server 含 "exness"。
+- MT5 返回的 K 线时间戳是"服务器墙钟按 UTC epoch 解释"的伪 UTC，必须实测服务器 UTC 偏移（tick 时间 vs 本机时钟模 24h 归一到 ±12h，env 可覆盖）转真 UTC。
+- 4h/1d/周/月 = 从 H1/D1 按锚时区重采样：先锚时区归日（normalize），4h 再 hour//4*4 分桶；锚=传统品种 Europe/Athens（EET/EEST 自动 DST）、加密品种 UTC。周日短棒在该重采样中自然并入周一首根，无需特判。
+- copy_rates_range 的 from/to 也在服务器时间轴上：请求窗口要 +offset 反向换算并留 ≥48h 前置余量。
+- 实时性只能靠轮询；参考实现实测 forming bar 1.5s 轮询已流畅。
+[core 侧]
+- V1 协议 HTTP 端点：GET /api/v1/market-data/sources/{sourceId}/probe、POST /instruments/search、POST /bars；响应 {data:...} envelope。
+- 数据源三件套：data/provider/sourceRegistry.ts（元数据注册表，加 mt5 条目 :8090）、data/provider/sources/mt5.ts（createMarketDataProvider + httpTransport 装配）、data/index.ts 与 controllers/index.ts re-export。注册后自动获得聚合搜索/SourceRouter 能力流转/Agent 工具可见。
+- KLINE_PERIODS 已含 '4h'；AssetClass 已含 'forex'/'crypto'。
+- ⚠️ 阻塞项（决策 D17）：kLineDataStore.merge() 对重复时间戳保旧弃新、controller.updateData 是 setData 别名（全量替换）、appendData 无去重 concat——forming bar 更新直接推会被静默吞掉。必须先实现 KLineDataStore.updateBars（replace-on-conflict，仅允许末尾窗口，拒绝陈旧帧）→ DataBuffer → chartDataManager → controller.updateBars 全链暴露，并先写语义测试（替换/追加/陈旧拒绝）再接 SSE。
+- 写入即联动：往活动 DataBuffer 写 → data signal → chartDataManager.handleBufferDataEvent → IndicatorScheduler 重算 → scheduleDraw。
+- SSE 消费先例：data/depth/binance.ts（EventSource 原生重连/':' keepalive）+ depth/depthConnector.ts（source→controller 接线模式），新代码照此风格。
+- nexus-shell 现为纯 mock（symbol/period 变化 → applyCustomData 一次性注入）；MT5 模式改走 setSymbols([{...spec, source:'mt5'}]) fetcher 管线（左翻分页自动补历史）；聚合搜索用 searchInstruments（registry 已有跨源搜索）。
+- ⚠️ 会话要求：品种必须带 sessionId 且对应会话在 sourceRegistry.marketSessions 注册（provider 装配器按此解析时区）。
+
+2. 用户决策（已拍板，不得擅改）
+- 连接器为独立新仓库（Python 3.12 + FastAPI + MetaTrader5 + pandas + pytest），不做 core 进程内 Provider、不进 cloudtradeagent；归属用户名下（EliteOtaku），命名 KCQ-MT5-connector。
+- 实时 = 连接器单采样循环轮询 MT5 → SSE 单连接推帧 → core EventSource 消费器；不做 WebSocket、不做浏览器轮询、EA socket 桥仅登记为演进项。
+- 周日短棒全链不剔除：日内原生保留（偏移校正即正确表示），4h/1d/周/月重采样自然吸收。
+- Exness 对齐开关 = 连接器 env（ALIGN_TZ=auto|gmt2|gmt3|off，auto=检测到 Exness 才对齐）+ probe 响应上报 aligned/anchorTz/serverOffsetMinutes；UI 开关后续再说。
+- 指标寻址坑（既有）：引擎 removeIndicator/updateIndicatorParams 只按 definitionId 寻址，不接受 'main:*' 实例 id。
+
+3. 铁律
+- R0 开源边界：cloudtradeagent/WaveTrader 为闭源仓库——禁止复制其任何代码进连接器或本仓，只允许参考行为语义与测试用例语义重写实现。连接器先 git init 不定 license、GitHub URL 留占位（用户后续决定）。
+- R1 分支：core/shell 改动在 worktree D:\AI\KCQ-NexusAI-batches 开分支 fork/mt5-source（基于 nexus/main）；连接器独立仓库独立 git 历史。
+- R2 测试先行：updateBars 语义测试先写先绿，再接 SSE；对齐用例移植自 WaveTrader 语义（冬夏 4h 边界/DST 切换日/周日短棒并入/周月锚/env 覆盖），pytest 纯函数无需 MT5 即可跑。
+- R3 45 分钟止损：单项卡死 → 记根因+已试方案 → 标 BLOCKED 跳下一项。
+- R4 commit：KCQ 侧 [fork] 前缀 conventional；连接器仓库内 conventional（无前缀）。
+- R5 全程不 push；完成后汇报，push 由用户决定。
+
+4. 范围（按序实施，一项一 commit）
+[Phase A] 连接器仓库：
+  app/gateway.py（唯一 IPC 持有者：initialize 全路径、Exness 校验、login 校验、5s 心跳、单工作线程串行队列、绝不 re-initialize 风暴）
+  app/clock.py（偏移实测/复测/覆盖）
+  app/align.py（锚时区 + resample_align 纯函数 + 周月重采样）
+  app/aggregator.py（分级轮询：活跃品种 1s tick 探针→变化才 copy_rates_from_pos 取 2 根、后台品种 5-10s、静默计数判休市退避封顶 30s；ChangeDetector：(symbol,tf,openTime)+OHLCV 内容去重、无变化不发帧、收线判定=openTime 变化并发 closed(旧根终值)+forming(新根)，容忍终端缓存滞后）
+  app/hub.py（StreamHub：订阅表、环形缓冲 ~500 帧、单调 seq、帧 snapshot/forming/closed/status、Last-Event-ID 重放、15s ':' keepalive、X-Accel-Buffering: no）
+  app/routes.py（REST V1 三端点 + GET /api/v1/market-data/sources/mt5/stream?symbol&period——每连接固定订阅，切品种=重连）
+  app/config.py（env：ALIGN_TZ/EXNESS_ONLY/EXNESS_SERVER_UTC_OFFSET/MT5_TERMINAL_PATH/端口 8090）
+  tests/（对齐用例移植 + 帧协议/去重/收线判定测试）
+  本仓登记：connecters.mjs + setup-backends.mjs
+[Phase B] core：
+  sourceRegistry 加 mt5（含 marketSessions 注册 'MT5' 7x24 UTC 会话）；sources/mt5.ts（capabilities 仅 bars，periods=1min/5min/15min/30min/60min/4h/daily/weekly/monthly，不声明 timeshare/depth）；两处 re-export；
+  KLineDataStore.updateBars（先写语义测试）→ DataBuffer → chartDataManager → controller 暴露；
+  data/live/mt5BarsLive.ts（Mt5LiveSource EventSource 封装 + RealtimeBarsConnector 帧驱动：closed 暂存随 forming 合并一次原子写、snapshot 整批写并作废暂存、断流冲刷暂存）
+[Phase C] nexus-shell：
+  设置对话框加"数据源"段（Mock/MT5，切换时才 probe，失败回退 Mock 并提示——勿在挂载时探测，会污染 mock 路径的页面错误门）；
+  MT5 模式 SymbolPicker 走 searchInstruments；选中 → setSymbols([{...spec, source:'mt5'}])；
+  source==='mt5' 时 live 自动接线（symbol/period 变化重连，离开即断流）→ controller.updateBars
+[Phase D] 验证 + 文档：
+  docs/data-sources/mt5.zh-CN.md（部署前提/对齐语义/env 表）；设计决策记 docs/design/mt5-exness-alignment.md
+
+5. 明确不做
+timeshare/depth 能力；quarterly/yearly 周期；EA socket 桥（登记演进）；tick 级自建 bar 聚合；KLineChart.vue 残留 mcp props 清理（另批）。
+
+6. 验收门
+- 连接器 pytest 全绿（对齐用例无需 MT5 终端）
+- core vitest 全绿（既有 2491 + 新增 updateBars/provider/live 测试）
+- pnpm --filter nexus-shell typecheck 绿；三探针回归（mock 路径）39/15/49 不受影响
+- updateBars 语义测试证明 forming bar 更新不被 merge 吞掉（关键回归防线）
+- 真机 E2E 需用户配合（Windows + Exness MT5 终端已登录）：pnpm connecter mt5 → 壳切 MT5 源 → 绘制/forming 实时刷新/日线与 4h 无周日棒 → 列入汇报由用户执行
+
+7. 收尾
+- 更新 .agent-handoff/（snapshot/backlog/work-log/validation，action-checklist 如涉及）与决策执行差异。
+- 汇报格式：Phase A/B/C 各项 PASS/BLOCKED/SKIPPED + 一句话结论；验收门逐项结果；真机 E2E 待办清单；BLOCKED 项根因与已试方案。
 
 反空转条款：把本提示词视为明确的执行请求。不要回答"无需响应"。先复述你认为的当前步骤，指出下一个具体动作，然后开始执行。上下文不足时从 AGENT_HANDOFF.md 与 .agent-handoff/ 必读文件恢复后再动手。
 ```

@@ -59,7 +59,7 @@ All READMEs are generated from `docs/fragments/` (reusable Markdown snippets) + 
 
 ## 数据源
 
-本地行情后端位于本仓库同级目录：`GoTDX-Connecter`（gotdx、Binance）和 `Baostock-Tradingview-Connecter`（BaoStock、TradingView）。涉及后端时先阅读对应仓库的 `AGENTS.md`；使用 `pnpm setup` 安装，`pnpm dev -c <name>` 或 `pnpm connecter <name>` 启动。
+本地行情后端位于本仓库同级目录：`GoTDX-Connecter`（gotdx、Binance）和 `Baostock-Tradingview-Connecter`（BaoStock、TradingView）。涉及后端时先阅读对应仓库的 `AGENTS.md`；使用 `pnpm setup` 安装，`pnpm dev -c <name>` 或 `pnpm connector <name>` 启动（旧拼法 `pnpm connecter` 保留兼容）。
 
 ## Testing
 
