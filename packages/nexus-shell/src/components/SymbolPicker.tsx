@@ -1,6 +1,6 @@
 // 顶栏品种搜索器：下拉 + 关键字过滤 + 最近使用。
 // mock 模式接本地品种目录（nexus.shell.recent-symbols）；
-// mt5 模式经 searchInstruments 跨源搜索（nexus.shell.recent-mt5-instruments 存品种描述）。
+// 网络源模式经 searchInstruments 限定当前源搜索（nexus.shell.recent-source-instruments 存品种描述）。
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { InstrumentDescriptor } from '@363045841yyt/klinechart-core/controllers'
@@ -16,11 +16,11 @@ import { SHELL_LABELS } from '../shell/labels'
 /** 最近使用上限。 */
 const RECENT_LIMIT = 8
 
-/** MT5 搜索防抖间隔（毫秒）。 */
-const MT5_SEARCH_DEBOUNCE_MS = 200
+/** 网络源搜索防抖间隔（毫秒）。 */
+const NETWORK_SEARCH_DEBOUNCE_MS = 200
 
-/** MT5 单次搜索返回上限。 */
-const MT5_SEARCH_LIMIT = 20
+/** 网络源单次搜索返回上限。 */
+const NETWORK_SEARCH_LIMIT = 20
 
 /** 记录最近使用的 mock 品种（去重置顶，超限截断）。 */
 function pushRecent(symbol: string): void {
@@ -36,12 +36,12 @@ export function SymbolPicker() {
   const [query, setQuery] = useState('')
   const rootRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
-  // mt5 异步搜索状态
-  const [mt5Results, setMt5Results] = useState<ReadonlyArray<InstrumentDescriptor>>([])
-  const [mt5Searching, setMt5Searching] = useState(false)
-  const [mt5Error, setMt5Error] = useState(false)
+  // 网络源异步搜索状态
+  const [networkResults, setNetworkResults] = useState<ReadonlyArray<InstrumentDescriptor>>([])
+  const [networkSearching, setNetworkSearching] = useState(false)
+  const [networkError, setNetworkError] = useState(false)
 
-  const isMt5 = shell.dataSource === 'mt5'
+  const isNetworkSource = shell.dataSource !== 'mock'
 
   // 点击外部关闭（捕获阶段）。
   useEffect(() => {
@@ -71,45 +71,45 @@ export function SymbolPicker() {
     if (request !== null) setOpen(true)
   }, [request])
 
-  // mt5 模式：防抖跨源搜索（限定 mt5 源），晚到的结果按请求序号丢弃。
+  // 网络源模式：防抖搜索（限定当前源），晚到的结果按请求序号丢弃。
   const searchSeq = useRef(0)
   useEffect(() => {
-    if (!open || !isMt5) return
+    if (!open || !isNetworkSource) return
     const keyword = query.trim()
     const seq = ++searchSeq.current
     if (keyword === '') {
-      setMt5Results([])
-      setMt5Searching(false)
-      setMt5Error(false)
+      setNetworkResults([])
+      setNetworkSearching(false)
+      setNetworkError(false)
       return
     }
-    setMt5Searching(true)
-    setMt5Error(false)
+    setNetworkSearching(true)
+    setNetworkError(false)
     const controller = new AbortController()
     const timer = window.setTimeout(() => {
       void searchInstruments(marketDataProviderRegistry, {
         keyword,
-        limit: MT5_SEARCH_LIMIT,
-        sourceIds: ['mt5'],
+        limit: NETWORK_SEARCH_LIMIT,
+        sourceIds: [shell.dataSource],
         signal: controller.signal,
       })
         .then((items) => {
           if (seq !== searchSeq.current) return
-          setMt5Results(items)
-          setMt5Searching(false)
+          setNetworkResults(items)
+          setNetworkSearching(false)
         })
         .catch(() => {
           if (seq !== searchSeq.current) return
-          setMt5Results([])
-          setMt5Searching(false)
-          setMt5Error(true)
+          setNetworkResults([])
+          setNetworkSearching(false)
+          setNetworkError(true)
         })
-    }, MT5_SEARCH_DEBOUNCE_MS)
+    }, NETWORK_SEARCH_DEBOUNCE_MS)
     return () => {
       window.clearTimeout(timer)
       controller.abort()
     }
-  }, [open, isMt5, query])
+  }, [open, isNetworkSource, shell.dataSource, query])
 
   /** 关闭并消费唤起请求（避免下次手动打开残留关键字）。 */
   function closePicker() {
@@ -127,10 +127,10 @@ export function SymbolPicker() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, shell.symbol])
 
-  const mt5Recents = useMemo(
-    () => readJson<ReadonlyArray<InstrumentDescriptor>>(STORAGE_KEYS.recentMt5Instruments, []),
+  const networkRecents = useMemo(
+    () => readJson<ReadonlyArray<InstrumentDescriptor>>(STORAGE_KEYS.recentSourceInstruments, []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [open, shell.mt5Instrument],
+    [open, shell.sourceInstrument],
   )
 
   const keyword = query.trim().toLowerCase()
@@ -148,9 +148,9 @@ export function SymbolPicker() {
     closePicker()
   }
 
-  /** 选中 MT5 品种：切换品种描述（上下文负责接线与最近使用记录）。 */
-  function selectMt5(instrument: InstrumentDescriptor) {
-    shell.setMt5Instrument(instrument)
+  /** 选中网络源品种：切换品种描述（上下文负责接线与最近使用记录）。 */
+  function selectNetwork(instrument: InstrumentDescriptor) {
+    shell.setSourceInstrument(instrument)
     closePicker()
   }
 
@@ -169,14 +169,14 @@ export function SymbolPicker() {
     )
   }
 
-  function renderMt5Row(instrument: InstrumentDescriptor) {
+  function renderNetworkRow(instrument: InstrumentDescriptor) {
     const active = instrument.symbol === shell.symbol
     return (
       <button
         key={instrument.id}
         type="button"
         className={`nx-symbol-option${active ? ' nx-symbol-option--active' : ''}`}
-        onClick={() => selectMt5(instrument)}
+        onClick={() => selectNetwork(instrument)}
       >
         <span className="nx-symbol-option__code">{instrument.symbol}</span>
         <span className="nx-symbol-option__name">{instrument.name}</span>
@@ -184,24 +184,24 @@ export function SymbolPicker() {
     )
   }
 
-  /** mt5 结果区（搜索中/失败/空态/结果）。 */
-  function renderMt5List() {
-    if (mt5Searching) {
+  /** 网络源结果区（搜索中/失败/空态/结果）。 */
+  function renderNetworkList() {
+    if (networkSearching) {
       return <div className="nx-symbol-picker__empty">{SHELL_LABELS.symbolSearchLoading}</div>
     }
-    if (mt5Error) {
+    if (networkError) {
       return <div className="nx-symbol-picker__empty">{SHELL_LABELS.symbolSearchFailed}</div>
     }
     if (keyword === '') {
       return null // 空关键字只展示最近使用
     }
-    if (mt5Results.length === 0) {
+    if (networkResults.length === 0) {
       return <div className="nx-symbol-picker__empty">{SHELL_LABELS.symbolNoResults}</div>
     }
-    return mt5Results.map(renderMt5Row)
+    return networkResults.map(renderNetworkRow)
   }
 
-  const recents = isMt5 ? mt5Recents : mockRecents
+  const recents = isNetworkSource ? networkRecents : mockRecents
   const hasRecents = recents.length > 0 && keyword === ''
 
   return (
@@ -214,7 +214,7 @@ export function SymbolPicker() {
       >
         <span className="nx-symbol-picker__code">{shell.symbol}</span>
         <span className="nx-symbol-picker__name">
-          {isMt5 ? (shell.mt5Instrument?.name ?? '') : (current?.name ?? '')}
+          {isNetworkSource ? (shell.sourceInstrument?.name ?? '') : (current?.name ?? '')}
         </span>
       </button>
 
@@ -230,9 +230,9 @@ export function SymbolPicker() {
             onKeyDown={(event) => {
               if (event.key === 'Escape') closePicker()
               if (event.key === 'Enter') {
-                if (isMt5) {
-                  const first = mt5Results[0]
-                  if (first) selectMt5(first)
+                if (isNetworkSource) {
+                  const first = networkResults[0]
+                  if (first) selectNetwork(first)
                 } else if (matched.length > 0) {
                   selectMock(matched[0]!.symbol)
                 }
@@ -242,8 +242,8 @@ export function SymbolPicker() {
           {hasRecents && (
             <>
               <div className="nx-symbol-picker__group">{SHELL_LABELS.symbolRecentGroup}</div>
-              {isMt5
-                ? mt5Recents.map(renderMt5Row)
+              {isNetworkSource
+                ? networkRecents.map(renderNetworkRow)
                 : mockRecents.map((symbol) =>
                     renderMockRow(
                       symbol,
@@ -253,8 +253,8 @@ export function SymbolPicker() {
             </>
           )}
           <div className="nx-symbol-picker__group">{SHELL_LABELS.symbolAllGroup}</div>
-          {isMt5 ? (
-            renderMt5List()
+          {isNetworkSource ? (
+            renderNetworkList()
           ) : matched.length === 0 ? (
             <div className="nx-symbol-picker__empty">{SHELL_LABELS.symbolNoResults}</div>
           ) : (

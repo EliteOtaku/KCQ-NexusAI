@@ -1038,6 +1038,152 @@ body {
   margin: -4px 0 8px;
 }
 
+/* ── 设置内当前源行 + 数据源管理子对话框 ── */
+.nx-settings__source {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.nx-settings__source-name {
+  color: var(--nx-text-primary);
+  font-size: 13px;
+}
+
+.nx-settings__manage-btn {
+  font-size: 12px;
+}
+
+.nx-dialog--nested {
+  z-index: 20;
+}
+
+.nx-source-manager .nx-source-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.nx-source-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+}
+
+.nx-source-item--current {
+  border-color: var(--nx-accent);
+}
+
+.nx-source-item__main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.nx-source-item__info {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.nx-source-item__name {
+  color: var(--nx-text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.nx-source-item__description {
+  color: var(--nx-text-secondary);
+  font-size: 11px;
+}
+
+.nx-source-item__status {
+  font-size: 11px;
+  color: var(--nx-text-secondary);
+}
+
+.nx-source-item__status.is-online {
+  color: #16865c;
+}
+
+.nx-source-item__status.is-offline {
+  color: #d64545;
+}
+
+.nx-source-item__use {
+  flex: 0 0 auto;
+  font-size: 12px;
+}
+
+.nx-source-item__endpoint-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--nx-text-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.nx-source-item__endpoint-toggle:hover {
+  background: var(--nx-bg);
+}
+
+.nx-source-endpoint {
+  display: flex;
+  gap: 8px;
+  padding: 4px 8px 8px;
+}
+
+.nx-source-endpoint__field {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nx-source-endpoint__field--port {
+  flex: 0 0 88px;
+}
+
+.nx-source-endpoint__field span {
+  color: var(--nx-text-secondary);
+  font-size: 11px;
+}
+
+.nx-source-endpoint__field input {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--nx-border);
+  border-radius: 4px;
+  background: var(--nx-bg);
+  color: var(--nx-text-primary);
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+
+.nx-source-item__toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--nx-text-secondary);
+  font-size: 11px;
+}
+
 /* ── 右栏分区折叠（B4-05 面板开关） ── */
 .nx-side-panel__title-btn {
   display: flex;

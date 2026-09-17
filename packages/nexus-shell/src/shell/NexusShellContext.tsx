@@ -16,7 +16,11 @@ import type {
   DrawingToolId,
   InstrumentDescriptor,
 } from '@363045841yyt/klinechart-core/controllers'
-import { Mt5LiveSource, RealtimeBarsConnector, mt5MarketDataProvider } from '@363045841yyt/klinechart-core/controllers'
+import {
+  marketDataProviderRegistry,
+  Mt5LiveSource,
+  RealtimeBarsConnector,
+} from '@363045841yyt/klinechart-core/controllers'
 import type { DrawingObject, DrawingStyle } from '@363045841yyt/klinechart-core/plugin'
 import { buildMockBundle, MOCK_SYMBOLS } from './mockData'
 import { ALL_PERIODS } from './periods'
@@ -37,8 +41,8 @@ interface ShellPrefs {
 
 const DEFAULT_PREFS: ShellPrefs = { magnet: 'off', stay: false, autoApply: true, groupLastTool: {} }
 
-/** 壳支持的数据源：mock（本地生成）| mt5（本机 Exness 终端连接器）。 */
-export type ShellDataSource = 'mock' | 'mt5'
+/** 壳当前数据源：'mock' 为本地生成；其余为行情注册表中的 sourceId（如 'mt5'/'gotdx'）。 */
+export type ShellDataSource = string
 
 /** 空图元数组兜底（稳定引用）。 */
 const EMPTY_DRAWINGS: ReadonlyArray<DrawingObject> = []
@@ -63,10 +67,10 @@ export interface NexusShellValue {
   theme: 'light' | 'dark'
   symbol: string
   period: string
-  /** 当前数据源（mock/mt5）。 */
+  /** 当前数据源（'mock' 或注册表 sourceId）。 */
   dataSource: ShellDataSource
-  /** MT5 模式当前选中品种描述。 */
-  mt5Instrument: InstrumentDescriptor | null
+  /** 网络源模式下当前选中品种描述；mock 模式为 null。 */
+  sourceInstrument: InstrumentDescriptor | null
   /** 模板库版本号（保存/删除后自增，消费方据此重拉清单）。 */
   templateVersion: number
 
@@ -93,10 +97,10 @@ export interface NexusShellValue {
   toggleTheme(): void
   setSymbol(symbol: string): void
   setPeriod(period: string): void
-  /** 切换数据源：切 MT5 前 probe 可达性，不可达返回 false 并保持现状。 */
+  /** 切换当前数据源：网络源先 probe 可达性，不可达返回 false 并保持现状。 */
   selectDataSource(next: ShellDataSource): Promise<boolean>
-  /** 选择 MT5 品种：更新图表品种并记录最近使用。 */
-  setMt5Instrument(instrument: InstrumentDescriptor): void
+  /** 选择网络源品种：更新图表品种、显示 symbol 并记录最近使用。 */
+  setSourceInstrument(instrument: InstrumentDescriptor): void
 
   /** 键盘唤起品种搜索的请求（nonce 递增，重复字母也触发重开）。 */
   symbolPickerRequest: { query: string; nonce: number } | null
@@ -134,12 +138,13 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
   const [templateVersion, setTemplateVersion] = useState(0)
   const [symbol, setSymbol] = useState(MOCK_SYMBOLS[0]!.symbol)
   const [period, setPeriod] = useState('daily')
-  // 数据源与 MT5 品种：dataSource 持久化；mt5 品种自最近使用列表恢复。
+  // 数据源与网络源品种：dataSource 持久化；品种自最近使用列表恢复。
   const [dataSource, setDataSource] = useState<ShellDataSource>(() =>
     readJson<ShellDataSource>(STORAGE_KEYS.dataSource, 'mock'),
   )
-  const [mt5Instrument, setMt5InstrumentState] = useState<InstrumentDescriptor | null>(() =>
-    readJson<ReadonlyArray<InstrumentDescriptor>>(STORAGE_KEYS.recentMt5Instruments, [])[0] ?? null,
+  const [sourceInstrument, setSourceInstrumentState] = useState<InstrumentDescriptor | null>(() =>
+    readJson<ReadonlyArray<InstrumentDescriptor>>(STORAGE_KEYS.recentSourceInstruments, [])[0] ??
+      null,
   )
   // 键盘唤起品种搜索（B4-01）与快捷键表（B4-03）。
   const symbolPickerNonce = useRef(0)
@@ -401,40 +406,43 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
   }, [ctrl, setTheme, shellTheme])
 
   // ── 数据接线 ──
-  // mock：一次性注入本地生成数据；mt5：走 fetcher 管线（setSymbols，左翻自动补历史）。
-  // mt5 未选品种时先回落 mock 数据，避免空图。
+  // mock：一次性注入本地生成数据；网络源：走 fetcher 管线（setSymbols，左翻自动补历史）。
+  // 网络源未选品种时先回落 mock 数据，避免空图。
   useEffect(() => {
     if (!ctrl) return
-    if (dataSource === 'mt5' && mt5Instrument) {
+    if (dataSource !== 'mock' && sourceInstrument) {
       ctrl.setSymbols([
         {
-          id: mt5Instrument.id,
-          instrument: mt5Instrument,
-          symbol: mt5Instrument.symbol,
-          market: mt5Instrument.assetClass,
-          exchange: mt5Instrument.exchange,
+          id: sourceInstrument.id,
+          instrument: sourceInstrument,
+          symbol: sourceInstrument.symbol,
+          market: sourceInstrument.assetClass,
+          exchange: sourceInstrument.exchange,
           period,
-          source: 'mt5',
+          source: dataSource,
         },
       ])
       return
     }
     ctrl.applyCustomData(buildMockBundle(symbol, period))
-  }, [ctrl, dataSource, mt5Instrument, period, symbol])
+  }, [ctrl, dataSource, sourceInstrument, period, symbol])
 
   // MT5 实时接线：SSE 帧驱动 updateBars；品种/周期变化重连，离开 mt5 即断流。
+  // 其他网络源暂无实时帧通道，仅历史 K 线。
   useEffect(() => {
-    if (!ctrl || dataSource !== 'mt5' || !mt5Instrument) return
-    const source = new Mt5LiveSource(mt5Instrument.symbol, period)
+    if (!ctrl || dataSource !== 'mt5' || !sourceInstrument) return
+    const source = new Mt5LiveSource(sourceInstrument.symbol, period)
     const connector = new RealtimeBarsConnector(ctrl, source)
     connector.start()
     return () => connector.stop()
-  }, [ctrl, dataSource, mt5Instrument, period])
+  }, [ctrl, dataSource, sourceInstrument, period])
 
-  /** 切换数据源：切 MT5 前 probe 连接器可达性，不可达保持现状并返回 false。 */
+  /** 切换当前数据源：网络源先经注册表 probe 可达性，不可达保持现状并返回 false。 */
   const selectDataSource = useCallback(async (next: ShellDataSource): Promise<boolean> => {
-    if (next === 'mt5') {
-      const probe = await mt5MarketDataProvider.probe()
+    if (next !== 'mock') {
+      const provider = marketDataProviderRegistry.get(next)
+      if (!provider) return false
+      const probe = await provider.probe()
       if (probe.status !== 'online') return false
     }
     setDataSource(next)
@@ -442,16 +450,16 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
     return true
   }, [])
 
-  /** 选择 MT5 品种：更新图表品种、显示 symbol 并置顶最近使用。 */
-  const setMt5Instrument = useCallback((instrument: InstrumentDescriptor) => {
-    setMt5InstrumentState(instrument)
+  /** 选择网络源品种：更新图表品种、显示 symbol 并置顶最近使用。 */
+  const setSourceInstrument = useCallback((instrument: InstrumentDescriptor) => {
+    setSourceInstrumentState(instrument)
     setSymbol(instrument.symbol)
     const recents = readJson<ReadonlyArray<InstrumentDescriptor>>(
-      STORAGE_KEYS.recentMt5Instruments,
+      STORAGE_KEYS.recentSourceInstruments,
       [],
     )
     writeJson(
-      STORAGE_KEYS.recentMt5Instruments,
+      STORAGE_KEYS.recentSourceInstruments,
       [instrument, ...recents.filter((item) => item.id !== instrument.id)].slice(0, 8),
     )
   }, [])
@@ -513,7 +521,7 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
         event.preventDefault()
         const direction = event.key === 'ArrowUp' ? 1 : -1
         const tick =
-          mt5Instrument?.tickSize ??
+          sourceInstrument?.tickSize ??
           MOCK_SYMBOLS.find((item) => item.symbol === symbol)?.tick ??
           0.01
         for (const drawing of ctrl.drawings.peek()) {
@@ -536,7 +544,7 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
     ctrl,
     deleteSelection,
     measureSession,
-    mt5Instrument,
+    sourceInstrument,
     period,
     requestSymbolPicker,
     selectTool,
@@ -562,7 +570,7 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
       symbol,
       period,
       dataSource,
-      mt5Instrument,
+      sourceInstrument,
       templateVersion,
       attachChart,
       detachChart,
@@ -587,7 +595,7 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
       setSymbol,
       setPeriod,
       selectDataSource,
-      setMt5Instrument,
+      setSourceInstrument,
       symbolPickerRequest,
       requestSymbolPicker,
       clearSymbolPickerRequest,
@@ -610,7 +618,7 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
       symbol,
       period,
       dataSource,
-      mt5Instrument,
+      sourceInstrument,
       templateVersion,
       attachChart,
       detachChart,
@@ -632,7 +640,7 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
       setTheme,
       toggleTheme,
       selectDataSource,
-      setMt5Instrument,
+      setSourceInstrument,
       symbolPickerRequest,
       requestSymbolPicker,
       clearSymbolPickerRequest,

@@ -48,14 +48,37 @@ async function main() {
   await page.reload({ waitUntil: 'domcontentloaded' })
   check('M-01：启动：dev 钩子就绪', await waitFor(page, () => nx(page, 'Boolean(window.__nx && window.__nx.ctrl)')))
 
-  // ── M-02：设置对话框切到 MT5（桩 probe 在线 → 切换成功并持久化） ──
+  // ── M-02：数据源管理切到 MT5（打开管理对话框 → 列表含 MT5 → 设为当前） ──
   await page.click('button[aria-label="设置"]')
   check('M-02：设置对话框弹出', await page.locator('.nx-dialog').isVisible())
-  await page.locator('.nx-settings__segment-btn', { hasText: 'MT5' }).click()
+  await page.locator('.nx-settings__manage-btn').click()
+  const managerVisible = await page.locator('.nx-source-manager').isVisible()
+  const mt5RowVisible = await page
+    .locator('.nx-source-item[data-source="mt5"]')
+    .isVisible()
+  check(
+    'M-02：数据源管理列出全部注册源（含 MT5）',
+    managerVisible && mt5RowVisible,
+    `manager=${managerVisible} mt5Row=${mt5RowVisible}`,
+  )
+  // 拨测应显示对齐摘要（桩 probe message 为空，但状态应为在线）
+  const mt5Online = await waitFor(
+    page,
+    async () =>
+      (
+        await page
+          .locator('.nx-source-item[data-source="mt5"] .nx-source-item__status')
+          .textContent()
+      )?.includes('在线') === true,
+    8000,
+  )
+  check('M-02：MT5 条目拨测在线', mt5Online)
+  await page.locator('.nx-source-item[data-source="mt5"] .nx-source-item__use').click()
   const switched = await waitFor(page, () =>
     page.evaluate(() => localStorage.getItem('nexus.shell.data-source') === '"mt5"'),
   )
-  check('M-02：切换 MT5 并持久化', switched)
+  check('M-02：设为当前并持久化', switched)
+  // 选源成功后管理对话框自动关闭，回到设置面板；关掉设置
   await page.locator('.nx-dialog__actions .nx-btn--primary').click()
 
   // ── M-03：SymbolPicker 跨源搜索（走 searchInstruments → 桩 search） ──
@@ -96,9 +119,10 @@ async function main() {
   const lastClose = await nx(page, 'window.__nx.ctrl.getData().at(-1).close')
   check('M-05：SSE forming 更新写入末根', formed, `lastClose=${lastClose}`)
 
-  // ── M-06：切回 Mock → SSE 断流（活跃连接归零） ──
+  // ── M-06：切回 Mock（走数据源管理）→ SSE 断流（活跃连接归零） ──
   await page.click('button[aria-label="设置"]')
-  await page.locator('.nx-settings__segment-btn', { hasText: 'Mock' }).click()
+  await page.locator('.nx-settings__manage-btn').click()
+  await page.locator('.nx-source-item[data-source="mock"] .nx-source-item__use').click()
   await page.locator('.nx-dialog__actions .nx-btn--primary').click()
   const streamClosed = await waitFor(page, () => stub.state.activeStreams === 0, 5000)
   const backToMock = await nx(page, 'window.__nx.ctrl.symbols.peek()[0].source')
