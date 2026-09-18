@@ -14,8 +14,8 @@
 
 import { describe, test } from 'vitest'
 
-import { createOrderBookState } from '../components/orderBookHeatmap/createOrderBookState'
-import type { OrderBookDelta } from '../components/orderBookHeatmap/types'
+import { createOrderBookState } from '../components/orderBookHeatmap/createOrderBookState.js'
+import type { OrderBookDelta } from '../components/orderBookHeatmap/types.js'
 
 const TICK = 0.01
 

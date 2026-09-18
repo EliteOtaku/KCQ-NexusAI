@@ -14,11 +14,11 @@ import type {
   DrawingSessionPort,
   DrawingViewportPort,
   PaneLayoutInfo,
-} from '../../../../controllers/types'
-import type { DrawingObject } from '../../../../foundation/plugin'
-import type { KLineData } from '../../../../foundation/types/price'
-import type { HitResult } from '../../HitTester'
-import type { DrawingToolId } from '../../toolConfig'
+} from '../../../../controllers/types.js'
+import type { DrawingObject } from '../../../../foundation/plugin/index.js'
+import type { KLineData } from '../../../../foundation/types/price.js'
+import type { HitResult } from '../../HitTester.js'
+import type { DrawingToolId } from '../../toolConfig.js'
 
 /** 测试图元默认描边色。 */
 export const TEST_STROKE = '#2962ff'

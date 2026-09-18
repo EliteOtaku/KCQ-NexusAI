@@ -9,7 +9,7 @@
 
 import { describe, test } from 'vitest'
 
-import { createSignal } from '../foundation/reactivity/signal'
+import { createSignal } from '../foundation/reactivity/signal.js'
 
 describe('signal.set + notify — subscriber scaling', () => {
   test('compares set + notify cost across subscriber counts', async ({ bench }) => {

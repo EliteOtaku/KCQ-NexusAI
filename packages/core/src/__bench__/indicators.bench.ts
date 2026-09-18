@@ -23,20 +23,20 @@
 import { describe, test } from 'vitest'
 
 // MA family (b-9)
-import { computeALMA } from '../features/indicators/alma'
+import { computeALMA } from '../features/indicators/alma.js'
 
 // Oscillator family (b-10)
-import { computeAwesomeOscillator } from '../features/indicators/awesomeOscillator'
-import { computeDPO } from '../features/indicators/dpo'
-import { computeFisherTransform } from '../features/indicators/fisherTransform'
-import { computeFRAMA } from '../features/indicators/frama'
-import { computeLSMA } from '../features/indicators/lsma'
-import { computeSchaffTrendCycle } from '../features/indicators/schaffTrendCycle'
-import { computeStochRSI } from '../features/indicators/stochRSI'
-import { computeT3 } from '../features/indicators/t3'
-import { computeUltimateOscillator } from '../features/indicators/ultimateOscillator'
-import { computeVIDYA } from '../features/indicators/vidya'
-import { computeZLEMA } from '../features/indicators/zlema'
+import { computeAwesomeOscillator } from '../features/indicators/awesomeOscillator.js'
+import { computeDPO } from '../features/indicators/dpo.js'
+import { computeFisherTransform } from '../features/indicators/fisherTransform.js'
+import { computeFRAMA } from '../features/indicators/frama.js'
+import { computeLSMA } from '../features/indicators/lsma.js'
+import { computeSchaffTrendCycle } from '../features/indicators/schaffTrendCycle.js'
+import { computeStochRSI } from '../features/indicators/stochRSI.js'
+import { computeT3 } from '../features/indicators/t3.js'
+import { computeUltimateOscillator } from '../features/indicators/ultimateOscillator.js'
+import { computeVIDYA } from '../features/indicators/vidya.js'
+import { computeZLEMA } from '../features/indicators/zlema.js'
 
 // ---------------------------------------------------------------------------
 // Fixtures

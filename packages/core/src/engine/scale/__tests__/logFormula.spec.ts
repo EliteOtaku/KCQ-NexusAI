@@ -8,7 +8,7 @@ import {
   logFormulaForPriceRange,
   logFormulasAreSame,
   toLog,
-} from '../logFormula'
+} from '../logFormula.js'
 
 describe('logFormula', () => {
   const defaultFormula: LogFormula = { logicalOffset: 4, coordOffset: 0.0001 }
