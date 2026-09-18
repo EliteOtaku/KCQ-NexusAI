@@ -280,10 +280,11 @@ async function main() {
   await page.mouse.click(ch2.x, ch2.y)
   await page.mouse.click(ch3.x, ch3.y)
   await page.waitForTimeout(200)
+  // 上游 #202 起 composite anchors 全量持久化：平行通道落库为 4 锚点（两条线各 2 端点）。
   check(
     'B1-04：三锚点通道创建',
     (await nx(page, 'window.__nx.ctrl.drawings.peek()[0].kind')) === 'parallel-channel' &&
-      (await nx(page, 'window.__nx.ctrl.drawings.peek()[0].anchors.length')) === 3,
+      (await nx(page, 'window.__nx.ctrl.drawings.peek()[0].anchors.length')) === 4,
   )
   const hasOpacity = await page.locator('.nx-flybar input[type="range"]').isVisible().catch(() => false)
   check('B1-07：通道显示填充不透明度控制（fillOpacity 键）', hasOpacity)
