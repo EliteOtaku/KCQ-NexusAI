@@ -24,6 +24,17 @@ export default defineConfig({
       },
     },
   },
+  preload: {
+    plugins: [externalizeDepsPlugin()],
+    build: {
+      rollupOptions: {
+        input: entry('electron/preload.ts'),
+        external: ['electron'],
+        // 窗口开启了 sandbox，sandbox 化的 preload 只能加载 CommonJS。
+        output: { format: 'cjs', entryFileNames: 'preload.cjs' },
+      },
+    },
+  },
   renderer: {
     root: '.',
     plugins: [
@@ -36,7 +47,7 @@ export default defineConfig({
           sourceMaps: true,
           plugins: [
             ['@babel/plugin-proposal-decorators', { version: '2023-11' }],
-            ['@babel/plugin-transform-typescript', { allowDeclareFields: true }],
+            ['@babel/plugin-transform-typescript'],
           ],
         },
       }),

@@ -1,6 +1,11 @@
 <template>
   <CanvasToolbar>
-    <div v-if="canEdit('stroke')" class="color-item" title="颜色">
+    <div
+      v-if="canEdit('stroke')"
+      class="color-item"
+      :class="{ 'is-disabled': allLocked }"
+      title="颜色"
+    >
       <span
         class="color-swatch"
         :style="{ background: style.stroke ?? DEFAULT_DRAWING_STROKE }"
@@ -9,6 +14,7 @@
         type="color"
         class="color-input"
         :value="style.stroke ?? DEFAULT_DRAWING_STROKE"
+        :disabled="allLocked"
         @input="onColorChange(($event.target as HTMLInputElement).value)"
       />
     </div>
@@ -19,6 +25,7 @@
       :options="widthOptions"
       size="sm"
       title="线宽"
+      :disabled="allLocked"
       @update:model-value="onWidthChange(Number($event))"
     />
 
@@ -28,6 +35,7 @@
       :options="styleOptions"
       size="sm"
       title="线型"
+      :disabled="allLocked"
       @update:model-value="onLineStyleChange($event as 'solid' | 'dashed' | 'dotted')"
     />
 
@@ -45,8 +53,21 @@
 
     <button
       type="button"
+      class="toolbar-btn toolbar-btn--lock"
+      :class="{ 'is-locked': allLocked }"
+      :title="allLocked ? '解锁' : '锁定'"
+      :aria-label="allLocked ? '解锁' : '锁定'"
+      @click="onToggleLock"
+    >
+      <IconTablerLock v-if="allLocked" class="lock-icon" aria-hidden="true" />
+      <IconTablerLockOpen v-else class="lock-icon" aria-hidden="true" />
+    </button>
+
+    <button
+      type="button"
       class="toolbar-btn toolbar-btn--delete"
       title="删除"
+      :disabled="allLocked"
       @click="$emit('delete')"
     >
       <svg
@@ -68,11 +89,13 @@
 </template>
 
 <script setup lang="ts">
-  import type { DrawingObject, DrawingStyle } from '@363045841yyt/klinechart-core/plugin'
   import { DEFAULT_DRAWING_STROKE } from '@363045841yyt/klinechart-core'
+  import type { DrawingObject, DrawingStyle } from '@363045841yyt/klinechart-core/plugin'
   import { computed, onMounted, onUnmounted } from 'vue'
-  import Dropdown from './Dropdown.vue'
+  import IconTablerLock from '~icons/tabler/lock'
+  import IconTablerLockOpen from '~icons/tabler/lock-open'
   import CanvasToolbar from './common/CanvasToolbar.vue'
+  import Dropdown from './Dropdown.vue'
 
   const widthOptions = [
     { label: '1px', value: '1' },
@@ -99,6 +122,7 @@
     (e: 'delete'): void
     (e: 'applyTemplate', name: string): void
     (e: 'saveTemplate'): void
+    (e: 'toggleLock', locked: boolean): void
   }>()
 
   const SAVE_SENTINEL = '__save__'
@@ -130,6 +154,15 @@
     return props.editableStyleKeys.includes(key)
   }
 
+  /** 全部选中图元均已锁定；混合选中视为未完全锁定。 */
+  const allLocked = computed(
+    () => props.drawings.length > 0 && props.drawings.every((drawing) => drawing.locked === true),
+  )
+
+  function onToggleLock() {
+    emit('toggleLock', !allLocked.value)
+  }
+
   function onColorChange(color: string) {
     emit('updateStyle', { stroke: color })
   }
@@ -158,6 +191,13 @@
 
   .color-item:hover {
     background: var(--klc-color-ui-hover);
+  }
+
+  /* 全选锁定：样式与删除不可编辑，仅保留解锁按钮。 */
+  .color-item.is-disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
   }
 
   .color-swatch {

@@ -1,211 +1,137 @@
-/** 验证 Ctrl 命中仅增删选择集合，不进入图元拖拽。 */
+/** 验证 Ctrl/Shift 命中仅增删选择集合，不进入图元拖拽。 */
 import { describe, expect, it, vi } from 'vitest'
 
-import type { DrawingChartAdapter } from '../../../controllers/types'
 import type { DrawingObject } from '../../../foundation/plugin'
 import { DrawingInteractionController } from '../interaction'
-
-/** 创建可被命中测试使用的最小图元。 */
-function createDrawing(id: string): DrawingObject {
-  return {
-    id,
-    kind: 'horizontal-line',
-    paneId: 'main',
-    visible: true,
-    anchors: [],
-    params: {},
-    style: { stroke: '#2962ff' },
-  }
-}
-
-/** 创建仅覆盖选择与命中路径的绘图 adapter。 */
-function createAdapter(drawings: ReadonlyArray<DrawingObject>, tool: 'cursor' | 'box-select' = 'cursor') {
-  let selectedIds: ReadonlyArray<string> = []
-  const setSelectedDrawingIds = vi.fn((ids: ReadonlyArray<string>) => {
-    selectedIds = [...ids]
-  })
-  const adapter = {
-    getDrawingToolId: () => tool,
-    getFullDrawings: () => drawings,
-    getSelectedDrawingIds: () => selectedIds,
-    setSelectedDrawingIds,
-    commitDrawingDrags: vi.fn(),
-    getDrawingData: () => [{ timestamp: 1 }],
-    getViewport: () => ({ scrollLeft: 0, plotWidth: 100, plotHeight: 100 }),
-    getPaneAtY: () => ({ paneId: 'main', top: 0, height: 100 }),
-    getPaneInfo: () => ({ paneId: 'main', top: 0, height: 100 }),
-    getLogicalIndexAtX: () => 0,
-    getDrawingTimestampAtLogicalIndex: () => 1,
-    getDrawingWorkspaceId: () => 'kline' as const,
-    yToPrice: (_paneId: string, y: number) => y,
-  } as unknown as DrawingChartAdapter
-  return { adapter, setSelectedDrawingIds }
-}
-
-/** 构造命中测试所需的指针事件。 */
-function pointerDown(ctrlKey: boolean): PointerEvent {
-  return { clientX: 10, clientY: 10, ctrlKey } as PointerEvent
-}
-
-/** 构造 Shift 按下的指针事件。 */
-function pointerDownWithShift(): PointerEvent {
-  return { clientX: 10, clientY: 10, ctrlKey: false, shiftKey: true } as PointerEvent
-}
-
-/** 构造框选拖拽过程中的指针事件。 */
-function pointerAt(x: number, y: number): PointerEvent {
-  return { clientX: x, clientY: y, ctrlKey: false } as PointerEvent
-}
+import {
+  CONTAINER,
+  createDrawingObject,
+  createPlacementAdapter,
+  createSelectionAdapter,
+  pointerDown,
+  pointerMove,
+  stubDrawingControllerInternals,
+} from './helpers/drawingTestKit'
 
 describe('DrawingInteractionController selection', () => {
   it('adds and removes hit drawings with Shift using the same toggle semantics as Ctrl', () => {
-    const first = createDrawing('first')
-    const second = createDrawing('second')
-    const { adapter, setSelectedDrawingIds } = createAdapter([first, second])
+    const first = createDrawingObject({ id: 'first' })
+    const second = createDrawingObject({ id: 'second' })
+    const { adapter, setSelectedDrawingIds } = createSelectionAdapter([first, second])
     const controller = new DrawingInteractionController(adapter)
-    const internal = controller as unknown as {
-      hitTester: { hitTest: ReturnType<typeof vi.fn> }
-      dragHandler: { startDrag: ReturnType<typeof vi.fn> }
-    }
-    internal.hitTester = { hitTest: vi.fn(() => ({ drawing: second })) }
-    internal.dragHandler.startDrag = vi.fn()
+    const internal = stubDrawingControllerInternals(controller, {
+      hit: { drawing: second, target: { type: 'all' } },
+    })
     adapter.setSelectedDrawingIds([first.id])
-    const container = {
-      getBoundingClientRect: () => ({ left: 0, top: 0 }),
-    } as HTMLElement
+    const container = CONTAINER
 
     // Shift 点击命中：切换选中且不开拖拽，与 Ctrl 语义一致。
-    expect(controller.onPointerDown(pointerDownWithShift(), container)).toBe(true)
+    expect(controller.onPointerDown(pointerDown(10, 10, { shiftKey: true }), container)).toBe(true)
     expect(setSelectedDrawingIds).toHaveBeenLastCalledWith(['first', 'second'])
     expect(internal.dragHandler.startDrag).not.toHaveBeenCalled()
 
-    expect(controller.onPointerDown(pointerDownWithShift(), container)).toBe(true)
+    expect(controller.onPointerDown(pointerDown(10, 10, { shiftKey: true }), container)).toBe(true)
     expect(setSelectedDrawingIds).toHaveBeenLastCalledWith(['first'])
   })
 
   it('keeps the current selection when Shift-clicking blank space', () => {
-    const drawing = createDrawing('selected')
-    const { adapter, setSelectedDrawingIds } = createAdapter([drawing])
+    const drawing = createDrawingObject({ id: 'selected' })
+    const { adapter, setSelectedDrawingIds } = createSelectionAdapter([drawing])
     const controller = new DrawingInteractionController(adapter)
-    ;(controller as unknown as { hitTester: unknown }).hitTester = {
-      hitTest: vi.fn(() => null),
-    }
+    stubDrawingControllerInternals(controller, { hit: null })
     adapter.setSelectedDrawingIds([drawing.id])
-    const container = {
-      getBoundingClientRect: () => ({ left: 0, top: 0 }),
-    } as HTMLElement
+    const container = CONTAINER
 
     // Shift 按住时空白点击不清空选择（与 Ctrl 一致）。
-    expect(controller.onPointerDown(pointerDownWithShift(), container)).toBe(false)
+    expect(controller.onPointerDown(pointerDown(10, 10, { shiftKey: true }), container)).toBe(false)
     expect(setSelectedDrawingIds).not.toHaveBeenLastCalledWith([])
     expect(adapter.getSelectedDrawingIds()).toEqual([drawing.id])
   })
 
   it('adds and removes hit drawings with Ctrl without starting a drag', () => {
-    const first = createDrawing('first')
-    const second = createDrawing('second')
-    const { adapter, setSelectedDrawingIds } = createAdapter([first, second])
+    const first = createDrawingObject({ id: 'first' })
+    const second = createDrawingObject({ id: 'second' })
+    const { adapter, setSelectedDrawingIds } = createSelectionAdapter([first, second])
     const controller = new DrawingInteractionController(adapter)
-    const internal = controller as unknown as {
-      hitTester: { hitTest: ReturnType<typeof vi.fn> }
-      dragHandler: { startDrag: ReturnType<typeof vi.fn> }
-    }
-    internal.hitTester = { hitTest: vi.fn(() => ({ drawing: second })) }
-    internal.dragHandler.startDrag = vi.fn()
+    const internal = stubDrawingControllerInternals(controller, {
+      hit: { drawing: second, target: { type: 'all' } },
+    })
     adapter.setSelectedDrawingIds([first.id])
-    const container = {
-      getBoundingClientRect: () => ({ left: 0, top: 0 }),
-    } as HTMLElement
+    const container = CONTAINER
 
-    expect(controller.onPointerDown(pointerDown(true), container)).toBe(true)
+    expect(controller.onPointerDown(pointerDown(10, 10, { ctrlKey: true }), container)).toBe(true)
     expect(setSelectedDrawingIds).toHaveBeenLastCalledWith(['first', 'second'])
     expect(internal.dragHandler.startDrag).not.toHaveBeenCalled()
 
-    expect(controller.onPointerDown(pointerDown(true), container)).toBe(true)
+    expect(controller.onPointerDown(pointerDown(10, 10, { ctrlKey: true }), container)).toBe(true)
     expect(setSelectedDrawingIds).toHaveBeenLastCalledWith(['first'])
     expect(internal.dragHandler.startDrag).not.toHaveBeenCalled()
   })
 
   it('toggles every drawing intersecting a selection marquee', () => {
-    const first = createDrawing('first')
-    const second = createDrawing('second')
-    const third = createDrawing('third')
-    const { adapter, setSelectedDrawingIds } = createAdapter(
-      [first, second, third],
-      'box-select',
-    )
+    const first = createDrawingObject({ id: 'first' })
+    const second = createDrawingObject({ id: 'second' })
+    const third = createDrawingObject({ id: 'third' })
+    const { adapter, setSelectedDrawingIds } = createSelectionAdapter([first, second, third], {
+      tool: 'box-select',
+    })
     const controller = new DrawingInteractionController(adapter)
-    const internal = controller as unknown as {
-      hitTester: { hitTest: ReturnType<typeof vi.fn>; getDrawingLineSegments: ReturnType<typeof vi.fn> }
-    }
-    internal.hitTester = {
-      hitTest: vi.fn(() => null),
-      getDrawingLineSegments: vi.fn((drawing: DrawingObject) => {
-        if (drawing.id === 'third') return [{ a: { x: 50, y: 50 }, b: { x: 60, y: 60 } }]
-        return [{ a: { x: 12, y: 12 }, b: { x: 28, y: 28 } }]
-      }),
-    }
+    const internal = stubDrawingControllerInternals(controller, { hit: null })
+    internal.hitTester.getDrawingLineSegments = vi.fn((drawing: DrawingObject) => {
+      if (drawing.id === 'third') return [{ a: { x: 50, y: 50 }, b: { x: 60, y: 60 } }]
+      return [{ a: { x: 12, y: 12 }, b: { x: 28, y: 28 } }]
+    })
     adapter.setSelectedDrawingIds([first.id])
-    const container = {
-      getBoundingClientRect: () => ({ left: 0, top: 0 }),
-    } as HTMLElement
+    const container = CONTAINER
 
-    expect(controller.onPointerDown(pointerAt(10, 10), container)).toBe(true)
-    expect(controller.onPointerMove(pointerAt(30, 30), container)).toBe(true)
-    expect(controller.onPointerUp(pointerAt(30, 30), container)).toBe(true)
+    expect(controller.onPointerDown(pointerMove(10, 10), container)).toBe(true)
+    expect(controller.onPointerMove(pointerMove(30, 30), container)).toBe(true)
+    expect(controller.onPointerUp(pointerMove(30, 30), container)).toBe(true)
     expect(setSelectedDrawingIds).toHaveBeenLastCalledWith(['second'])
     expect(controller.getSelectionMarquee()).toBeNull()
   })
 
   it('clears the current selection when box-select clicks blank space', () => {
-    const drawing = createDrawing('selected')
-    const { adapter, setSelectedDrawingIds } = createAdapter([drawing], 'box-select')
+    const drawing = createDrawingObject({ id: 'selected' })
+    const { adapter, setSelectedDrawingIds } = createSelectionAdapter([drawing], {
+      tool: 'box-select',
+    })
     const controller = new DrawingInteractionController(adapter)
-    const container = {
-      getBoundingClientRect: () => ({ left: 0, top: 0 }),
-    } as HTMLElement
+    const container = CONTAINER
     adapter.setSelectedDrawingIds([drawing.id])
 
-    expect(controller.onPointerDown(pointerAt(40, 40), container)).toBe(true)
-    expect(controller.onPointerUp(pointerAt(40, 40), container)).toBe(true)
+    expect(controller.onPointerDown(pointerMove(40, 40), container)).toBe(true)
+    expect(controller.onPointerUp(pointerMove(40, 40), container)).toBe(true)
     expect(setSelectedDrawingIds).toHaveBeenLastCalledWith([])
   })
 
   it('drags every selected drawing when dragging a selected line', () => {
-    const first = createDrawing('first')
-    const second = createDrawing('second')
-    const { adapter } = createAdapter([first, second])
+    const first = createDrawingObject({ id: 'first' })
+    const second = createDrawingObject({ id: 'second' })
+    const { adapter } = createSelectionAdapter([first, second])
     const controller = new DrawingInteractionController(adapter)
-    const movedFirst = { ...first, anchors: [{ id: 'first-anchor', type: 'horizontal' as const, price: 11 }] }
-    const movedSecond = { ...second, anchors: [{ id: 'second-anchor', type: 'horizontal' as const, price: 21 }] }
+    const movedFirst = {
+      ...first,
+      anchors: [{ id: 'first-anchor', type: 'horizontal' as const, price: 11 }],
+    }
+    const movedSecond = {
+      ...second,
+      anchors: [{ id: 'second-anchor', type: 'horizontal' as const, price: 21 }],
+    }
     const startDrag = vi.fn()
-    const internal = controller as unknown as {
-      hitTester: { hitTest: ReturnType<typeof vi.fn> }
-      dragHandler: {
-        isDragging: ReturnType<typeof vi.fn>
-        getDraggingDrawingIds: ReturnType<typeof vi.fn>
-        startDrag: ReturnType<typeof vi.fn>
-        handleDragMove: ReturnType<typeof vi.fn>
-        endDrag: ReturnType<typeof vi.fn>
-      }
-    }
-    internal.hitTester = { hitTest: vi.fn(() => ({ drawing: first })) }
-    internal.dragHandler = {
-      isDragging: vi.fn(() => startDrag.mock.calls.length > 0),
-      getDraggingDrawingIds: vi.fn(() => [first.id, second.id]),
+    stubDrawingControllerInternals(controller, {
+      hit: { drawing: first, target: { type: 'all' } },
+      draggingIds: [first.id, second.id],
+      movedDrawings: [movedFirst, movedSecond],
       startDrag,
-      handleDragMove: vi.fn(() => [movedFirst, movedSecond]),
-      endDrag: vi.fn(),
-    }
+    })
     adapter.setSelectedDrawingIds([first.id, second.id])
-    const container = {
-      getBoundingClientRect: () => ({ left: 0, top: 0 }),
-    } as HTMLElement
+    const container = CONTAINER
 
-    expect(controller.onPointerDown(pointerDown(false), container)).toBe(true)
-    expect(startDrag).toHaveBeenCalledWith([first, second], undefined, 10, 10)
-    expect(controller.onPointerMove(pointerAt(20, 20), container)).toBe(true)
-    expect(controller.onPointerUp(pointerAt(20, 20), container)).toBe(true)
+    expect(controller.onPointerDown(pointerDown(10, 10), container)).toBe(true)
+    expect(startDrag).toHaveBeenCalledWith([first, second], { type: 'all' }, 10, 10)
+    expect(controller.onPointerMove(pointerMove(20, 20), container)).toBe(true)
+    expect(controller.onPointerUp(pointerMove(20, 20), container)).toBe(true)
     expect(adapter.commitDrawingDrags).toHaveBeenCalledWith([
       { id: first.id, anchors: movedFirst.anchors },
       { id: second.id, anchors: movedSecond.anchors },
@@ -213,74 +139,54 @@ describe('DrawingInteractionController selection', () => {
   })
 
   it('starts a group drag before marquee when box-select hits a selected drawing', () => {
-    const first = createDrawing('first')
-    const second = createDrawing('second')
-    const { adapter } = createAdapter([first, second], 'box-select')
+    const first = createDrawingObject({ id: 'first' })
+    const second = createDrawingObject({ id: 'second' })
+    const { adapter } = createSelectionAdapter([first, second], { tool: 'box-select' })
     const controller = new DrawingInteractionController(adapter)
     const startDrag = vi.fn()
-    const internal = controller as unknown as {
-      hitTester: { hitTest: ReturnType<typeof vi.fn> }
-      dragHandler: { startDrag: ReturnType<typeof vi.fn> }
-    }
-    internal.hitTester = { hitTest: vi.fn(() => ({ drawing: first })) }
-    internal.dragHandler.startDrag = startDrag
+    stubDrawingControllerInternals(controller, {
+      hit: { drawing: first, target: { type: 'all' } },
+      startDrag,
+    })
     adapter.setSelectedDrawingIds([first.id, second.id])
-    const container = {
-      getBoundingClientRect: () => ({ left: 0, top: 0 }),
-    } as HTMLElement
+    const container = CONTAINER
 
-    expect(controller.onPointerDown(pointerAt(10, 10), container)).toBe(true)
-    expect(startDrag).toHaveBeenCalledWith([first, second], undefined, 10, 10)
+    expect(controller.onPointerDown(pointerMove(10, 10), container)).toBe(true)
+    expect(startDrag).toHaveBeenCalledWith([first, second], { type: 'all' }, 10, 10)
     expect(controller.getSelectionMarquee()).toBeNull()
   })
 
-  it('passes the future-slot offset through when creating a drawing in the right blank area', () => {
-    const createdDrawing = createDrawing('future-line')
-    const createDrawingCommand = vi.fn(() => createdDrawing)
-    const adapter = {
-      ...createAdapter([]).adapter,
-      getDrawingToolId: () => 'v-line' as const,
-      getLogicalIndexAtX: () => 3,
-      getDrawingTimestampAtLogicalIndex: () => 1,
-      createDrawing: createDrawingCommand,
-      setDrawingToolId: vi.fn(),
-    } as unknown as DrawingChartAdapter
+  it('freezes and unfreezes the hover target across a drawing drag', () => {
+    const drawing = createDrawingObject({ id: 'subject' })
+    const freeze = vi.fn()
+    const unfreeze = vi.fn()
+    const adapter = createPlacementAdapter(
+      {
+        tool: 'cursor',
+        pane: { paneId: 'main', top: 0, height: 100 },
+        plotWidth: 100,
+        plotHeight: 100,
+        logicalIndex: 0,
+        session: { freezeHoverTarget: freeze, unfreezeHoverTarget: unfreeze },
+      },
+      [drawing],
+    )
     const controller = new DrawingInteractionController(adapter)
-    const container = {
-      getBoundingClientRect: () => ({ left: 0, top: 0 }),
-    } as HTMLElement
-
-    expect(controller.onPointerDown(pointerDown(false), container)).toBe(true)
-    expect(createDrawingCommand).toHaveBeenCalledWith({
-      kind: 'vertical-line',
-      paneId: 'main',
-      anchors: [{ timestamp: 1, futureOffset: 3, price: 10 }],
+    stubDrawingControllerInternals(controller, {
+      hit: { drawing, target: { type: 'anchor', index: 0 } },
+      draggingIds: [drawing.id],
+      movedDrawings: [drawing],
     })
-  })
+    const container = CONTAINER
 
-  it('resets the tool before creating so the new selection is not cleared', () => {
-    const createdDrawing = createDrawing('created')
-    const calls: string[] = []
-    const adapter = {
-      ...createAdapter([]).adapter,
-      getDrawingToolId: () => 'v-line' as const,
-      getLogicalIndexAtX: () => 3,
-      getDrawingTimestampAtLogicalIndex: () => 1,
-      createDrawing: vi.fn(() => {
-        calls.push('createDrawing')
-        return createdDrawing
-      }),
-      setDrawingToolId: vi.fn(() => {
-        calls.push('setDrawingToolId')
-      }),
-    } as unknown as DrawingChartAdapter
-    const controller = new DrawingInteractionController(adapter)
-    const container = {
-      getBoundingClientRect: () => ({ left: 0, top: 0 }),
-    } as HTMLElement
-
-    expect(controller.onPointerDown(pointerDown(false), container)).toBe(true)
-    // 切换工具会清空选中，必须发生在创建（原子选中新图元）之前。
-    expect(calls).toEqual(['setDrawingToolId', 'createDrawing'])
+    // 拖拽会话：按下时冻结悬停目标，抬起时解冻；中途不重复调用。
+    expect(freeze).not.toHaveBeenCalled()
+    expect(controller.onPointerDown(pointerDown(10, 10), container)).toBe(true)
+    expect(freeze).toHaveBeenCalledTimes(1)
+    expect(controller.onPointerMove(pointerMove(40, 40), container)).toBe(true)
+    expect(freeze).toHaveBeenCalledTimes(1)
+    expect(unfreeze).not.toHaveBeenCalled()
+    expect(controller.onPointerUp(pointerMove(40, 40), container)).toBe(true)
+    expect(unfreeze).toHaveBeenCalledTimes(1)
   })
 })

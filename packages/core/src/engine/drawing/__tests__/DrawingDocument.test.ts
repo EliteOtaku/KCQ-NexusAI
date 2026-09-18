@@ -7,9 +7,16 @@ import { PREVIEW_ID } from '../DrawingState'
 
 function createDocument() {
   const state = createDrawingState()
+  // 五个 Bar 的时间轴：锚点 1_000 落在索引 4，派生锚点仍可落在数据范围内。
+  const timestamps = [0, 250, 500, 750, 1_000]
   const document = new DrawingDocument({
     drawingState: state,
-    getLogicalIndexAtTimestamp: (timestamp) => (timestamp === 1_000 ? 4 : null),
+    getLogicalIndexAtTimestamp: (timestamp) => {
+      const index = timestamps.indexOf(timestamp)
+      return index === -1 ? null : index
+    },
+    getDrawingTimestampAtLogicalIndex: (index) => timestamps[index] ?? null,
+    getDrawingData: () => timestamps.map((timestamp) => ({ timestamp })),
     findAnchorAtTradingDate: (tradingDate) =>
       tradingDate === '2026-04-10' ? { timestamp: 1_000 } : null,
     hasPaneId: (paneId) => paneId === 'main',
@@ -29,6 +36,28 @@ describe('DrawingDocument', () => {
     })
 
     expect(drawing.anchors).toEqual([expect.objectContaining({ price: 9 })])
+  })
+
+  it('persists the derived parallel-channel anchor and accepts it on drag', () => {
+    const { document } = createDocument()
+
+    const drawing = document.createDrawing({
+      kind: 'parallel-channel',
+      paneId: 'main',
+      anchors: [
+        { timestamp: 1_000, price: 10 },
+        { timestamp: 1_000, price: 20 },
+        { timestamp: 1_000, price: 30 },
+      ],
+    })
+
+    // 第三个输入价格落在 3（次点 X），2（首点 X）按首两点增量反向回推为 20。
+    expect(drawing.anchors).toHaveLength(4)
+    expect(drawing.anchors[2]).toMatchObject({ time: 1_000, price: 20 })
+    expect(drawing.anchors[3]).toMatchObject({ time: 1_000, price: 30 })
+
+    const moved = drawing.anchors.map((anchor) => ({ ...anchor, price: anchor.price + 1 }))
+    expect(document.commitDrawingDrag(drawing.id, moved)?.anchors[2]).toMatchObject({ price: 21 })
   })
 
   it('selects the new drawing and drops the previous selection', () => {
@@ -260,10 +289,12 @@ describe('DrawingDocument', () => {
     expect(document.listDrawings()).toEqual(before)
 
     expect(
-      document.commitDrawingDrags([
-        { id: first.id, anchors: first.anchors.map((anchor) => ({ ...anchor, price: 11 })) },
-        { id: second.id, anchors: second.anchors.map((anchor) => ({ ...anchor, price: 21 })) },
-      ]).map((drawing) => drawing.id),
+      document
+        .commitDrawingDrags([
+          { id: first.id, anchors: first.anchors.map((anchor) => ({ ...anchor, price: 11 })) },
+          { id: second.id, anchors: second.anchors.map((anchor) => ({ ...anchor, price: 21 })) },
+        ])
+        .map((drawing) => drawing.id),
     ).toEqual([first.id, second.id])
     expect(document.getDrawing(first.id)?.anchors[0]?.price).toBe(11)
     expect(document.getDrawing(second.id)?.anchors[0]?.price).toBe(21)
@@ -378,6 +409,46 @@ describe('DrawingDocument', () => {
     const anchors = [{ ...drawing.anchors[0]!, price: 11 }]
 
     expect(document.commitDrawingDrag(drawing.id, anchors)?.anchors).toEqual(anchors)
+  })
+
+  it('freezes locked drawings against edits but still allows unlocking', () => {
+    const { document } = createDocument()
+    const drawing = document.createDrawing({
+      kind: 'horizontal-line',
+      paneId: 'main',
+      anchors: [{ price: 10 }],
+    })
+    document.updateDrawingFromInput(drawing.id, { locked: true })
+
+    expect(document.updateDrawing({ ...drawing, style: { stroke: '#f00' } })).toBeNull()
+    expect(document.updateDrawingFromInput(drawing.id, { style: { stroke: '#f00' } })).toBeNull()
+    expect(document.updateBatch([drawing.id], { style: { stroke: '#f00' } })).toEqual([])
+    expect(document.removeDrawing(drawing.id)).toBe(false)
+    expect(document.commitDrawingDrag(drawing.id, drawing.anchors)).toBeNull()
+
+    expect(document.updateBatch([drawing.id], { locked: false })).toHaveLength(1)
+    expect(document.getDrawing(drawing.id)?.locked).toBe(false)
+  })
+
+  it('skips locked targets in a mixed batch while updating the rest', () => {
+    const { document } = createDocument()
+    const locked = document.createDrawing({
+      kind: 'horizontal-line',
+      paneId: 'main',
+      anchors: [{ price: 10 }],
+    })
+    const free = document.createDrawing({
+      kind: 'horizontal-line',
+      paneId: 'main',
+      anchors: [{ price: 11 }],
+    })
+    document.updateBatch([locked.id], { locked: true })
+
+    expect(document.updateBatch([locked.id, free.id], { style: { stroke: '#f00' } })).toHaveLength(
+      1,
+    )
+    expect(document.getDrawing(locked.id)?.style.stroke).not.toBe('#f00')
+    expect(document.getDrawing(free.id)?.style.stroke).toBe('#f00')
   })
 
   it('does not persist session preview objects through document replacement', () => {

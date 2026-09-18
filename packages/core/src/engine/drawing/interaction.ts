@@ -1,52 +1,43 @@
-import type { DrawingChartAdapter } from '../../controllers/types'
+import type { DrawingChartAdapter } from '../../controllers/types.js'
+import type { DrawingObject, DrawingStyle } from '../../foundation/plugin/index.js'
+import { ChartWorkspaceId } from '../../foundation/types/chartView.js'
+import type { DrawingHoverTarget } from '../state/interactionState.js'
+import { AnchorCollector } from './AnchorCollector.js'
 import type {
-  DrawingLabelPosition,
-  DrawingObject,
-  DrawingStyle,
-} from '../../foundation/plugin/index'
-import { ChartWorkspaceId } from '../../foundation/types/chartView'
-
-import { AnchorCollector } from './AnchorCollector'
-import { DragHandler } from './DragHandler'
-import { DrawingState, PREVIEW_ID } from './DrawingState'
-import { clearDrawingSelection, toggleDrawingSelection } from './DrawingSelection'
-import { HitTester } from './HitTester'
-import type { HitResult } from './HitTester'
+  DrawingPointerAnchor,
+  PointerCoordinates,
+  ResolveDrawingPointerOptions,
+  ResolvedInteractionAnchor,
+} from './coordinateUtils.js'
+import { resolveDrawingPointer } from './coordinateUtils.js'
+import { DragHandler } from './DragHandler.js'
+import { clearDrawingSelection, toggleDrawingSelection } from './DrawingSelection.js'
+import { DrawingState, PREVIEW_ID } from './DrawingState.js'
+import { isDrawingLocked } from './drawingAccess.js'
+import type { HitResult, LineLabelTarget } from './HitTester.js'
+import { HitTester } from './HitTester.js'
+import type { MagnetMode } from './magnetSnapper.js'
+import { PreviewRenderer } from './PreviewRenderer.js'
 import {
+  type DrawingSelectionMarquee,
   drawingIntersectsSelectionMarquee,
   hasSelectionMarqueeArea,
-  type DrawingSelectionMarquee,
-} from './selectionMarquee'
-import { PreviewRenderer } from './PreviewRenderer'
-import { resolveDrawingPointer } from './coordinateUtils'
-import type {
-  ResolvedInteractionAnchor,
-  DrawingPointerAnchor,
-  ResolveDrawingPointerOptions,
-} from './coordinateUtils'
-import type { MagnetMode } from './magnetSnapper'
-import type { DrawingToolId } from './toolConfig'
-import { getAnchorCountForTool, getDrawingKind } from './toolConfig'
+} from './selectionMarquee.js'
+import type { DrawingToolId } from './toolConfig.js'
+import { getAnchorCountForTool, getDrawingKind } from './toolConfig.js'
 
+export type { InteractionDrawingAnchor } from './coordinateUtils.js'
 // Re-export types so index.ts re-exports work unchanged
-export type { DrawingToolId } from './toolConfig'
-export type { InteractionDrawingAnchor } from './coordinateUtils'
+export type { DrawingToolId } from './toolConfig.js'
 
-/** 命中线段标签后供宿主渲染就地文本编辑器的几何快照。 */
-export interface DrawingLineLabelTarget {
-  readonly drawingId: string
-  readonly targetKind: 'line' | 'area'
-  readonly lineIndex: number
-  readonly x: number
-  readonly y: number
-  readonly rotation: number
-  readonly text: string
-  readonly position: DrawingLabelPosition
-}
+/** 命中标签后供宿主渲染就地编辑器的几何快照；与 HitTester 的命中结果同一类型。 */
+export type DrawingLineLabelTarget = LineLabelTarget
 
 /** 指针会话的唯一状态：框选和拖拽互斥，禁止通过多个可空字段推导行为。 */
 type DrawingPointerSession =
-  { kind: 'idle' } | { kind: 'marquee'; marquee: DrawingSelectionMarquee } | { kind: 'drag' }
+  | { kind: 'idle' }
+  | { kind: 'marquee'; marquee: DrawingSelectionMarquee }
+  | { kind: 'drag' }
 
 /**
  * 绘图交互控制器 —— 精简事件路由，组合子模块。
@@ -163,21 +154,16 @@ export class DrawingInteractionController {
     return this.drawingState.getSelectedDrawings()
   }
 
-  /** 查找指针命中的线段标签区域；只在光标模式且非拖拽时可编辑。 */
+  /** 查找指针命中的文本热点（线段中点/填充中心）；只在光标模式且非拖拽时可编辑。 */
   getLineLabelTarget(e: PointerEvent, container: HTMLElement): DrawingLineLabelTarget | null {
     if (this.getActiveTool() !== 'cursor' || this.dragHandler.isDragging()) return null
     const pointer = resolveDrawingPointer(e, container, this.adapter)
     if (!pointer) return null
-    const drawings = this.drawingState
-      .getNonPreview()
-      .filter(
-        (drawing) =>
-          drawing.paneId === pointer.paneId &&
-          (drawing.workspaceId ?? ChartWorkspaceId.KLine) === this.adapter.getDrawingWorkspaceId(),
-      )
-    return (
-      this.hitTester.findLineLabelTarget(pointer.x, pointer.y, drawings, this.adapter) ??
-      this.hitTester.findAreaLabelTarget(pointer.x, pointer.y, drawings, this.adapter)
+    return this.hitTester.findLabelTarget(
+      pointer.x,
+      pointer.y,
+      this.getEditableDrawings(pointer.paneId),
+      this.adapter,
     )
   }
 
@@ -198,9 +184,9 @@ export class DrawingInteractionController {
         e,
         container,
         this.adapter,
-        this.resolveMagnetOptions(e),
+        this.resolvePlacementOptions(e),
       )
-      if (!pointer || (this.pendingPaneId !== null && pointer.paneId !== this.pendingPaneId)) {
+      if (!pointer) {
         this.drawingState.removePreview()
         return false
       }
@@ -242,10 +228,9 @@ export class DrawingInteractionController {
       e,
       container,
       this.adapter,
-      this.resolveMagnetOptions(e),
+      this.resolvePlacementOptions(e),
     )
-    if (!pointer || (this.pendingPaneId !== null && pointer.paneId !== this.pendingPaneId))
-      return false
+    if (!pointer) return false
 
     const anchorCount = getAnchorCountForTool(activeTool)
 
@@ -282,6 +267,8 @@ export class DrawingInteractionController {
     if (session.kind !== 'drag') return false
     this.drawingState.commitDrags()
     this.dragHandler.endDrag()
+    // 解冻悬停目标：下一次 hover flush 重新按当前位置命中。
+    this.adapter.unfreezeHoverTarget?.()
     return true
   }
 
@@ -301,6 +288,16 @@ export class DrawingInteractionController {
     return this.magnetMode === 'off' ? undefined : { magnet: { mode: this.magnetMode } }
   }
 
+  /**
+   * 绘图落点解析选项：磁吸 + 出界钳制。
+   * 进行中的多锚点图元固定在其起始 Pane 内，指针移出该 Pane（含轴区）时贴边继续预览，
+   * 不再因落点解析失败而抹掉预览。首个锚点仍要求落在有效 Pane 内。
+   */
+  private resolvePlacementOptions(e: PointerEvent): ResolveDrawingPointerOptions {
+    const options = this.resolveMagnetOptions(e) ?? {}
+    return this.pendingPaneId === null ? options : { ...options, clampPaneId: this.pendingPaneId }
+  }
+
   private handleCursorDown(e: PointerEvent, container: HTMLElement): boolean {
     // Shift 与 Ctrl 同语义：按住时点击切换选中，空白处不清空选择。
     const isMultiSelect = e.ctrlKey || e.shiftKey
@@ -318,48 +315,63 @@ export class DrawingInteractionController {
 
     const selectedDrawings = this.drawingState.getSelectedDrawings()
     const isSelected = selectedDrawings.some((drawing) => drawing.id === hit.drawing.id)
-    // 连带拖拽只携带未锁定的图元；锁定的图元即使保持选中也不可拖。
-    const dragTargets = isSelected
-      ? selectedDrawings.filter((drawing) => !drawing.locked)
-      : [hit.drawing]
-    if (!isSelected) this.setSelected(dragTargets)
+    if (!isSelected) this.setSelected([hit.drawing])
 
-    this.startDrag(pointer, hit, dragTargets)
+    this.startDrag(pointer, hit, isSelected ? selectedDrawings : [hit.drawing])
     return true
   }
 
-  /** 框选工具优先拖拽已选图元，其他位置才进入框选会话；锁定的图元不参与组拖拽。 */
+  /** 框选工具优先拖拽已选图元，其他位置才进入框选会话。 */
   private handleBoxSelectDown(e: PointerEvent, container: HTMLElement): boolean {
     const result = this.findDrawingHit(e, container)
     if (result && this.adapter.getSelectedDrawingIds().includes(result.hit.drawing.id)) {
-      const selectedDrawings = this.drawingState
-        .getSelectedDrawings()
-        .filter((drawing) => !drawing.locked)
-      this.startDrag(result.pointer, result.hit, selectedDrawings)
+      this.startDrag(result.pointer, result.hit, this.drawingState.getSelectedDrawings())
       return true
     }
     return this.startSelectionMarquee(e, container)
   }
 
-  /** 查找当前 Pane 和工作区内被指针命中的图元；锁定的图元不可点选。 */
+  /** 查找当前 Pane 和工作区内被指针命中的图元；选中集合决定线段中点手柄是否参与命中。 */
   private findDrawingHit(
     e: PointerEvent,
     container: HTMLElement,
   ): { pointer: DrawingPointerAnchor; hit: HitResult } | null {
     const pointer = resolveDrawingPointer(e, container, this.adapter)
     if (!pointer) return null
-    const hit = this.hitTester.hitTest(
+    const hit = this.findSelectableHit(pointer)
+    return hit ? { pointer, hit } : null
+  }
+
+  /** 命中当前 Pane 与工作区内可选中图元的拖拽目标；手柄只在图元被选中时参与命中。 */
+  private findSelectableHit(pointer: DrawingPointerAnchor): HitResult | null {
+    return this.hitTester.hitTest(
       pointer.x,
       pointer.y,
-      this.getHitCandidates(pointer.paneId),
+      this.getSelectableDrawings(pointer.paneId),
       this.adapter,
+      new Set(this.adapter.getSelectedDrawingIds()),
     )
-    return hit ? { pointer, hit } : null
+  }
+
+  /**
+   * 指针悬停的绘图拖拽目标，与命中返回的目标类型一致；未命中时由本方法给出 `none`。
+   * 与命中共用同一份选中集合与线表：中点手柄只在图元被选中时可悬停，锚点与线身不受选中限制。
+   * @param pointer 指针 client 坐标；一般由 hover flush 用缓存的指针位置传入
+   */
+  getHoveredTarget(pointer: PointerCoordinates, container: HTMLElement): DrawingHoverTarget {
+    const tool = this.getActiveTool()
+    if (tool !== 'cursor' && tool !== 'box-select') return 'none'
+    if (this.dragHandler.isDragging()) return 'none'
+    const resolved = resolveDrawingPointer(pointer, container, this.adapter)
+    if (!resolved) return 'none'
+    const hit = this.findSelectableHit(resolved)
+    return hit === null ? 'none' : hit.target.type
   }
 
   /**
    * 公开命中查询：返回容器局部坐标 (x, y) 处的图元，供橡皮擦、对象树 hover 等宿主交互使用。
-   * 过滤口径与光标点选一致（当前 Pane + 当前工作区 + 可见性由 HitTester 处理 + 排除锁定图元）。
+   * 过滤口径与光标点选一致（当前 Pane + 当前工作区 + 可见）；锁定图元同样命中，编辑策略由调用方决定。
+   * 不传选中集合：线段中点手柄是选中态专属的操作，宿主查询一律不返回它。
    * @param x 容器局部 X 坐标（px）
    * @param y 容器局部 Y 坐标（px）
    * @returns 命中的图元；未命中或 Pane 不可解析时返回 null
@@ -370,39 +382,44 @@ export class DrawingInteractionController {
     const hit = this.hitTester.hitTest(
       x,
       y - pane.top,
-      this.getHitCandidates(pane.paneId),
+      this.getSelectableDrawings(pane.paneId),
       this.adapter,
     )
     return hit ? hit.drawing : null
   }
 
-  /** 汇总当前 Pane 与工作区内可被指针命中的候选图元（排除锁定与预览）。 */
-  private getHitCandidates(paneId: string): DrawingObject[] {
+  /** 当前 Pane 与工作区内可被选中/命中的图元（可见且非预览；锁定图元也在内）。 */
+  private getSelectableDrawings(paneId: string): DrawingObject[] {
     return this.drawingState
       .getNonPreview()
       .filter(
         (drawing) =>
-          !drawing.locked &&
+          drawing.visible &&
           drawing.paneId === paneId &&
-          (drawing.workspaceId ?? ChartWorkspaceId.KLine) ===
-            this.adapter.getDrawingWorkspaceId(),
+          (drawing.workspaceId ?? ChartWorkspaceId.KLine) === this.adapter.getDrawingWorkspaceId(),
       )
   }
 
-  /** 进入拖拽会话；锚点命中只拖动命中图元，主体命中拖动整个选择组。 */
+  /** 可编辑图元：选中候选剔除锁定项，用于标签就地编辑等编辑入口。 */
+  private getEditableDrawings(paneId: string): DrawingObject[] {
+    return this.getSelectableDrawings(paneId).filter((drawing) => !isDrawingLocked(drawing))
+  }
+
+  /** 进入拖拽会话；锚点与中点手柄命中只拖动命中图元，主体命中拖动整个选择组；锁定图元一律不参与。 */
   private startDrag(
     pointer: DrawingPointerAnchor,
     hit: HitResult,
     selectedDrawings: ReadonlyArray<DrawingObject>,
   ): void {
-    const isAnchorHit = 'anchorIndex' in hit
-    this.dragHandler.startDrag(
-      isAnchorHit ? [hit.drawing] : selectedDrawings,
-      isAnchorHit ? hit.anchorIndex : undefined,
-      pointer.x,
-      pointer.y,
+    const target = hit.target
+    const targets = (target.type === 'all' ? selectedDrawings : [hit.drawing]).filter(
+      (drawing) => !isDrawingLocked(drawing),
     )
+    if (targets.length === 0) return
+    this.dragHandler.startDrag(targets, target, pointer.x, pointer.y)
     this.pointerSession = { kind: 'drag' }
+    // 冻结悬停目标：拖拽中指针会离开锚点，实时命中会把光标重算成 none。
+    this.adapter.freezeHoverTarget?.()
   }
 
   /** 开始框选，坐标只在按下所在 Pane 内解释。 */
@@ -440,18 +457,9 @@ export class DrawingInteractionController {
       return
     }
 
-    const candidates = this.drawingState
-      .getNonPreview()
-      .filter(
-        (drawing) =>
-          drawing.visible &&
-          !drawing.locked &&
-          drawing.paneId === marquee.paneId &&
-          (drawing.workspaceId ?? ChartWorkspaceId.KLine) === this.adapter.getDrawingWorkspaceId(),
-      )
-      .filter((drawing) =>
-        drawingIntersectsSelectionMarquee(drawing, marquee, this.hitTester, this.adapter),
-      )
+    const candidates = this.getSelectableDrawings(marquee.paneId).filter((drawing) =>
+      drawingIntersectsSelectionMarquee(drawing, marquee, this.hitTester, this.adapter),
+    )
     if (candidates.length === 0) return
 
     this.toggleSelected(candidates)

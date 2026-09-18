@@ -9,114 +9,109 @@
  *
  * 不是绘制管线的一部分。绘制由 ChartRenderer 完成，Chart 仅负责代理调用并维护 runtimeProjection（批量投影）屏障。
  */
-import { createAlertController } from '../features/alerts/index'
+
+import {
+  type CustomDataSource,
+  FIVE_DAY_TIME_SHARE_PERIOD,
+  isTimeSharePeriod,
+  type SymbolInfo,
+  type SymbolSpec,
+  TIME_SHARE_PERIOD,
+} from '../controllers/types.js'
+import { resolveMarketDataCacheMaxBytes } from '../data/buffer/marketDataPolicy.js'
+import { AUTO_SOURCE_ID } from '../data/buffer/seriesRepository.js'
+import { lookupInstrumentsBySymbol } from '../data/provider/instrumentSearch.js'
+import { marketDataProviderRegistry } from '../data/provider/registry.js'
+import { createAlertController } from '../features/alerts/index.js'
 import {
   createVolumeLookbacks,
   pushToVolumeLookbacks,
   type VolumeLookbacks,
-} from '../features/alerts/rollingVolume'
-import {
-  createPluginHost,
-  RendererPluginManager,
-  wrapPaneInfo,
-  type PluginHostImpl,
-  type RendererPlugin,
-  type RendererPluginWithHost,
-} from '../foundation/plugin/index'
-import { makePluginLayerId } from '../foundation/plugin/rendererLayerId'
-import { createLayerFromPlugin } from '../rendering/scene/createLayerFromPlugin'
-import {
-  computed,
-  createSignal,
-  effect,
-  type Computed,
-  type ReadonlySignal,
-  type Signal,
-  type WritableSignal,
-} from '../foundation/reactivity/signal'
-import type { LegendTemplateContext } from './renderers/Indicator/mainIndicatorLegendContext'
-
-import { InteractionController, type InteractionSnapshot } from './controller/interaction'
+} from '../features/alerts/rollingVolume.js'
+import type { AlertController, MarketSnapshot } from '../features/alerts/types.js'
 
 import {
   buildPaneScaleTypesFromSetting,
-  resolvePriceScaleTypeSetting,
   type ChartSettings,
-} from '../foundation/config/chartSettings'
-import { resolveMarketDataCacheMaxBytes } from '../data/buffer/marketDataPolicy'
-import { AUTO_SOURCE_ID } from '../data/buffer/seriesRepository'
-import { lookupInstrumentsBySymbol } from '../data/provider/instrumentSearch'
-import { marketDataProviderRegistry } from '../data/provider/registry'
+  resolvePriceScaleTypeSetting,
+} from '../foundation/config/chartSettings.js'
+import {
+  createPluginHost,
+  type PluginHostImpl,
+  type RendererPlugin,
+  RendererPluginManager,
+  type RendererPluginWithHost,
+  wrapPaneInfo,
+} from '../foundation/plugin/index.js'
+import { makePluginLayerId } from '../foundation/plugin/rendererLayerId.js'
+import {
+  type Computed,
+  computed,
+  createSignal,
+  effect,
+  type ReadonlySignal,
+  type Signal,
+  type WritableSignal,
+} from '../foundation/reactivity/signal.js'
+import type { KLineData } from '../foundation/types/price.js'
 import {
   createDefaultRendererHostSync,
+  getVisibleCanvas,
   type RendererBackend,
   type RendererHost,
-} from '../rendering/render/index'
-import type { KLineData } from '../foundation/types/price'
-
-import type { IndicatorScheduler } from './indicators/scheduler'
-import type { CustomMarkerEntity, MarkerManager } from './marker/registry'
-import type { ChartModeHandler } from './modes/types'
-import type { ScaleType } from './utils/tickPosition'
-
+} from '../rendering/render/index.js'
+import { createLayerFromPlugin } from '../rendering/scene/createLayerFromPlugin.js'
+import type {
+  ChartDom,
+  ChartOptions,
+  IndicatorInstance,
+  PaneSpec,
+  SubPaneInfo,
+  Viewport,
+  ViewportState,
+} from './chartTypes.js'
+import { InteractionController, type InteractionSnapshot } from './controller/interaction.js'
 // ===== 普通 imports，按路径字母排序 =====
-import { ChartDataManager } from './data/chartDataManager'
-import { ComparisonCommands } from './data/comparisonCommands'
-import { symbolInfoFromSpec } from './data/symbolInfo'
-import { ChartDrawingFacade } from './facade/chartDrawingFacade'
-import { ChartIndicatorFacade } from './facade/chartIndicatorFacade'
-import { ChartMarkerFacade } from './facade/chartMarkerFacade'
-import { ChartPaneFacade } from './facade/chartPaneFacade'
-import { ChartThemeFacade } from './facade/chartThemeFacade'
-import { ChartZoomFacade } from './facade/chartZoomFacade'
-import { ChartIndicatorManager } from './indicators/chartIndicatorManager'
-import { resolveStateKey } from './indicators/indicatorMetadata'
-import { ChartPaneLayout } from './layout/chartPaneLayout'
-import { UpdateLevel, type VisibleRange } from './layout/pane'
-import { KLineMode } from './modes/kLineMode'
-import { TimeShareMode } from './modes/timeShareMode'
-import { MarketSessionRegistry } from './market/marketSessionRegistry'
-import { resolveSymbolMarketSession } from './market/resolveSymbolMarketSession'
-import { PaneRenderer } from './paneRenderer'
-import { ChartRenderer, mergeUpdateLevel } from './render/chartRenderer'
-import { ChartStateKernel } from './state/chartStateKernel'
-import type { ViewWorkspacePersistence, ViewWorkspacesSnapshot } from './state/viewWorkspace'
-import type { RangeSelectionState } from './state/interactionState'
+import { ChartDataManager } from './data/chartDataManager.js'
+import { ComparisonCommands } from './data/comparisonCommands.js'
+import { symbolInfoFromSpec } from './data/symbolInfo.js'
+import type { DrawingInteractionController } from './drawing/interaction.js'
+import type { DrawingToolId } from './drawing/toolConfig.js'
+import { ChartDrawingFacade } from './facade/chartDrawingFacade.js'
+import { ChartIndicatorFacade } from './facade/chartIndicatorFacade.js'
+import { ChartMarkerFacade } from './facade/chartMarkerFacade.js'
+import { ChartPaneFacade } from './facade/chartPaneFacade.js'
+import { ChartThemeFacade } from './facade/chartThemeFacade.js'
+import { ChartZoomFacade } from './facade/chartZoomFacade.js'
+import { ChartIndicatorManager } from './indicators/chartIndicatorManager.js'
+import { resolveStateKey } from './indicators/indicatorMetadata.js'
+import type { IndicatorScheduler } from './indicators/scheduler.js'
+import { ChartPaneLayout } from './layout/chartPaneLayout.js'
+import { UpdateLevel, type VisibleRange } from './layout/pane.js'
+import type { CustomMarkerEntity, MarkerManager } from './marker/registry.js'
+import { MarketSessionRegistry } from './market/marketSessionRegistry.js'
+import { resolveSymbolMarketSession } from './market/resolveSymbolMarketSession.js'
+import { KLineMode } from './modes/kLineMode.js'
+import { TimeShareMode } from './modes/timeShareMode.js'
+import type { ChartModeHandler } from './modes/types.js'
+import { PaneRenderer } from './paneRenderer.js'
+import { ChartRenderer, mergeUpdateLevel } from './render/chartRenderer.js'
+import type { LegendTemplateContext } from './renderers/Indicator/mainIndicatorLegendContext.js'
+import { ChartStateKernel } from './state/chartStateKernel.js'
+import type { RangeSelectionState } from './state/interactionState.js'
 import {
+  type ChartDataView,
   ChartDataViewId,
   isTimeShareDataView,
   resolveChartWorkspaceId,
-  type ChartDataView,
-} from './state/modeState'
-import { ChartViewportManager } from './viewport/chartViewportManager'
-import { ViewportScrollBridge } from './viewport/viewportScrollBridge'
-import { ChartZoomController } from './utils/chartZoomController'
-import { getPhysicalKLineConfig } from './utils/klineConfig'
-import type {
-  ChartDom,
-  PaneSpec,
-  ChartOptions,
-  Viewport,
-  ViewportState,
-  IndicatorInstance,
-  SubPaneInfo,
-} from './chartTypes'
-import type { DrawingToolId } from './drawing/toolConfig'
-import type { DrawingInteractionController } from './drawing/interaction'
-import {
-  FIVE_DAY_TIME_SHARE_PERIOD,
-  isTimeSharePeriod,
-  TIME_SHARE_PERIOD,
-  type SymbolSpec,
-  type SymbolInfo,
-  type CustomDataSource,
-} from '../controllers/types'
-import type { AlertController, MarketSnapshot } from '../features/alerts/types'
+} from './state/modeState.js'
+import type { ViewWorkspacePersistence, ViewWorkspacesSnapshot } from './state/viewWorkspace.js'
+import { ChartZoomController } from './utils/chartZoomController.js'
+import { getPhysicalKLineConfig } from './utils/klineConfig.js'
+import type { ScaleType } from './utils/tickPosition.js'
+import { ChartViewportManager } from './viewport/chartViewportManager.js'
+import { ViewportScrollBridge } from './viewport/viewportScrollBridge.js'
 
-export type { InteractionSnapshot }
-
-// ===== 重新导出 =====
-export { getPhysicalKLineConfig }
 export type {
   ChartDom,
   ChartOptions,
@@ -128,7 +123,10 @@ export type {
   SubPaneInfo,
   Viewport,
   ViewportState,
-} from './chartTypes'
+} from './chartTypes.js'
+export type { InteractionSnapshot }
+// ===== 重新导出 =====
+export { getPhysicalKLineConfig }
 
 type ResolvedChartOptions = Omit<ChartOptions, 'kWidth' | 'kGap'>
 
@@ -230,7 +228,7 @@ export class Chart {
       initialSettings?: Partial<ChartSettings>
       initialViewWorkspaces?: ViewWorkspacesSnapshot
       marketSessions?: Readonly<
-        Record<string, import('../foundation/utils/sessionTimeLabels').MarketSessionConfig>
+        Record<string, import('../foundation/utils/sessionTimeLabels.js').MarketSessionConfig>
       >
     },
   ) {
@@ -459,7 +457,8 @@ export class Chart {
       zoom: this.kernel.zoom,
       options: this.kernel.options,
       viewport: this.kernel.viewport,
-      commitViewportScroll: (targetScrollLeft) => this.viewportScrollBridge.commit(targetScrollLeft),
+      commitViewportScroll: (targetScrollLeft) =>
+        this.viewportScrollBridge.commit(targetScrollLeft),
       getDataManager: () => this.dataManager,
       getIndicatorManager: () => this.indicatorManager,
       getActiveMode: () => this.activeMode,
@@ -1019,7 +1018,7 @@ export class Chart {
   }
 
   /** 返回图表与 Agent 共用的实例级行情缓存。 */
-  getMarketDataCache(): import('../data/buffer/marketDataCache').MarketDataCache {
+  getMarketDataCache(): import('../data/buffer/marketDataCache.js').MarketDataCache {
     return this.dataManager.marketDataCache
   }
 
@@ -1029,7 +1028,7 @@ export class Chart {
   }
 
   /** 获取渲染数据源（分时图下为 TimeShareData，K线图为 KLineData） */
-  getRenderData(): ReadonlyArray<KLineData | import('../foundation/types/price').TimeShareData> {
+  getRenderData(): ReadonlyArray<KLineData | import('../foundation/types/price.js').TimeShareData> {
     return this.dataManager.getRenderData()
   }
 
@@ -1189,6 +1188,8 @@ export class Chart {
       }
       this.renderer.clearCachedFrame()
       this.layoutManager.layoutPanes()
+      // 尺寸变了：指针派生态（含绘图悬停目标）需按新几何重算，否则光标会陈旧到下一次指针移动
+      this.interaction.invalidateHover()
       this.scheduleDraw()
       return
     }
@@ -1199,6 +1200,7 @@ export class Chart {
     }
     this.renderer.clearCachedFrame()
     this.layoutManager.layoutPanes()
+    this.interaction.invalidateHover()
     this.scheduleDraw()
   }
 
@@ -1275,8 +1277,7 @@ export class Chart {
       return
     }
 
-    const surface = this.rendererHost.renderer.surface as { canvas?: HTMLCanvasElement }
-    const canvas = surface.canvas
+    const canvas = getVisibleCanvas(this.rendererHost.renderer.surface)
     if (!canvas) return
 
     canvas.classList.add('gpu-scene-canvas')
@@ -1385,6 +1386,38 @@ export class Chart {
     }
   }
 
+  /**
+   * 按指针位置重算绘图悬停目标（none / 锚点 / 平移手柄 / 线身），宿主据此切换光标。
+   * 由 InteractionController 在 hover flush 中调用，与本帧几何同代。
+   */
+  updateDrawingHover(clientX: number, clientY: number): void {
+    if (this.drawingSession === null) {
+      this.clearDrawingHover()
+      return
+    }
+    this.kernel.interaction.actions.setDrawingTargetHover(
+      this.drawingSession.getHoveredTarget({ clientX, clientY }, this.dom.container),
+    )
+  }
+
+  /** 冻结绘图悬停目标：图元拖拽开始时调用，拖拽期间不再被实时命中改写。 */
+  freezeDrawingHover(): void {
+    if (this.drawingSession === null) return
+    this.kernel.interaction.actions.setDrawingDragTarget(
+      this.kernel.interaction.readonly.hoveredDrawingTarget.peek(),
+    )
+  }
+
+  /** 解冻绘图悬停目标：图元拖拽结束后调用，恢复为实时命中。 */
+  unfreezeDrawingHover(): void {
+    this.kernel.interaction.actions.setDrawingDragTarget(null)
+  }
+
+  /** 清除绘图悬停目标：指针离开画布、悬停被清空或切换绘图工具时调用。 */
+  clearDrawingHover(): void {
+    this.kernel.interaction.actions.setDrawingTargetHover('none')
+  }
+
   /** 面板比例信号 */
   get paneRatios(): ReadonlySignal<Readonly<Record<string, number>>> {
     return this.kernel.pane.readonly.paneRatios
@@ -1454,8 +1487,8 @@ export class Chart {
     this.dataManager.appendData(newData)
   }
 
-  get dataBuffer(): import('../data/buffer/dataBuffer').DataBuffer {
-    return this.dataManager.dataBuffer as import('../data/buffer/dataBuffer').DataBuffer
+  get dataBuffer(): import('../data/buffer/dataBuffer.js').DataBuffer {
+    return this.dataManager.dataBuffer as import('../data/buffer/dataBuffer.js').DataBuffer
   }
 
   checkVisibleRangeGap(): void {
@@ -1470,9 +1503,7 @@ export class Chart {
     const primary = specs[0]
     const primaryPeriod = primary?.period
     if (primary && isTimeSharePeriod(primaryPeriod)) {
-      this._timeShareMode.setMarketSession(
-        resolveSymbolMarketSession(primary, this.marketSessions),
-      )
+      this._timeShareMode.setMarketSession(resolveSymbolMarketSession(primary, this.marketSessions))
     }
 
     // 品种/周期切换时重置最新 K 线时间戳，确保新数据触发预警
@@ -1637,7 +1668,10 @@ export class Chart {
           const handled = drawingController.onPointerMove(e, this.dom.container)
           if (handled) return true
         }
+        // 绘图悬停目标不在事件里直接写：由 InteractionController 的 hover flush 与本帧几何同代推导
         if (isRightAxis) {
+          // 右轴不参与绘图悬停
+          this.clearDrawingHover()
           this.interaction.onRightAxisPointerMove(e)
         } else {
           this.interaction.onPointerMove(e)
@@ -1656,7 +1690,8 @@ export class Chart {
         }
         return false
       case 'pointerleave':
-        // pointerleave 通常不用于绘图，直接交给 interaction
+        // 指针离开画布：先清绘图悬停，再交给 interaction 处理
+        this.clearDrawingHover()
         if (isRightAxis) {
           this.interaction.onRightAxisPointerLeave(e)
         } else {

@@ -37,7 +37,7 @@ export default defineConfig({
         configFile: false,
         plugins: [
           ['@babel/plugin-proposal-decorators', { version: '2023-11' }],
-          ['@babel/plugin-transform-typescript', { allowDeclareFields: true }],
+          ['@babel/plugin-transform-typescript'],
         ],
       },
     }),
@@ -45,7 +45,9 @@ export default defineConfig({
     Icons({ compiler: 'vue3' }),
   ],
   test: {
-    environment: 'jsdom',
+    // 持久化 transform 缓存，跨 vitest 进程复用（Vitest 5+）
+    fsModuleCache: true,
+    environment: 'happy-dom',
     include: ['src/**/*.test.ts'],
     setupFiles: ['./src/test-setup.ts'],
   },

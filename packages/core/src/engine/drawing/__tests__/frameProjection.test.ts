@@ -1,66 +1,103 @@
 /** 验证绘图帧投影在绘制前一次性产出图元和轴装饰。 */
 import { describe, expect, it } from 'vitest'
-
+import { createMockRenderContext } from '@/engine/__tests__/helpers/renderTestKit'
+import {
+  type DrawingFrameProjection,
+  type DrawingKind,
+  type DrawingObject,
+  type DrawingPrimitive,
+  type LinePrimitive,
+  POINT_ROLE,
+  type PointPrimitive,
+  type RenderContext,
+} from '../../../foundation/plugin'
 import { createSignal } from '../../../foundation/reactivity/signal'
-import type { DrawingKind, DrawingObject, RenderContext } from '../../../foundation/plugin'
 import { DrawingDefinitionRegistry, DrawingStore, registerDefaultDrawingDefinitions } from '..'
+import { PREVIEW_ID } from '../DrawingState'
 import { projectDrawingsForFrame } from '../frameProjection'
+import { createDrawingObject } from './helpers/drawingTestKit'
 
 /** 构造仅覆盖趋势线投影的最小 RenderContext。 */
 function createContext(): RenderContext {
-  const context: RenderContext = {
-    ctx: {} as CanvasRenderingContext2D,
-    pane: {
-      id: 'main',
-      role: 'price',
-      height: 100,
-      yAxis: { priceToY: (price: number) => 100 - price } as any,
-    } as RenderContext['pane'],
+  const context = createMockRenderContext({
     data: [
       { timestamp: 1_000, open: 1, high: 2, low: 0, close: 1 },
       { timestamp: 2_000, open: 2, high: 3, low: 1, close: 2 },
     ],
-    period: 'daily',
-    dataView: 'kline',
-    getLogicalIndexAtTimestamp: (timestamp) => {
-      const matches = context.data.reduce<number[]>((indices, item, index) => {
-        if ((item as { timestamp?: number }).timestamp === timestamp) indices.push(index)
-        return indices
-      }, [])
-      return matches.length === 1 ? matches[0]! : null
-    },
     range: { start: 0, end: 2 },
-    scrollLeft: 0,
     kWidth: 6,
     kGap: 2,
-    dpr: 1,
     paneWidth: 100,
     kLinePositions: [7, 27],
     kLineCenters: [10, 30],
     kBarRects: [],
     viewport: { scrollLeft: 0, plotWidth: 100, plotHeight: 100 },
-    yAxisLabels: [],
-    yAxisRanges: [],
-    xAxisLabels: [],
-    xAxisRanges: [],
+    pane: { id: 'main', role: 'price', height: 100, yAxis: { priceToY: (price) => 100 - price } },
+  })
+  // 部分用例会替换 context.data，因此按调用时的数据重新解析时间戳；
+  // 命中多个同名时间戳时返回 null，避免把锚点解析到任意一根 Bar。
+  context.getLogicalIndexAtTimestamp = (timestamp) => {
+    const matches = context.data.reduce<number[]>((indices, item, index) => {
+      if (item.timestamp === timestamp) indices.push(index)
+      return indices
+    }, [])
+    return matches.length === 1 ? matches[0]! : null
   }
   return context
 }
 
+/** 基准趋势线图元，只声明用例关心的差异。 */
+const createTrendDrawing = (overrides: Partial<DrawingObject> = {}) =>
+  createDrawingObject({
+    id: 'trend',
+    kind: 'trend-line',
+    anchors: [
+      { id: 'a', time: 1_000, price: 10 },
+      { id: 'b', time: 2_000, price: 20 },
+    ],
+    ...overrides,
+  })
+
+/** 从帧投影中取出点图元（含线段中点手柄）。 */
+function pointPrimitives(
+  primitives: ReadonlyArray<DrawingPrimitive>,
+): ReadonlyArray<PointPrimitive> {
+  return primitives.filter((primitive): primitive is PointPrimitive => primitive.kind === 'point')
+}
+
+/** 从帧投影中取出线图元；其端点在选中态充当锚点。 */
+function linePrimitives(primitives: ReadonlyArray<DrawingPrimitive>): ReadonlyArray<LinePrimitive> {
+  return primitives.filter((primitive): primitive is LinePrimitive => primitive.kind === 'line')
+}
+
+/** 平滑顶底夹具：斜线 (10,90)-(30,80)，水平线 (10,95)-(30,95)。 */
+function createFlatLineDrawing(id: string): DrawingObject {
+  return createDrawingObject({
+    id,
+    kind: 'flat-line',
+    anchors: [
+      { id: 'a', time: 1_000, price: 10 },
+      { id: 'b', time: 2_000, price: 20 },
+      { id: 'h1', time: 1_000, price: 5 },
+      { id: 'h2', time: 2_000, price: 5 },
+    ],
+  })
+}
+
+/** 用单个图元跑一次帧投影，selected 决定其是否被选中。 */
+function projectSingleDrawing(drawing: DrawingObject, selected: boolean): DrawingFrameProjection {
+  const store = new DrawingStore({
+    drawings$: createSignal<ReadonlyArray<DrawingObject>>([drawing]),
+    selectedDrawingIds$: createSignal<ReadonlyArray<string>>(selected ? [drawing.id] : []),
+  })
+  const definitions = new DrawingDefinitionRegistry()
+  registerDefaultDrawingDefinitions(definitions)
+  return projectDrawingsForFrame(store, definitions, createContext())
+}
+
 describe('projectDrawingsForFrame', () => {
   it('returns selected drawing primitives and axis decorations without mutating context', () => {
-    const drawing: DrawingObject = {
-      id: 'trend',
-      kind: 'trend-line',
-      paneId: 'main',
-      visible: true,
-      anchors: [
-        { id: 'a', time: 1_000, price: 10 },
-        { id: 'b', time: 2_000, price: 20 },
-      ],
-      params: {},
-      style: { stroke: '#2962ff', strokeWidth: 1 },
-    }
+    const drawing = createTrendDrawing({ style: { stroke: '#2962ff', strokeWidth: 1 } })
     const store = new DrawingStore({
       drawings$: createSignal<ReadonlyArray<DrawingObject>>([drawing]),
       selectedDrawingIds$: createSignal<ReadonlyArray<string>>(['trend']),
@@ -79,20 +116,117 @@ describe('projectDrawingsForFrame', () => {
     expect(context.yAxisRanges).toHaveLength(0)
   })
 
-  it('attaches a persisted line label to its matching line primitive', () => {
-    const drawing: DrawingObject = {
-      id: 'labeled-trend',
-      kind: 'trend-line',
-      paneId: 'main',
-      visible: true,
-      anchors: [
-        { id: 'a', time: 1_000, price: 10 },
-        { id: 'b', time: 2_000, price: 20 },
+  it('keeps the line body stroke width unchanged when selected', () => {
+    const drawing = createTrendDrawing({ style: { stroke: '#2962ff', strokeWidth: 2 } })
+
+    const projection = projectSingleDrawing(drawing, true)
+
+    // 选中态只对齐描边，线身不加粗：线图元仍沿用图元自身的 strokeWidth。
+    expect(
+      linePrimitives(projection.primitives).map((primitive) => primitive.style?.strokeWidth),
+    ).toEqual([2])
+  })
+
+  it('keeps the anchors of an in-progress preview visible', () => {
+    // 预览只经会话 overlay 参与绘制，committed 列表里的同名 id 会被丢弃。
+    const preview = createDrawingObject({
+      id: PREVIEW_ID,
+      kind: 'horizontal-ray',
+      anchors: [{ id: 'a', type: 'point', time: 1_000, price: 25 }],
+    })
+    const store = new DrawingStore({
+      drawings$: createSignal<ReadonlyArray<DrawingObject>>([]),
+      selectedDrawingIds$: createSignal<ReadonlyArray<string>>([]),
+      getOverlay: () => [preview],
+    })
+    const definitions = new DrawingDefinitionRegistry()
+    registerDefaultDrawingDefinitions(definitions)
+
+    const projection = projectDrawingsForFrame(store, definitions, createContext())
+
+    // 预览未选中，但正在放置的锚点仍要投影。
+    expect(pointPrimitives(projection.primitives).map((primitive) => primitive.role)).toEqual([
+      'anchor',
+    ])
+  })
+
+  it('hides every anchor of an unselected drawing', () => {
+    const flatLine = projectSingleDrawing(createFlatLineDrawing('flat'), false)
+    expect(linePrimitives(flatLine.primitives).map((primitive) => primitive.showEndpoints)).toEqual(
+      [false, false],
+    )
+    expect(pointPrimitives(flatLine.primitives)).toEqual([])
+
+    // 显式锚点点图元同样不投影：未选中态只剩线与填充。
+    const ray = projectSingleDrawing(
+      createDrawingObject({
+        id: 'ray',
+        kind: 'horizontal-ray',
+        anchors: [{ id: 'a', type: 'point', time: 1_000, price: 25 }],
+      }),
+      false,
+    )
+    expect(pointPrimitives(ray.primitives)).toEqual([])
+  })
+
+  const handleCases: ReadonlyArray<{
+    label: string
+    drawing: DrawingObject
+    selected: boolean
+    midpoints: ReadonlyArray<{ x: number; y: number }>
+  }> = [
+    {
+      label: 'a selected drawing',
+      drawing: createFlatLineDrawing('flat'),
+      selected: true,
+      // 锚点屏幕位置为 (10,90)、(30,80)、(10,95)、(30,95)：手柄落在两条线的中点。
+      midpoints: [
+        { x: 20, y: 85 },
+        { x: 20, y: 95 },
       ],
+    },
+    {
+      label: 'an unselected drawing',
+      drawing: createFlatLineDrawing('flat'),
+      selected: false,
+      midpoints: [],
+    },
+    {
+      label: 'a drawing without a line table',
+      drawing: createDrawingObject({
+        id: 'trend',
+        kind: 'trend-line',
+        anchors: [
+          { id: 'a', time: 1_000, price: 10 },
+          { id: 'b', time: 2_000, price: 20 },
+        ],
+      }),
+      selected: true,
+      midpoints: [],
+    },
+  ]
+
+  it.each(handleCases)(
+    'projects a vertical handle per line midpoint for $label',
+    ({ drawing, selected, midpoints }) => {
+      const projection = projectSingleDrawing(drawing, selected)
+
+      const handles = pointPrimitives(projection.primitives).filter(
+        (primitive) => primitive.role === POINT_ROLE['translate-handle'],
+      )
+      expect(handles.map((primitive) => primitive.point)).toEqual(midpoints)
+      // 手柄统一压在所有图元之后，不被后画的图元遮住。
+      expect(handles.length === 0 ? [] : projection.primitives.slice(-handles.length)).toEqual(
+        handles,
+      )
+    },
+  )
+
+  it('attaches a persisted line label to its matching line primitive', () => {
+    const drawing = createTrendDrawing({
+      id: 'labeled-trend',
       labels: { line: { 0: { text: '趋势', position: 'start' } }, area: {} },
-      params: {},
-      style: { stroke: '#2962ff' },
-    }
+    })
     const store = new DrawingStore({
       drawings$: createSignal<ReadonlyArray<DrawingObject>>([drawing]),
       selectedDrawingIds$: createSignal<ReadonlyArray<string>>([]),
@@ -105,25 +239,22 @@ describe('projectDrawingsForFrame', () => {
     expect(projection.primitives).toEqual([
       expect.objectContaining({
         kind: 'line',
-        text: expect.objectContaining({ text: '趋势', position: 'start' }),
+        // 线段标签基线固定为 bottom：锚点即文本块底边，宿主输入框据此对齐。
+        text: expect.objectContaining({ text: '趋势', position: 'start', baseline: 'bottom' }),
       }),
     ])
   })
 
   it('attaches an arrow label to its arrow primitive', () => {
-    const drawing: DrawingObject = {
+    const drawing = createDrawingObject({
       id: 'labeled-arrow',
       kind: 'arrow',
-      paneId: 'main',
-      visible: true,
       anchors: [
         { id: 'a', time: 1_000, price: 10 },
         { id: 'b', time: 2_000, price: 20 },
       ],
       labels: { line: { 0: { text: '箭头', position: 'end' } }, area: {} },
-      params: {},
-      style: { stroke: '#2962ff' },
-    }
+    })
     const store = new DrawingStore({
       drawings$: createSignal<ReadonlyArray<DrawingObject>>([drawing]),
       selectedDrawingIds$: createSignal<ReadonlyArray<string>>([]),
@@ -140,19 +271,8 @@ describe('projectDrawingsForFrame', () => {
   })
 
   it('re-resolves timestamp anchors after older data prepends and ignores the stale index', () => {
-    const drawing: DrawingObject = {
-      id: 'trend',
-      kind: 'trend-line',
-      paneId: 'main',
-      visible: true,
-      // 创建时的 index 为 0/1；前方插入两根旧 K 线后它们应变为 2/3。
-      anchors: [
-        { id: 'a', time: 1_000, price: 10 },
-        { id: 'b', time: 2_000, price: 20 },
-      ],
-      params: {},
-      style: { stroke: '#2962ff' },
-    }
+    // 创建时的 index 为 0/1；前方插入两根旧 K 线后它们应变为 2/3。
+    const drawing = createTrendDrawing()
     const context = createContext()
     context.data = [
       { timestamp: -1_000, open: 0, high: 1, low: -1, close: 0 },
@@ -176,18 +296,7 @@ describe('projectDrawingsForFrame', () => {
   })
 
   it('does not resolve an ambiguous timestamp to an arbitrary bar', () => {
-    const drawing: DrawingObject = {
-      id: 'trend',
-      kind: 'trend-line',
-      paneId: 'main',
-      visible: true,
-      anchors: [
-        { id: 'a', time: 1_000, price: 10 },
-        { id: 'b', time: 2_000, price: 20 },
-      ],
-      params: {},
-      style: { stroke: '#2962ff' },
-    }
+    const drawing = createTrendDrawing()
     const context = createContext()
     context.getLogicalIndexAtTimestamp = (timestamp) => (timestamp === 1_000 ? null : 1)
     const store = new DrawingStore({
@@ -204,18 +313,12 @@ describe('projectDrawingsForFrame', () => {
   })
 
   it('keeps the line geometry when an endpoint is after the visible range without registering it', () => {
-    const drawing: DrawingObject = {
-      id: 'trend',
-      kind: 'trend-line',
-      paneId: 'main',
-      visible: true,
+    const drawing = createTrendDrawing({
       anchors: [
         { id: 'a', time: 1_000, price: 10 },
         { id: 'b', time: 3_000, price: 20 },
       ],
-      params: {},
-      style: { stroke: '#2962ff' },
-    }
+    })
     const context = createContext()
     context.data = [
       { timestamp: 1_000, open: 1, high: 2, low: 0, close: 1 },
@@ -241,18 +344,13 @@ describe('projectDrawingsForFrame', () => {
   })
 
   it('projects a future-slot anchor from its creation-time base bar', () => {
-    const drawing: DrawingObject = {
+    const drawing = createTrendDrawing({
       id: 'future-trend',
-      kind: 'trend-line',
-      paneId: 'main',
-      visible: true,
       anchors: [
         { id: 'a', time: 1_000, price: 10 },
         { id: 'b', time: 1_000, futureOffset: 2, price: 20 },
       ],
-      params: {},
-      style: { stroke: '#2962ff' },
-    }
+    })
     const store = new DrawingStore({
       drawings$: createSignal<ReadonlyArray<DrawingObject>>([drawing]),
       selectedDrawingIds$: createSignal<ReadonlyArray<string>>(['future-trend']),
@@ -270,15 +368,7 @@ describe('projectDrawingsForFrame', () => {
 
   /** 用单个已选中图元跑一次帧投影，断言其轴标签语义。 */
   function projectSingleAnchor(kind: DrawingKind, anchors: DrawingObject['anchors']) {
-    const drawing: DrawingObject = {
-      id: 'subject',
-      kind,
-      paneId: 'main',
-      visible: true,
-      anchors,
-      params: {},
-      style: { stroke: '#2962ff' },
-    }
+    const drawing = createDrawingObject({ id: 'subject', kind, anchors })
     const store = new DrawingStore({
       drawings$: createSignal<ReadonlyArray<DrawingObject>>([drawing]),
       selectedDrawingIds$: createSignal<ReadonlyArray<string>>([drawing.id]),

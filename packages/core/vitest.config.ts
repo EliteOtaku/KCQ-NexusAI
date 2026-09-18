@@ -22,12 +22,14 @@ export default defineConfig({
         configFile: false,
         plugins: [
           ['@babel/plugin-proposal-decorators', { version: '2023-11' }],
-          ['@babel/plugin-transform-typescript', { allowDeclareFields: true }],
+          ['@babel/plugin-transform-typescript'],
         ],
       },
     }),
   ],
   test: {
+    // 持久化 transform 缓存，跨 vitest 进程复用（Vitest 5+）
+    fsModuleCache: true,
     environment: 'node',
     include: ['src/**/*.test.ts'],
   },

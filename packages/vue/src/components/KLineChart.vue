@@ -123,6 +123,7 @@
                     @apply-template="onApplyDrawingTemplate"
                     @save-template="onSaveDrawingTemplate"
                     @delete="onDeleteDrawing"
+                    @toggle-lock="onToggleDrawingLock"
                   />
                   <CanvasToolbar v-if="isEditingLineLabel" class="drawing-label-position-toolbar">
                     <button
@@ -143,20 +144,17 @@
                 <div
                   v-if="lineLabelTarget"
                   class="drawing-line-label-editor"
-                  :style="{
-                    left: `${lineLabelTarget.x}px`,
-                    top: `${lineLabelTarget.y}px`,
-                    '--drawing-line-label-rotation': `${lineLabelTarget.rotation}rad`,
-                  }"
+                  :class="{ 'is-placeholder': !isEditingLineLabel && !lineLabelTarget.text }"
+                  :style="lineLabelEditorStyle"
                   @pointerdown.stop
                   @pointermove.stop
                   @pointerup.stop
+                  @click.stop="openLineLabelEditor"
                 >
                   <button
                     v-if="!isEditingLineLabel"
                     type="button"
                     class="drawing-line-label-editor__prompt"
-                    @click.stop="openLineLabelEditor"
                   >
                     {{ lineLabelTarget.text || '+ 添加文本' }}
                   </button>
@@ -295,49 +293,49 @@
 </template>
 
 <script setup lang="ts">
-  import { resolveSettings, type ChartSettings } from '@363045841yyt/klinechart-core/config'
+  import { formatTimestamp } from '@363045841yyt/klinechart-core'
+  import { type ChartSettings, resolveSettings } from '@363045841yyt/klinechart-core/config'
   import type {
     CanvasLegendOptions,
     RendererBackendRuntime,
   } from '@363045841yyt/klinechart-core/controllers'
   import {
-    createChartController,
-    marketDataProviderRegistry,
     type ChartController,
     type ChartMountOptions,
+    type CustomDataSource,
+    createChartController,
     type DrawingLineLabelTarget,
     type InteractionSnapshot,
     type LegendTemplateContext,
-    type SymbolSpec,
-    type SymbolInfo,
-    type CustomDataSource,
+    marketDataProviderRegistry,
     PANE_HEADER_INSET_PX,
+    type SymbolInfo,
+    type SymbolSpec,
   } from '@363045841yyt/klinechart-core/controllers'
-  import {
-    searchInstruments,
-    type InstrumentDescriptor,
-  } from '@363045841yyt/klinechart-core/market-data'
   import type {
     CustomMarkerEntity,
     MarkerEntity,
   } from '@363045841yyt/klinechart-core/engine/marker/registry'
   import type { DrawingStyle } from '@363045841yyt/klinechart-core/plugin'
   import {
-    ref,
+    type InstrumentDescriptor,
+    searchInstruments,
+  } from '@363045841yyt/klinechart-core/market-data'
+  import {
     computed,
+    nextTick,
     onBeforeUpdate,
     onMounted,
     onUnmounted,
-    watch,
-    nextTick,
+    ref,
     shallowRef,
     useSlots,
+    watch,
   } from 'vue'
   import {
-    useAggregationSources,
     type AggregationSourceDefinition,
-  } from '../composables/useAggregationSources'
-  import { formatTimestamp } from '@363045841yyt/klinechart-core'
+    useAggregationSources,
+  } from '../composables/useAggregationSources.js'
 
   const slots = useSlots()
   // 外部 slot 需要 Vue 响应式 props；默认 tooltip 走直接 DOM 更新，避免高频 VNode patch。
@@ -361,18 +359,20 @@
     setEndpoint: setAggregationSourceEndpoint,
   } = useAggregationSources(aggregationSources)
 
-  import { useChartState } from '../composables/chart/useChartState'
-  import { useChartTheme } from '../composables/chart/useChartTheme'
-  import { useDrawingManager } from '../composables/chart/useDrawingManager'
+  import { useChartState } from '../composables/chart/useChartState.js'
+  import { useChartTheme } from '../composables/chart/useChartTheme.js'
+  import { useControllerSignal } from '../composables/chart/useControllerSignal.js'
+  import { useDrawingManager } from '../composables/chart/useDrawingManager.js'
   import { useDrawingTemplates } from '../composables/chart/useDrawingTemplates'
-  import { useIndicatorManager } from '../composables/chart/useIndicatorManager'
-  import { useControllerSignal } from '../composables/chart/useControllerSignal'
-  import { useWatchlist } from '../composables/useWatchlist'
-  import { useRangeSelection } from '../composables/chart/useRangeSelection'
-  import { symbolIdentityKey } from '../composables/useSymbolSearch'
-  import { provideFullscreenTeleportTarget } from '../composables/useFullscreenTeleportTarget'
+  import { useIndicatorManager } from '../composables/chart/useIndicatorManager.js'
+  import { useRangeSelection } from '../composables/chart/useRangeSelection.js'
+  import { provideFullscreenTeleportTarget } from '../composables/useFullscreenTeleportTarget.js'
+  import { symbolIdentityKey } from '../composables/useSymbolSearch.js'
+  import { useWatchlist } from '../composables/useWatchlist.js'
 
   import BatchStockDialog from './BatchStockDialog.vue'
+  import CanvasToolbar from './common/CanvasToolbar.vue'
+  import CanvasToolbarStack from './common/CanvasToolbarStack.vue'
   import DrawingStyleToolbar from './DrawingStyleToolbar.vue'
   import DrawingTemplateSaveDialog from './DrawingTemplateSaveDialog.vue'
   import ExportProgressDialog from './ExportProgressDialog.vue'
@@ -383,8 +383,6 @@
   import RangeSelectionExport from './RangeSelectionExport.vue'
   import TopToolbar, { type SymbolItem } from './TopToolbar.vue'
   import WatchlistPanel from './WatchlistPanel.vue'
-  import CanvasToolbar from './common/CanvasToolbar.vue'
-  import CanvasToolbarStack from './common/CanvasToolbarStack.vue'
 
   // ── Props & Emits ──
   type ChartIndicatorConfig = {
@@ -934,6 +932,7 @@
     applyTemplateToSelected,
     updateDrawingLabel,
     onDeleteDrawing,
+    onToggleDrawingLock,
     setupDrawing,
   } = useDrawingManager(controller)
 
@@ -990,16 +989,45 @@
     { label: '终点', value: 'end' },
   ] as const
 
+  /**
+   * 命中框按被命中标签的绘制参数摆放：锚点贴文本块的对应边（基线定纵向、对齐定横向），
+   * 并以同一锚点旋转，保证输入框与画布文字重合。
+   */
+  const lineLabelEditorStyle = computed(() => {
+    const target = lineLabelTarget.value
+    if (!target) return undefined
+    const translateX = target.align === 'left' ? '0' : target.align === 'right' ? '-100%' : '-50%'
+    const translateY =
+      target.baseline === 'top' ? '0' : target.baseline === 'bottom' ? '-100%' : '-50%'
+    const originX = target.align === 'left' ? 'left' : target.align === 'right' ? 'right' : 'center'
+    const originY =
+      target.baseline === 'top' ? 'top' : target.baseline === 'bottom' ? 'bottom' : 'center'
+    return {
+      left: `${target.x}px`,
+      top: `${target.y}px`,
+      transform: `translate(${translateX}, ${translateY}) rotate(${target.rotation}rad)`,
+      transformOrigin: `${originX} ${originY}`,
+      fontSize: `${target.fontSize}px`,
+      textAlign: target.align,
+    }
+  })
+
   /** 打开命中线段标签的就地文本编辑器。 */
   function openLineLabelEditor(): void {
-    if (!lineLabelTarget.value) return
+    if (!lineLabelTarget.value || isEditingLineLabel.value) return
     lineLabelDraft.value = lineLabelTarget.value.text
     lineLabelPosition.value = lineLabelTarget.value.position
     isEditingLineLabel.value = true
     void nextTick(() => lineLabelInput.value?.focus())
   }
 
-  /** 提交当前线段文本，并恢复透明提示态。 */
+  /** 结束就地编辑并立即收起命中框；再次悬停时才会重新显示提示。 */
+  function closeLineLabelEditor(): void {
+    isEditingLineLabel.value = false
+    lineLabelTarget.value = null
+  }
+
+  /** 提交当前线段文本，并收起编辑器。 */
   function saveLineLabel(): void {
     const target = lineLabelTarget.value
     if (!target || !isEditingLineLabel.value) return
@@ -1010,12 +1038,12 @@
       lineLabelDraft.value,
       lineLabelPosition.value,
     )
-    isEditingLineLabel.value = false
+    closeLineLabelEditor()
   }
 
   /** 放弃当前文本草稿，不修改绘图模型。 */
   function cancelLineLabelEditor(): void {
-    isEditingLineLabel.value = false
+    closeLineLabelEditor()
   }
 
   /** 在不转移输入焦点的情况下切换线段文字位置。 */
@@ -1301,6 +1329,8 @@
   // ── 高频交互 Overlay ──
   // 鼠标坐标和帧快照只服务于 DOM overlay，不能写入 Vue ref，否则会在事件和 RAF 后各排一次 flushJobs。
   let mousePos = { x: 0, y: 0 }
+  /** 绘图拖拽按下瞬间的光标；非空表示正处于图元拖拽会话，期间光标不随 pointermove 变化。 */
+  let drawingDragCursor: string | null = null
   let latestInteractionState: InteractionSnapshot = {
     crosshairPos: null,
     crosshairIndex: null,
@@ -1316,6 +1346,7 @@
     isHoveringPaneBoundary: false,
     hoveredPaneBoundaryId: null,
     isHoveringRightAxis: false,
+    drawingHoverTarget: 'none',
   }
   const externalInteractionState = shallowRef<InteractionSnapshot>(latestInteractionState)
   const hoveredMarker = shallowRef<MarkerEntity | null>(null)
@@ -1509,9 +1540,13 @@
   }
 
   function onPointerDown(e: PointerEvent) {
+    // 记录按下瞬间的光标：若随后进入图元拖拽会话，期间沿用该 cursor 而不回落成十字线。
+    drawingDragCursor =
+      e.pointerType === 'touch' ? null : (containerRef.value?.style.cursor ?? 'crosshair')
     controller.value?.handlePointerEvent(e, {
       onPointerDown: (event, container) => {
         if (handleRangePointerDown(event, container)) {
+          drawingDragCursor = null
           return true
         }
         if (drawingController.value?.onPointerDown(event, container)) {
@@ -1553,14 +1588,18 @@
     controller.value?.handlePointerEvent(e, {
       onPointerUp: (event, container) => {
         if (handleRangePointerUp(event, container)) {
+          drawingDragCursor = null
           return true
         }
         if (drawingController.value?.onPointerUp(event, container)) {
+          drawingDragCursor = null
           return true
         }
         return false
       },
     })
+    // 非绘图拖拽（平移/框选）也在这里收尾；图元拖拽在回调内已清空。
+    drawingDragCursor = null
   }
 
   function onPointerLeave(e: PointerEvent) {
@@ -1569,6 +1608,7 @@
       return
     }
     if (!isEditingLineLabel.value) lineLabelTarget.value = null
+    drawingDragCursor = null
     controller.value?.handlePointerEvent(e)
   }
 
@@ -1895,6 +1935,33 @@
     applyThemeFromSettings(resolved.theme as string)
   }
 
+  /**
+   * 光标优先级：图元拖拽会话冻结目标 > 实时绘图悬停 > 通用 hover。
+   * 拖拽中 kernel 的 isDragging 恒为 true（记 `grabbing`），无法区分「平移」与「拖图元」，
+   * 因此图元拖拽沿用按下时认定的 cursor；标尺/平移仍走 grabbing。
+   */
+  function pickCursor(
+    snap: InteractionSnapshot,
+    dragCursor: string | null,
+    fallbackCursor: string,
+  ): string {
+    if (dragCursor !== null && snap.drawingHoverTarget !== 'none') return dragCursor
+    return resolveStageCursor(snap, fallbackCursor)
+  }
+
+  /**
+   * 舞台光标：图表平移/框选 dragging；面板分隔与绘图中点手柄 ns-resize；
+   * 图元线身 move（可整体拖动）；圆形锚点显式 default，避免沿用十字线/指针。
+   */
+  function resolveStageCursor(state: InteractionSnapshot, fallbackCursor: string): string {
+    if (state.isResizingPaneBoundary || state.isHoveringPaneBoundary) return 'ns-resize'
+    if (state.drawingHoverTarget === 'vertical-handle') return 'ns-resize'
+    if (state.drawingHoverTarget === 'all') return 'move'
+    if (state.drawingHoverTarget === 'anchor') return 'default'
+    if (state.isDragging) return 'grabbing'
+    return fallbackCursor
+  }
+
   function setupInteractionCallbacks(ctrl: ChartController): void {
     ctrl.setTooltipAnchorPositioning(false)
     ctrl.interactionState.subscribe(() => {
@@ -1903,6 +1970,13 @@
 
       const stage = chartStageRef.value
       stage?.classList.toggle('is-dragging', next.isDragging)
+      const drawingDragging = drawingDragCursor !== null && next.drawingHoverTarget !== 'none'
+      stage?.classList.toggle('is-dragging-drawing', drawingDragging)
+      if (stage && drawingDragging) {
+        stage.dataset.drawingCursor = next.drawingHoverTarget
+      } else if (stage) {
+        delete stage.dataset.drawingCursor
+      }
       stage?.classList.toggle('is-resizing-pane', next.isResizingPaneBoundary)
       stage?.classList.toggle('is-hovering-pane-separator', next.isHoveringPaneBoundary)
       stage?.classList.toggle('is-hovering-right-axis', next.isHoveringRightAxis)
@@ -1913,13 +1987,9 @@
 
       const container = containerRef.value
       if (container) {
-        container.style.cursor = next.isDragging
-          ? 'grabbing'
-          : next.isResizingPaneBoundary || next.isHoveringPaneBoundary
-            ? 'ns-resize'
-            : next.hoveredIndex !== null
-              ? 'pointer'
-              : 'crosshair'
+        // 下一帧兜底光标：本帧没有绘图会话时按通用 hover 推导。
+        const fallback = next.hoveredIndex !== null ? 'pointer' : 'crosshair'
+        container.style.cursor = pickCursor(next, drawingDragCursor, fallback)
       }
 
       // 自定义 K 线 tooltip 是调用方显式选择的 Vue slot；仅该分支保留高频响应式 props。
@@ -2195,6 +2265,23 @@
     cursor: grabbing;
   }
 
+  /* 拖拽图元时沿用锚点/手柄/线身光标；内联 `cursor` 不足以覆盖上面的 CSS 规则。 */
+  .chart-stage.is-dragging-drawing {
+    cursor: inherit;
+  }
+
+  .chart-stage.is-dragging-drawing[data-drawing-cursor='anchor'] {
+    cursor: default;
+  }
+
+  .chart-stage.is-dragging-drawing[data-drawing-cursor='vertical-handle'] {
+    cursor: ns-resize;
+  }
+
+  .chart-stage.is-dragging-drawing[data-drawing-cursor='all'] {
+    cursor: move;
+  }
+
   .chart-container {
     position: relative;
     flex: 1 1 auto;
@@ -2220,31 +2307,71 @@
     position: absolute;
     z-index: 21;
     pointer-events: auto;
-    transform: translate(-50%, -50%);
-    transform-origin: center;
+    color: var(--klc-color-ui-text);
+    line-height: var(--klc-typography-line-height-tight);
+  }
+
+  /* 外框绘制在容器上：提示态与编辑态共用同一外框，几何完全一致。
+     内容盒必须等于画布文本块，故子元素 padding/border 均为 0，避免锚点漂移。 */
+  .drawing-line-label-editor::before {
+    content: '';
+    position: absolute;
+    z-index: -1;
+    inset: -3px -8px;
+    border: 1px solid var(--klc-color-ui-border);
+    border-radius: 6px;
+    background: var(--klc-color-ui-surface);
+    box-shadow:
+      0 2px 8px rgba(0, 0, 0, 0.08),
+      0 1px 2px rgba(0, 0, 0, 0.04);
+    transition:
+      background var(--klc-motion-duration-fast) var(--klc-motion-easing-standard),
+      border-color var(--klc-motion-duration-fast) var(--klc-motion-easing-standard);
+  }
+
+  .drawing-line-label-editor.is-placeholder {
+    color: var(--klc-color-ui-muted);
+  }
+
+  .drawing-line-label-editor.is-placeholder::before {
+    border-style: dashed;
+  }
+
+  .drawing-line-label-editor:hover::before {
+    border-color: var(--klc-color-ui-border-strong);
+    background: var(--klc-color-ui-hover);
   }
 
   .drawing-line-label-editor__prompt {
-    padding: 2px 6px;
-    border: 1px dashed color-mix(in srgb, var(--chart-border) 65%, transparent);
-    border-radius: 3px;
-    color: color-mix(in srgb, var(--chart-text-secondary) 72%, transparent);
-    background: color-mix(in srgb, var(--chart-bg) 52%, transparent);
+    display: block;
+    padding: 0;
+    border: 0;
+    color: inherit;
+    background: transparent;
+    font: inherit;
+    line-height: inherit;
+    text-align: inherit;
+    white-space: pre;
     cursor: text;
-    font: 12px/1.3 inherit;
-    white-space: nowrap;
-    transform: rotate(var(--drawing-line-label-rotation));
   }
 
   .drawing-line-label-editor__input {
+    display: block;
     width: 140px;
-    padding: 3px 6px;
+    height: calc(var(--klc-typography-line-height-tight) * 1em);
+    padding: 0;
     border: 0;
-    border-radius: 3px;
-    color: var(--klc-color-ui-text);
-    background: var(--klc-color-ui-control-background);
-    font: 12px/1.3 inherit;
+    color: inherit;
+    caret-color: var(--klc-color-ui-accent);
+    background: transparent;
+    font: inherit;
+    line-height: inherit;
+    text-align: inherit;
     outline: none;
+  }
+
+  .drawing-line-label-editor__input::placeholder {
+    color: var(--klc-color-ui-muted);
   }
 
   .drawing-label-position-toolbar {
@@ -2253,19 +2380,28 @@
   }
 
   .drawing-label-position-toolbar__button {
-    padding: 3px 6px;
+    height: 26px;
+    padding: 0 10px;
     border: 0;
-    border-radius: 3px;
-    color: var(--chart-text-secondary);
+    border-radius: 4px;
+    color: var(--klc-color-ui-muted);
     background: transparent;
-    font: 12px/1.3 inherit;
+    font: inherit;
+    font-size: var(--klc-typography-font-size-md);
     cursor: pointer;
+    transition:
+      background var(--klc-motion-duration-fast) var(--klc-motion-easing-standard),
+      color var(--klc-motion-duration-fast) var(--klc-motion-easing-standard);
   }
 
-  .drawing-label-position-toolbar__button:hover,
-  .drawing-label-position-toolbar__button.is-active {
-    color: var(--chart-text);
+  .drawing-label-position-toolbar__button:hover {
+    color: var(--klc-color-ui-text);
     background: var(--klc-color-ui-hover);
+  }
+
+  .drawing-label-position-toolbar__button.is-active {
+    color: var(--klc-color-ui-accent);
+    background: color-mix(in srgb, var(--klc-color-ui-accent) 16%, transparent);
   }
 
   .chart-container::-webkit-scrollbar {
