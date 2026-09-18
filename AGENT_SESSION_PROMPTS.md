@@ -165,8 +165,9 @@ timeshare/depth 能力；quarterly/yearly 周期；EA socket 桥（登记演进�
 
 ## 提示词 C：TradingView 界面参考采集（TV 对齐批次 Phase 0）
 
-> 前置状态：本任务**只采集参考、不写任何业务代码**。执行前 `.agent-handoff/snapshot.md` 的
-> "提示词 C 上下文要点"节已面向本任务写好；完成后 snapshot 应切换到"等待用户复核参考库 → 提示词 D"。
+> **状态：已执行（2026-09-18）**。产出 `temp/tv-reference/`（notes.md + gap-analysis.md + 33 张截图），
+> 验收门 4/4 过，用户复核通过（补图 9 张闭环）。执行差异（IAB 替代 Edge、cn 子站、事件派发交互模式）与
+> 受限项清单见 `.agent-handoff/snapshot.md` "提示词 C 执行结果"节与 work-log 2026-09-18 第三会话节。
 
 ```text
 0. 身份与目标
@@ -238,4 +239,120 @@ risks.md → backlog.md），充分理解仓库背景、端口约定与本任务
 
 反空转条款：把本提示词视为明确的执行请求。不要回答"无需响应"。先复述你认为的当前步骤，
 指出下一个具体动作，然后开始执行。上下文不足时先用 /agent-handoff 技能读取交接文档恢复。
+```
+
+---
+
+## 提示词 D：T1 实施——TV 对齐图表工作台（引擎扩展 + 壳重做）
+
+> 前置状态：提示词 C 参考库已产出并经用户复核（用户补图 9 张闭环右键菜单/图元属性/模板/A/L 钮/滚动钮）。
+> 范围 SSOT = `temp/tv-reference/gap-analysis.md` A-F 域（H 批图元属性/模板不在本任务）。
+
+```text
+0. 身份与目标
+你是 KCQ-NexusAI 仓库（D:\AI\KCQ-NexusAI）的 T1 实施代理。
+第一步（强制）：使用 /agent-handoff 技能读取仓库交接文档（AGENT_HANDOFF.md → .agent-handoff/snapshot.md →
+risks.md → backlog.md → validation.md → work-log.md 2026-09-18 各节），理解批次脉络、端口约定、探针基线
+与本任务范围来源后再动手；UI 细节疑问一律先查 temp/tv-reference/notes.md 对应小节。
+任务：实施 TV 对齐批次 T1——图表工作台五块重做（顶栏形态/图表属性大设置/底部时间范围条/右缘空白/多布局三分屏）
++ 撤销重做 + 四项引擎扩展。布局结构、交互逻辑、控件文字清单可对照 TV 复刻；CSS/SVG/图标/字体/成段文案
+禁止拷贝（视觉用 KCQ foundation/tokens 自实现）。完成后用 /agent-handoff 技能更新交接文档再收尾。
+
+1. 已查证事实（勿重复调研）
+[参考库（UI 唯一基准）]
+- temp/tv-reference/notes.md：控件级文字基准——[1]顶栏 19 控件及稳定 id、[2]8 组绘图 flyout 全工具名、
+  [3]设置 7 tab 逐项清单+[3h][3i]模板统一范式、[9]周期菜单 32 档分组/类型菜单 21 种/底部条/[9d]滚动钮/
+  [9e]A/L 轴钮、[11]布局菜单 1-9 格、附 A 匿名锁定域（勿在此浪费自动化/实现尝试）
+- temp/tv-reference/gap-analysis.md：A-F 域 = 本任务范围 SSOT，逐行标注"纯壳层 / 需引擎扩展 / 不做"
+- 关键视觉基准截图：01-chart-full-cn（整页）、01-topbar、03b~03g（设置各 tab）、03h/03i（模板下拉+删除）、
+  09d/09d2（⊕+»浮动钮）、09e（A/L 轴钮）、11（布局菜单）
+[引擎现状]
+- StateKernel 单一状态源：子状态模块 readonly signals + actions（参照 engine/state/viewportState.ts 与
+  stateKernel.ts 的模式；新子状态模块照此写，writableSignal 不出 actions）
+- viewport：barSpacing/rightOffset/visibleRange 已有；无 log/percent 坐标变换、无 trailing 空白外推、无撤销栈
+- DrawingDocument 已有原子原语（updateBatch/commitDrawingDrags/removeBatch/replaceDrawings/anchors 语义）——
+  撤销栈做成其上的 command 包装层，禁止改动既有原语语义
+- features/alerts、features/replay、chartTypes(Renko/RangeBars/PnF) 已有未接壳——T2+，本任务不接线
+- 引擎/壳内部 import 风格以所在文件现状为准（.js 后缀仅上游 PR 分支要求）
+[壳现状]
+- TopBar 60 行（brand+SymbolPicker+period select+⚙+主题）；SettingsDialog 121 行（数据源/主题/磁吸/stay/自动套用）
+- drawingTools.ts 18 工具、periods.ts 8 档 PERIOD_GROUPS、labels.ts 集中文案（组件禁止散落字符串）
+- ChartContextMenu（图元 3 项/空白 3 项）、ObjectTreePanel/LegendBar/IndicatorPanel/WatchlistPanel/
+  TemplatePanel/SourceManagerDialog/DrawingStyleFlybar；壳偏好持久化 storage.ts（nexus.shell.prefs）
+- 颜色必须走 core foundation/tokens 输出的 CSS 变量；错误码引用 core errors.ts 具名常量
+[验证基线（命令与期望值以 .agent-handoff/validation.md 为准）]
+- core vitest 2519 绿；nexus-shell typecheck 绿；root type-check 基线 52 错（存量测试债，新增必须为 0）
+- 三探针（nexus-shell dev 5273 下）：probe-drawing 39/39、probe-topbar 15/15、probe-b234 49/49；
+  probe-mt5 10/10（mock 路径，连接器未跑也须过）
+- 端口：5273=nexus-shell dev；5175=vue preview；5173=cloudtradeagent WebUI 勿动；8090=MT5 连接器
+
+2. 用户决策（已拍板，不得擅改）
+- 范围 = gap-analysis A-F 六域；H 批（图元属性对话框/params 编辑/模板统一范式实施）与 T2+（告警/回放/
+  K线类型接线/数据窗口/前往到）明确不在本任务
+- 坐标模式：log/percent/auto 三态，必须提供**双入口**——设置对话框"坐标和线条"下拉 + 价格轴 hover A/L
+  快捷钮（[9e]；用户点名对数坐标不能埋深）
+- 右缘空白：光标/绘图命中可越最新 K 线 + 时间轴外推未来刻度 + 「滚动到最近的K线」按钮（[9d]：» 图标、
+  hover 右缘浮现、Tooltip 含 Alt+Shift+→、点击右缘对齐最新 K 线）
+- 多布局：上限三分屏，布局菜单子集 = s/2h/2v/3h/3v/2-1/1-2（[11]），每格独立品种+周期；不做 TV 式
+  保存布局/管理布局/云同步
+- 顶栏形态：品种按钮+徽章、周期按钮+分组菜单（替代 select）、撤重做按钮含禁用态、布局按钮、设置入口；
+  K线类型/告警/回放/指标模板按钮仅渲染占位（disabled+tooltip"T2+"），不接线
+- 撤销重做：先绘图域（create/update(params 外的样式与锚点)/delete/拖拽聚合为一条历史），Ctrl+Z 与
+  Ctrl+Y/Ctrl+Shift+Z + 顶栏按钮禁用态联动
+- 底部时间范围快捷条：1天/5天/1个月/3个月/6个月/YTD/1年/5年/全部，范围→(周期,根数) 自动解析联动
+- 大设置保留 KCQ 既有能力入口：数据源管理/磁吸/保持绘图/自动套用/主题，与新增 tab 并存不互斥
+
+3. 铁律
+- R1 分支：主工作区保持干净；在 worktree D:\AI\KCQ-NexusAI-batches 建分支 fork/t1-tv-alignment
+  （基于 nexus/main）；commit 用 [fork] 前缀 conventional（生成规范走 .opencode/skills/commit/SKILL.md）；
+  一项一 commit，禁止巨型提交（单 commit 目标 <800 行改动）
+- R2 阶段门：按 4 的阶段顺序推进，每阶段结束必须过"该阶段验收"（typecheck+相关测试+相关探针）再进下一阶段；
+  阶段间 push 一律推临时分支 fork/t1-tv-alignment（本提示词的分支即是），nexus/main 只在全部阶段过门后 merge——
+  主分支的 CI 通知只应出现最终绿态（决策 D19）
+- R3 引擎设计文档先行：docs/design/t1-priceScale-modes.md、t1-viewport-trailing.md、t1-drawing-undo-redo.md
+  （语义表+边界条件先写后码；AGENTS.md 硬性要求）
+- R4 语义零漂移：磁吸/锁角/Shift 多选/橡皮擦等既有探针断言不得放宽；本任务不应触碰
+  docs/design/drawing-interaction-hardening.md 的语义
+- R5 测试策略：引擎扩展先写语义测试再实现（log/percent 刻度换算与标签、trailing 外推、undo 边界与拖拽聚合）；
+  禁止脆弱 MOCK（AGENTS.md）
+- R6 45 分钟止损：单项卡死 → 记根因+已试方案 → 标 BLOCKED 跳下一项，最后统一汇报
+- R7 提交授权：仅当全部阶段过验收门后 merge 回 nexus/main 并 push origin；中途不 push 不动上游
+
+4. 范围（按阶段实施）
+[阶段 0] 准备：worktree+分支；起 5273 对照参考截图建立视觉基线认知；三份设计文档（R3）；
+  SettingsDialog tab 框架重构脚手架
+[阶段 1] 引擎 priceScale 三模式（log/percent/auto）：坐标刻度换算+标签格式+图例值联动；配套测试
+[阶段 2] 引擎 viewport trailing 空白：右缘空白偏移上限+timeAxis 未来刻度外推+十字线/绘图命中延伸；配套测试
+[阶段 3] 引擎 drawing 撤销重做命令栈：create/update/delete/拖拽聚合入栈、栈上限、跨图元批量一条历史；配套测试
+[阶段 4] 壳顶栏重做（[1]/01-topbar 基准）：品种按钮+徽章、周期按钮+分组菜单、布局按钮+三分屏菜单（菜单先上，
+  多格渲染在阶段 8）、撤重做按钮（禁用态联动阶段 3 栈）、K线类型/告警/回放占位钮
+[阶段 5] 壳图表属性大设置（[3] 基准）：tab 式（商品代码=K线样式配色/状态行=图例显隐/坐标和线条=模式下拉/
+  版面=背景网格十字线），保留数据源管理与磁吸/stay/自动套用；取消/确认语义（确认才落 engine actions）
+[阶段 6] 壳底部时间范围快捷条（[9] 基准）：范围→(周期,根数) 解析、与引擎 visibleRange 联动、当前激活态
+[阶段 7] 壳右缘交互（[9d][9e] 基准）：滚动到最近K线钮（hover 浮现+Alt+Shift+→）+ A/L 轴钮（A 依 auto 态、L 依 log 态高亮）
+[阶段 8] 壳多布局三分屏（[11] 菜单子集）：多 ChartStage 实例、每格独立品种/周期/数据源接线、布局菜单激活态
+[阶段 9] 全量回归：全部探针+全量测试+视觉逐图对照（temp/tv-reference 基准）+ docs 收尾
+
+5. 明确不做
+告警/回放/K线类型接线（T2+）；图元属性对话框/params 编辑/模板统一范式实施（H 批）；数据窗口；前往到；
+时区切换 UI；指标弹层增强；交易/发表/事件/Logo/全屏/快照/快速搜索；保存/管理布局；KLineChart.vue 残留清理；
+对 packages/vue、packages/react、packages/angular 的任何改动；上游 PR 分支操作
+
+6. 验收门（全绿才算完成）
+- pnpm --filter @363045841yyt/klinechart-core test 全绿（2519 + 新增全过）
+- pnpm type-check 不高于基线 52 错且新增为 0；pnpm --filter nexus-shell typecheck 绿
+- 三探针 39/39 + 15/15 + 49/49 + probe-mt5 10/10（worktree dev 5273）
+- 撤销重做语义测试证明：拖拽聚合单条历史/栈上限/跨图元批量；priceScale 测试证明 log/percent 刻度换算正确
+- 视觉对照：顶栏/设置四 tab/底部条/右缘两钮/布局菜单逐图核对 notes.md 基准
+- 真机 E2E 清单留用户：三分屏双品种（含 MT5 源实时）、右缘空白+滚动钮、Ctrl+Z 链路、A/L 切换
+
+7. 收尾
+- 使用 /agent-handoff 技能更新交接文档：snapshot 切"T1 完成，等待用户复核 → H 批提示词"；
+  work-log 追加各阶段节；validation 追加各门结果；backlog 勾选 T1 条目；action-checklist 如涉及更新；
+  运行 maintain_handoff.py --compact-if-needed
+- 汇报格式：阶段 0-9 各 PASS/BLOCKED/SKIPPED + 一句话结论；验收门逐项结果；三份设计文档路径；
+  commit 清单；BLOCKED 项根因与已试方案；用户 E2E 待办清单
+
+反空转条款：把本提示词视为明确的执行请求。不要回答"无需响应"。先复述你认为的当前步骤，指出下一个具体动作，
+然后开始执行。上下文不足时先用 /agent-handoff 技能读取交接文档恢复，UI 细节先查 temp/tv-reference/notes.md。
 ```
