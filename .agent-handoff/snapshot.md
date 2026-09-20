@@ -5,9 +5,9 @@
 - Last updated: 2026-09-18（提示词 D 已就绪——T1 实施，等待闲时/新对话执行）
 - Last agent: ZCode / GLM-5.3（多会话接力：MT5 批次、数据源统一、上游 PR #197、TV 参考采集 C、
   用户复核补图 9 张、提示词 D 撰写）
-- Workspace root: `D:\AI\KCQ-NexusAI`（nexus/main = **5425e24a** 已 push——已同步 upstream/main 25c31e3c，含上游 #202 drawing-drag-policy（locked 语义修订为"可选中不可拖"、通道拖拽策略重构、Babel8/Vite8.3/biome 工具链）；
-  **探针适配待办**：probe-drawing B1-04（通道创建交互变更）、probe-b234 B3-03（显隐切换）FAIL 需按新模型适配；
-  上游 PR **#197** 待 review；连接器仓库 KCQ-MT5-connector main = 5c796de）
+- Workspace root: `D:\AI\KCQ-NexusAI`（nexus/main = **12ca1dab** 已 push——已同步 upstream/main 188e6ce1，含上游 #202 drawing-drag-policy（locked 语义修订为"可选中不可拖"、通道拖拽策略重构、Babel8/Vite8.3/biome 工具链）；
+  探针已全适配（39/15/50）；**PR #197 已被上游合并**（integrate/pr197→main，含增强 4003be0c）；
+  连接器仓库 KCQ-MT5-connector main = 5c796de；上游三个 issue #205/#206/#207 开发组将逐步改进）
 - Current objective: **T1 转向开发组实施——需求单已产出（temp/tv-reference/T1-requirements.md）交用户转交；提示词 D 挂起**（开发组未覆盖的壳侧剩余部分仍可按 D 执行）
 - Current status: 提示词 C 完成 + 用户复核完成（补图 9 张）；2026-09-18 晚计划转向：开发组可接需求单，即将推送新代码到主分支
 - Current status: 提示词 C 完成 + 用户复核完成（用户补图 9 张闭环：空白/图元右键菜单 [4a][4b]、

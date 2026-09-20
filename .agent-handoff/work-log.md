@@ -1,13 +1,5 @@
 # Current Work Log
 
-## 2026-09-14（第三任务·编辑路径磁吸）
-
-- Objective: 拖动已有图元锚点时吸附 OHLC，修饰键语义与绘制路径同源（fork/engine-drag-anchor-magnet，worktree 实施）
-- 设计决策: 锚点拖拽本就绝对跟随指针（DragHandler.moveAnchor 直接覆写锚点），磁吸经 handleDragMove 新增第 4 可选参注入 resolveDrawingPointer，仅 anchorIndex 分支生效；整线拖拽是位移增量语义（全体锚点平移），无单一落点基准，不吸附——水平线/垂直线整线拖拽吸附需先定义 delta→snap 语义，登记后续；cursor 命中/框选仍绝不传磁吸（按下命中不得漂移）
-- Changed files: `DragHandler.ts`（handleDragMove 可选磁吸参数，anchorIndex 分支限定）；`interaction.ts`（handleDragMove 传 resolveMagnetOptions(e)）；`__tests__/dragHandler.magnet.test.ts`（新增：锚点吸附/无磁吸基线/整线免疫）；`interaction.magnet.test.ts`（adapter 支持注入图元 + 编辑路径磁吸/Shift 互斥用例）；`docs/design/drawing-interaction-hardening.md`（接入点章节更新）
-- Commits: 56025ea9([pr] feat) → no-ff merge 2caf16e0 已 push origin/nexus/main
-- Result: PASS——core 2473 绿（218 文件，净增 5）、探针 39/39（B1-01 整线拖拽不受影响符合设计）
-
 ## 2026-09-14（第四会话·批2 收尾 + 批3/批4）
 
 - Objective: 消费 cloudtradeagent 主线交接简报，完成批2 剩余 + 批3 + 批4（shell/b2-b4，worktree 实施）
@@ -354,3 +346,21 @@
 - 用户确认：CI 中间态红通知不应发到 nexus/main（本次 #202 合并连收 4 封失败邮件）
 - D19 登记 decisions.md：多轮 CI 修复一律临时分支推进，每轮 push 该分支验证，全绿后 merge nexus/main；
   提示词 D 的 R2 同步补充（阶段 push 推 fork/t1-tv-alignment，nexus/main 只收最终绿态）
+
+## 2026-09-20（同步上游 188e6ce1：PR #197 进上游 + 大批次新功能）
+
+- 背景：开发组看过三个 issue（#205-207）将逐步改进；上游 main 前进到 188e6ce1（24+ 提交，324 文件）
+- **PR #197（MT5 链路）正式进上游**：integrate/pr197 集成分支收编我们的原提交 + 增强
+  （4003be0c MT5 进 setup/dev flow）；nexus/main 与上游的 MT5 双版本分叉就此对齐
+- 新功能要点：bbc79641 图表显示时区、706e0606 右轴宽度自适应极值、560674e8 bar aggregation
+  进序列身份（breaking：Mt5LiveSource 构造 3-5 参）、188e6ce1 agent 模型设置对话框重做、
+  d460206c agent 输入下拉向上弹、e9cbf19e type-check:tests REQUIRED 门禁、6718210a Pi 0.85.1（breaking）
+- 同步方式（D19 首次实践）：临时分支 fork/sync-upstream-20260919 合并验证，全绿后 FF 进 nexus/main
+- 冲突 16 文件：AA（mt5 五件套）取上游（=我们 PR 原提交+增强）；UU 取上游（PR 内容已收编）；
+  scripts 三个取上游（MT5 集成）；**踩坑一次**：目录级 `git add data/` 强制 resolve 了带标记版本，
+  后续 checkout --theirs 取到污染 index——改用 git show upstream/main:path 重写并 amend
+- 适配修复三个 commit：updateBars 去重（chartDataManager 自动合并双侧保留）、
+  Mt5LiveSource 补 barAggregation 参数（壳侧固定 original）、_testChartAgent lookup 返回类型（新门禁暴露）
+- 验证链：install/build:packages/react+angular/core 2587/nexus-shell typecheck/attw 全绿/三探针 39-15-50；
+  CI run 35522663176 全绿（build+test × node 22.23.2/24.21.0——上游 CI 矩阵升最新 LTS）
+- nexus/main = 12ca1dab 已 push
