@@ -33,7 +33,7 @@
           <div class="custom-tooltip">
             <div class="custom-tooltip__title">
               <span>{{ hoverData.symbol }}</span>
-              <span>{{ formatTimestamp(hoverData.timestamp, { timeZone: 'Asia/Shanghai' }) }}</span>
+              <span>{{ formatTimeInTimeZone(hoverData.timestamp, { timeZone: 'Asia/Shanghai', showTime: false }) }}</span>
             </div>
             <div class="custom-tooltip__price"
                 :style="{ color: hoverData.close >= hoverData.open ? upColor : downColor }">
@@ -72,6 +72,7 @@
 <script setup lang="ts">
   import { ref, computed, provide, inject, type Ref, type InjectionKey } from 'vue'
   import DebugControls from './DebugControls.vue'
+  import { useChartDocumentTitle } from './useChartDocumentTitle'
   import { AgentWorkbenchShell, KlineChart, type AgentPanelWidthStorage } from '../src/index'
   import { BrowserAgentBridge } from '../src/features/agent/browser-agent-bridge'
   import {
@@ -82,7 +83,7 @@
     DepthConnector,
     createHeatmapController,
   } from '@363045841yyt/klinechart-core/controllers'
-  import { formatTimestamp } from '@363045841yyt/klinechart-core'
+  import { formatTimeInTimeZone } from '@363045841yyt/klinechart-core'
 
   /** 硬编码演示数据：主品种 CUSTOM.DEMO（15 根日 K） */
   const DEMO_MAIN_DATA: KLineData[] = [
@@ -556,6 +557,9 @@
   // 产品内不传 settings prop，图表内部以 localStorage 偏好 + 默认值自行接管
   const currentTheme = ref<'light' | 'dark'>('dark')
 
+  /** 主品种 → 浏览器 Tab 标题同步器，控制器就绪时绑定。 */
+  const { bind: bindDocumentTitle } = useChartDocumentTitle()
+
   function onThemeChange(theme: 'light' | 'dark') {
     currentTheme.value = theme
   }
@@ -564,6 +568,7 @@
   function onControllerReady(controller: ChartController) {
     agentBridge.bindChartAgent(controller.agent)
     currentTheme.value = controller.theme.peek()
+    bindDocumentTitle(controller)
   }
 
   provideFullscreenTeleportTarget(embedContainerRef)

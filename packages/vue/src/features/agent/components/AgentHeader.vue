@@ -34,14 +34,6 @@
         </button>
         <button
           type="button"
-          :title="text.switchLanguage"
-          :aria-label="text.switchLanguage"
-          @click="$emit('toggle-locale')"
-        >
-          <IconLanguage aria-hidden="true" />
-        </button>
-        <button
-          type="button"
           :title="text.settings"
           :aria-label="text.settings"
           @click="$emit('settings')"
@@ -72,7 +64,6 @@
 
 <script setup lang="ts">
   import { computed } from 'vue'
-  import IconLanguage from '~icons/tabler/language'
   import IconPanelRightClose from '~icons/tabler/layout-sidebar-right-collapse'
   import IconPencil from '~icons/tabler/pencil'
   import IconPlus from '~icons/tabler/plus'
@@ -96,7 +87,6 @@
     delete: []
     settings: []
     close: []
-    'toggle-locale': []
   }>()
 
   const text = computed(() => getAgentCopy(props.locale))

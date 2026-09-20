@@ -3,6 +3,7 @@
  *
  * 数据源后端（connecter）的启动逻辑，供 `scripts/dev.mjs` 与 `scripts/start-connecter.mjs` 复用。
  * 支持名称与别名：gotdx（别名 tdx / g）、binance（别名 bnb）、baostock（别名 b）、mt5（别名 m）、all（全部）。
+ * `all` 不含 mt5：它依赖 Windows + 已登录的 MT5 终端，仅显式启动。
  */
 
 import { spawn } from 'node:child_process'
@@ -41,16 +42,23 @@ const CONNECTERS = {
     args: ['run', 'python', './server.py'],
   },
   mt5: {
-    label: 'mt5（Exness 本地终端，:8090）',
+    label: 'mt5（本地终端，:8090）',
     logLabel: 'mt5',
     logColor: LOG_COLORS.mt5,
     dir: 'KCQ-MT5-connector',
     cmd: 'uv',
     args: ['run', 'python', './server.py'],
+    // 依赖 Windows + 本机已登录的 MT5 终端，不纳入 `all`，仅显式启动
+    includeInAll: false,
   },
 }
 
 export const CONNECTER_NAMES = Object.keys(CONNECTERS)
+
+// `all` 展开的集合：跳过 includeInAll === false 的 connecter（如 mt5）
+const ALL_CONNECTER_NAMES = CONNECTER_NAMES.filter(
+  (name) => CONNECTERS[name].includeInAll !== false,
+)
 
 // 名称 → 标准名；`all` 展开为全部
 const ALIASES = {
@@ -71,7 +79,7 @@ export function resolveConnecters(names) {
   for (const raw of names) {
     const key = String(raw).toLowerCase().trim()
     if (key === 'all') {
-      for (const n of CONNECTER_NAMES) resolved.add(n)
+      for (const n of ALL_CONNECTER_NAMES) resolved.add(n)
       continue
     }
     const target = ALIASES[key]

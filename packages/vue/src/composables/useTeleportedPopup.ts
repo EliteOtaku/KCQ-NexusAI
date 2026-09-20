@@ -5,6 +5,7 @@ export function useTeleportedPopup(
   popupRef: Ref<HTMLElement | null>,
   gap = 4,
   matchTriggerWidth = false,
+  placement: 'auto' | 'top' | 'bottom' = 'auto',
 ) {
   const popupStyle = ref<Record<string, string>>({})
 
@@ -18,7 +19,9 @@ export function useTeleportedPopup(
     const spaceBelow = Math.max(0, viewportHeight - rect.bottom - gap - margin)
     const spaceAbove = Math.max(0, rect.top - gap - margin)
     const popupHeight = popup?.offsetHeight ?? 0
-    const opensUpward = popupHeight > spaceBelow && spaceAbove > spaceBelow
+    const opensUpward =
+      placement === 'top' ||
+      (placement === 'auto' && popupHeight > spaceBelow && spaceAbove > spaceBelow)
     const availableHeight = opensUpward ? spaceAbove : spaceBelow
 
     let left = rect.left
@@ -33,10 +36,16 @@ export function useTeleportedPopup(
     const renderedHeight = Math.min(popupHeight, availableHeight)
     const top = opensUpward ? Math.max(margin, rect.top - gap - renderedHeight) : rect.bottom + gap
 
+    // BaseModal 的原生 dialog 使用 transform 居中。transform 会让内部的
+    // position: fixed 元素改为相对 dialog 定位，因此需要把视口坐标转换为
+    // dialog 的局部坐标；普通 Teleport 到 body 时仍直接使用视口坐标。
+    const dialog = popup?.closest('dialog')
+    const dialogRect = dialog?.getBoundingClientRect()
+
     popupStyle.value = {
       position: 'fixed',
-      top: `${top}px`,
-      left: `${left}px`,
+      top: `${top - (dialogRect?.top ?? 0)}px`,
+      left: `${left - (dialogRect?.left ?? 0)}px`,
       maxHeight: `${availableHeight}px`,
       ...(matchTriggerWidth ? { width: `${rect.width}px` } : {}),
     }

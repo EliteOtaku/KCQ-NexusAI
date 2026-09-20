@@ -16,7 +16,13 @@ import {
   type FrameTransaction,
 } from '../../foundation/reactivity/frameTransaction.js'
 import type { ReadonlySignal } from '../../foundation/reactivity/signal.js'
-import type { ChartSeriesDatum } from '../../foundation/types/price.js'
+import type { ChartSeriesDatum, KLineData } from '../../foundation/types/price.js'
+import {
+  createDisplayTimeFormatter,
+  type DisplayTimeFormatter,
+  type DisplayTimeZoneSetting,
+  resolveDisplayTimeZone,
+} from '../../foundation/utils/dateFormat.js'
 import {
   ASHARE_MARKET_SESSION,
   resolveMarketSessionSlots,
@@ -74,6 +80,10 @@ import type { ZoomStateModule } from '../state/zoomState.js'
 import { calcKBarWidthPx, getPhysicalKLineConfig } from '../utils/klineConfig.js'
 import { calculateTickCount } from '../utils/tickCount.js'
 import { findVisibleBarRange } from '../utils/visibleBarIndex.js'
+import {
+  computeVisiblePriceExtrema,
+  type VisiblePriceExtrema,
+} from '../utils/visiblePriceExtrema.js'
 import { createCandleLayer } from './layers/candleLayer.js'
 import { createComparisonLineLayer } from './layers/comparisonLineLayer.js'
 import { createCrosshairLayer } from './layers/crosshairLayer.js'
@@ -118,6 +128,10 @@ type FrameContext = {
   zoomLevelCount: number
   /** 五日分时供所有 renderer 和交互共享的帧级几何。 */
   fiveDayTimeShareGeometry: FiveDayTimeShareGeometry | null
+  /** 帧准备阶段生成的真正可视 K 线极值。 */
+  visiblePriceExtrema: VisiblePriceExtrema | null
+  /** 跨数量级时生成的低频右轴测量意图；由 seal 阶段提交。 */
+  rightAxisWidthMeasurement: VisiblePriceExtrema | null
 }
 
 /** 帧事务输入：合并多次 scheduleDraw 的 level */
@@ -181,6 +195,8 @@ export interface RendererDependencies {
       | import('../renderers/Indicator/mainIndicatorLegendContext.js').LegendTemplateContext
       | null,
   ) => void
+  /** 可视区极值跨数量级时才请求右轴实测与布局更新。 */
+  commitRightAxisWidthMeasurement?: (extrema: VisiblePriceExtrema) => void
 }
 
 export class ChartRenderer {
@@ -212,6 +228,7 @@ export class ChartRenderer {
     kBarRects: Array<{ x: number; width: number }>
     kWidthPx: number
     fiveDayTimeShareGeometry: FiveDayTimeShareGeometry | null
+    visiblePriceExtrema: VisiblePriceExtrema | null
   } | null = null
 
   private scene: Scene
@@ -220,7 +237,11 @@ export class ChartRenderer {
   private currentPaneId = 'main'
   private timeAxisCtx: RenderContext | null = null
   private timeAxisLayer: Layer | null = null
+  private displayTimeZoneSetting: DisplayTimeZoneSetting = 'UTC'
+  private displayTimeFormatter: DisplayTimeFormatter = createDisplayTimeFormatter('UTC')
   private _prevFrameRange: { visible: VisibleRange; raw: VisibleRange } | null = null
+  /** 上次已测量右轴的可视区绝对值数量级。 */
+  private measuredVisiblePriceMagnitudeOrder: number | null = null
 
   constructor(deps: RendererDependencies) {
     this.deps = deps
@@ -280,6 +301,12 @@ export class ChartRenderer {
         return this.raf
       },
     })
+  }
+
+  private requiresRightAxisWidthMeasurement(extrema: VisiblePriceExtrema): boolean {
+    const magnitude = Math.max(Math.abs(extrema.min), Math.abs(extrema.max))
+    const nextOrder = magnitude >= 1 ? Math.floor(Math.log10(magnitude)) : 0
+    return this.measuredVisiblePriceMagnitudeOrder !== nextOrder
   }
 
   initCoreRenderers(): void {
@@ -438,6 +465,17 @@ export class ChartRenderer {
     return this.deps.settings$.peek()
   }
 
+  /** 仅在持久化显示时区偏好变更时重建 formatter 状态。 */
+  private getDisplayTimeFormatter(): DisplayTimeFormatter {
+    const configured = this.settings.displayTimeZone
+    const setting: DisplayTimeZoneSetting = configured === 'local' ? 'local' : 'UTC'
+    if (setting !== this.displayTimeZoneSetting) {
+      this.displayTimeZoneSetting = setting
+      this.displayTimeFormatter = createDisplayTimeFormatter(resolveDisplayTimeZone(setting))
+    }
+    return this.displayTimeFormatter
+  }
+
   /**
    * 申请绘制：合并重绘级别并写入帧事务，由 rAF 最多 flush 一次。
    *
@@ -497,6 +535,13 @@ export class ChartRenderer {
         frame.kLineCenters,
         this.deps.getOption().kWidth + this.deps.getOption().kGap,
       )
+    const widthMeasurement = frame.rightAxisWidthMeasurement
+    if (widthMeasurement) {
+      const magnitude = Math.max(Math.abs(widthMeasurement.min), Math.abs(widthMeasurement.max))
+      this.measuredVisiblePriceMagnitudeOrder =
+        magnitude >= 1 ? Math.floor(Math.log10(magnitude)) : 0
+      this.deps.commitRightAxisWidthMeasurement?.(widthMeasurement)
+    }
   }
 
   /** 将最新 viewport 位置同步到原生滚动容器，作为绘制帧的第一项 DOM 副作用。 */
@@ -524,9 +569,11 @@ export class ChartRenderer {
       useCachedFrame,
       fiveDayTimeShareGeometry,
     } = frame
+    const renderData = frame.data
 
-    const dataManager = this.deps.getDataManager()
     const mode = this.deps.getActiveMode()
+    const { visiblePriceExtrema, rightAxisWidthMeasurement } = frame
+    const requiresRightAxisWidthMeasurement = rightAxisWidthMeasurement !== null
     const indicatorManager = this.deps.getIndicatorManager()
     if (mode.useIndicatorScheduler) {
       // 获取指标管理器实例（持有 scheduler、状态、reconcile 逻辑）
@@ -543,7 +590,6 @@ export class ChartRenderer {
     const mainIndicatorRange = useCachedFrame
       ? null
       : this.deps.getIndicatorManager().indicatorSchedulerAccessor.getMainIndicatorPriceRange()
-    const renderData = frame.data
 
     // 遍历所有 pane，清 canvas → 构建 RenderContext → scene.paintPane
     const { sharedXAxisLabels, sharedXAxisRanges } = this.renderPanes(
@@ -557,6 +603,8 @@ export class ChartRenderer {
       level,
       renderData,
       fiveDayTimeShareGeometry,
+      visiblePriceExtrema,
+      requiresRightAxisWidthMeasurement,
     )
 
     // 画底部时间轴（独立 layer，不进 scene）
@@ -710,6 +758,24 @@ export class ChartRenderer {
       }
     }
 
+    const visiblePriceExtrema = useCachedFrame
+      ? this.cachedDrawFrame!.visiblePriceExtrema
+      : this.deps.dataView$() === ChartDataViewId.KLine
+        ? computeVisiblePriceExtrema(
+            internalData as KLineData[],
+            range,
+            kLineCenters,
+            vp.scrollLeft,
+            vp.plotWidth,
+          )
+        : null
+    const rightAxisWidthMeasurement =
+      !useCachedFrame &&
+      visiblePriceExtrema &&
+      this.requiresRightAxisWidthMeasurement(visiblePriceExtrema)
+        ? visiblePriceExtrema
+        : null
+
     return {
       vp,
       range,
@@ -723,6 +789,8 @@ export class ChartRenderer {
       zoomLevel: this.deps.zoom.readonly.zoomLevel.peek(),
       zoomLevelCount: this.deps.options.readonly.options.peek().zoomLevelCount,
       fiveDayTimeShareGeometry,
+      visiblePriceExtrema,
+      rightAxisWidthMeasurement,
     }
   }
 
@@ -798,6 +866,8 @@ export class ChartRenderer {
     level: UpdateLevel,
     renderData: ChartSeriesDatum[],
     fiveDayTimeShareGeometry: FiveDayTimeShareGeometry | null,
+    visiblePriceExtrema: VisiblePriceExtrema | null,
+    requiresRightAxisWidthMeasurement: boolean,
   ): { sharedXAxisLabels: XAxisLabel[]; sharedXAxisRanges: XAxisRange[] } {
     // X 轴由多个 Pane 共享；Y 轴装饰必须保持 Pane 隔离。
     const sharedXAxisLabels: XAxisLabel[] = []
@@ -948,6 +1018,7 @@ export class ChartRenderer {
         data: renderData,
         period: dataManager.currentPeriod,
         dataView: this.deps.dataView$(),
+        displayTimeFormatter: this.getDisplayTimeFormatter(),
         timeShareRange: dataManager.getTimeShareRange() ?? undefined,
         fiveDayTimeShareGeometry: fiveDayTimeShareGeometry ?? undefined,
         comparisonData: dataManager.getComparisonData(),
@@ -962,6 +1033,8 @@ export class ChartRenderer {
         kLinePositions,
         kLineCenters,
         kBarRects,
+        visiblePriceExtrema,
+        requiresRightAxisWidthMeasurement,
         getLogicalIndexAtTimestamp: (timestamp) =>
           dataManager.getLogicalIndexAtTimestamp(timestamp),
         indicatorStateReader,
@@ -991,8 +1064,6 @@ export class ChartRenderer {
         theme: this.deps.theme$.peek(),
         isAsiaMarket: this.settings.isAsiaMarket as boolean,
         colorPresetSettings: this.settings.colorPresetSettings,
-        monthKeys: dataManager.getMonthKeys() ?? undefined,
-        dayKeys: dataManager.getDayKeys() ?? undefined,
       }
 
       // 在任一 layer 绘制前一次性投影，后续 renderer 只读本 Pane 的结果。
@@ -1129,6 +1200,7 @@ export class ChartRenderer {
         marketSession,
         data: renderData,
         dataView: this.deps.dataView$.peek(),
+        displayTimeFormatter: this.getDisplayTimeFormatter(),
         getLogicalIndexAtTimestamp: (timestamp) =>
           dataManager.getLogicalIndexAtTimestamp(timestamp),
         timeShareRange: dataManager.getTimeShareRange() ?? undefined,
@@ -1155,8 +1227,6 @@ export class ChartRenderer {
         theme: this.deps.theme$.peek(),
         isAsiaMarket: this.settings.isAsiaMarket as boolean,
         colorPresetSettings: this.settings.colorPresetSettings,
-        monthKeys: dataManager.getMonthKeys() ?? undefined,
-        dayKeys: dataManager.getDayKeys() ?? undefined,
       }
       const paintCtx: PaintContext = {
         renderer: this.deps.getSceneRenderer(),
@@ -1228,6 +1298,7 @@ export class ChartRenderer {
       kBarRects: frame.kBarRects,
       kWidthPx: frame.kWidthPx,
       fiveDayTimeShareGeometry: frame.fiveDayTimeShareGeometry,
+      visiblePriceExtrema: frame.visiblePriceExtrema,
     }
   }
 

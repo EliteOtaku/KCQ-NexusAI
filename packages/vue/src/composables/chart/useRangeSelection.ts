@@ -1,8 +1,8 @@
 /** 区间选择状态、统计指标与 CSV 导出逻辑。 */
-import { formatTimestamp } from '@363045841yyt/klinechart-core'
+import { formatDateTimeInTimeZone } from '@363045841yyt/klinechart-core'
 import type { ChartController, KLineData } from '@363045841yyt/klinechart-core/controllers'
 import type { KLineAdjustment, KLinePeriod } from '@363045841yyt/klinechart-core/market-data'
-import { sourceRouter } from '@363045841yyt/klinechart-core/market-data'
+import { ORIGINAL_BAR_AGGREGATION, sourceRouter } from '@363045841yyt/klinechart-core/market-data'
 import { type ComputedRef, computed, type Ref, ref, watch } from 'vue'
 import type { Bounds } from '../../tools/calcRangeOverlayPixel.js'
 import { calcRangeOverlayPixel } from '../../tools/calcRangeOverlayPixel.js'
@@ -329,7 +329,7 @@ export function useRangeSelection(options: {
     const rows = [
       header,
       ...items.map((item) => {
-        const timeStr = toCsvCell(formatTimestamp(item.timestamp, { showTime: true }))
+        const timeStr = toCsvCell(formatDateTimeInTimeZone(item.timestamp))
         const code = toCsvCell(item.symbol ?? prefix)
         return `${code},${timeStr},${CSV_FIELDS.map((field) => toCsvCell(item[field])).join(',')}`
       }),
@@ -385,6 +385,7 @@ export function useRangeSelection(options: {
             assetClass: spec?.instrument?.assetClass,
             period,
             adjustment,
+            barAggregation: ORIGINAL_BAR_AGGREGATION,
             limit: 500,
             beforeTimestamp: endTs + 86_400_000,
           })

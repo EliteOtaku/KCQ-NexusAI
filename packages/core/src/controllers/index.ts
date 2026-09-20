@@ -78,6 +78,7 @@ export type {
 export { createHeatmapController } from '../components/orderBookHeatmap/index.js'
 export type {
   AssetClass,
+  BarAggregation,
   BarCapability,
   BarDataSource,
   BarQuery,
@@ -102,7 +103,11 @@ export type {
   MarketDataSourceConfig,
   MarketDataSourceConfigPatch,
   MarketDataSourceStatus,
+  Mt5LiveBar,
+  Mt5LiveFrame,
+  Mt5LiveStatus,
   ProviderRef,
+  RealtimeBarsSink,
   SourceProbeResult,
   TimeShareDataSource,
   TimeShareQuery,
@@ -112,31 +117,26 @@ export type {
 } from '../data/index.js'
 // Data access
 export {
+  ALIGNED_BAR_AGGREGATION,
+  BAR_AGGREGATIONS,
   BinanceSSESource,
   baostockMarketDataProvider,
   DataBuffer,
   DEFAULT_BINANCE_SSE_URL,
+  DEFAULT_MT5_SSE_URL,
   DepthConnector,
   dataSourceRegistry,
   finshareMarketDataProvider,
   gotdxMarketDataProvider,
   MarketDataProviderRegistry,
+  Mt5LiveSource,
   marketDataProviderRegistry,
   mockMarketDataProvider,
   mt5MarketDataProvider,
+  ORIGINAL_BAR_AGGREGATION,
+  RealtimeBarsConnector,
   searchInstruments,
   tradingviewMarketDataProvider,
-} from '../data/index.js'
-export {
-  Mt5LiveSource,
-  RealtimeBarsConnector,
-  DEFAULT_MT5_SSE_URL,
-} from '../data/index.js'
-export type {
-  Mt5LiveFrame,
-  Mt5LiveBar,
-  Mt5LiveStatus,
-  RealtimeBarsSink,
 } from '../data/index.js'
 export type { DrawingLineLabelTarget, DrawingToolId } from '../engine/drawing/index.js'
 // Drawing

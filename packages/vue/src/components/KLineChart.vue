@@ -293,7 +293,7 @@
 </template>
 
 <script setup lang="ts">
-  import { formatTimestamp } from '@363045841yyt/klinechart-core'
+  import { formatTimeInTimeZone } from '@363045841yyt/klinechart-core'
   import { type ChartSettings, resolveSettings } from '@363045841yyt/klinechart-core/config'
   import type {
     CanvasLegendOptions,
@@ -1217,7 +1217,7 @@
     const closeC = closeDiff > 0 ? upColor : closeDiff < 0 ? downColor : NEUTRAL_COLOR
     const changeC = changePct > 0 ? upColor : changePct < 0 ? downColor : NEUTRAL_COLOR
 
-    slots.date.textContent = formatTimestamp(kline.timestamp, { timeZone: timezone, showTime })
+     slots.date.textContent = formatTimeInTimeZone(kline.timestamp, { timeZone: timezone, showTime })
     if (slots.symbol) slots.symbol.textContent = kline.symbol ?? ''
 
     slots.open.textContent = kline.open.toFixed(2)
@@ -1682,7 +1682,10 @@
   }
 
   // ── Width / Zoom / Expose ──
-  const axisHostWidth = computed(() => props.rightAxisWidth + props.priceLabelWidth)
+  const effectiveRightAxisWidth = ref(0)
+  const axisHostWidth = computed(() =>
+    Math.max(props.rightAxisWidth + props.priceLabelWidth, effectiveRightAxisWidth.value),
+  )
 
   const computedLeftAxisWidth = computed(() => props.leftAxisWidth ?? 0)
 
@@ -1765,6 +1768,10 @@
   }
 
   function setupChartCallbacks(ctrl: ChartController): () => void {
+    effectiveRightAxisWidth.value = ctrl.rightAxisEffectiveWidth.peek()
+    const unsubscribeRightAxisWidth = ctrl.rightAxisEffectiveWidth.subscribe(() => {
+      effectiveRightAxisWidth.value = ctrl.rightAxisEffectiveWidth.peek()
+    })
     const unsubscribePaneLayout = ctrl.paneLayout.subscribe(() => {
       invalidateContainerRectCache()
       const borderTop = containerRef.value
@@ -1911,6 +1918,7 @@
     })
 
     return () => {
+      unsubscribeRightAxisWidth()
       unsubscribeData()
       unsubscribeDataLoading()
       unsubscribeDataError()

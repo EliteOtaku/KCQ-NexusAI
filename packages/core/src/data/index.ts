@@ -27,13 +27,9 @@ export { baostockMarketDataProvider } from './provider/sources/baostock.js'
 export { finshareMarketDataProvider } from './provider/sources/finshare.js'
 export { gotdxMarketDataProvider } from './provider/sources/gotdx.js'
 export { mockMarketDataProvider } from './provider/sources/mock.js'
-export { mt5MarketDataProvider } from './provider/sources/mt5.js'
 export { tradingviewMarketDataProvider } from './provider/sources/tradingview.js'
-export {
-  Mt5LiveSource,
-  RealtimeBarsConnector,
-  DEFAULT_MT5_SSE_URL,
-} from './live/mt5BarsLive.js'
+export { mt5MarketDataProvider } from './provider/sources/mt5.js'
+export { Mt5LiveSource, RealtimeBarsConnector, DEFAULT_MT5_SSE_URL } from './live/mt5BarsLive.js'
 export type {
   Mt5LiveFrame,
   Mt5LiveBar,
@@ -46,3 +42,4 @@ import './provider/sources/baostock.js'
 import './provider/sources/finshare.js'
 import './provider/sources/tradingview.js'
 import './provider/sources/mock.js'
+import './provider/sources/mt5.js'

@@ -329,10 +329,8 @@ export interface RenderDataContext {
   comparisonColors?: ReadonlyMap<string, string>
   /** 由活动数据 Buffer 提供的唯一时间戳到逻辑索引解析。 */
   getLogicalIndexAtTimestamp: (timestamp: number) => number | null
-  /** 预计算的月份键值数组（year*12+month），与 data 长度一致，由 DataBuffer 在数据加载时计算 */
-  monthKeys?: Int32Array
-  /** 预计算的日期键值数组（year*366+dayOfYear），与 data 长度一致，由 DataBuffer 在数据加载时计算 */
-  dayKeys?: Int32Array
+  /** 当前图表的显示时区 formatter；仅用于普通 K 线的日期显示与边界。 */
+  displayTimeFormatter: import('../utils/dateFormat.js').DisplayTimeFormatter
 }
 
 /** 渲染几何子契约：Pane、视口、K 线位置与缩放。 */
@@ -349,6 +347,12 @@ export interface RenderGeometryContext {
   kLineCenters: number[]
   /** 每根K线对应柱的X/宽度（物理像素对齐后，逻辑像素），供柱状图使用 */
   kBarRects: Array<{ x: number; width: number }>
+  /** K 线真正可视区的 high/low 及其索引；由帧准备阶段计算，供多个 renderer 共享。 */
+  visiblePriceExtrema?:
+    | import('../../engine/utils/visiblePriceExtrema.js').VisiblePriceExtrema
+    | null
+  /** 本帧可视极值跨越右轴文字数量级边界，允许低频实测并调整宽度。 */
+  requiresRightAxisWidthMeasurement?: boolean
   viewport: {
     scrollLeft: number
     plotWidth: number

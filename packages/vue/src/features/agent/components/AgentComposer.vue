@@ -16,6 +16,7 @@
             class="composer__model"
             allow-empty
             size="sm"
+            placement="top"
             :model-value="provider.modelId"
             :options="modelOptions"
             :placeholder="modelsLoading ? text.loadingModels : text.modelPlaceholder"
@@ -29,10 +30,11 @@
             class="composer__reasoning"
             allow-empty
             size="sm"
+            placement="top"
             :model-value="provider.reasoningEffort"
             :options="reasoningOptions"
             :placeholder="text.reasoning"
-            :title="text.reasoning"
+            :title="text.reasoningEffort"
             :disabled="running"
             @update:model-value="$emit('reasoning-effort', $event)"
           />
