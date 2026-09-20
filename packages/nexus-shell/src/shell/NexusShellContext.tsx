@@ -19,6 +19,7 @@ import type {
 import {
   marketDataProviderRegistry,
   Mt5LiveSource,
+  ORIGINAL_BAR_AGGREGATION,
   RealtimeBarsConnector,
 } from '@363045841yyt/klinechart-core/controllers'
 import type { DrawingObject, DrawingStyle } from '@363045841yyt/klinechart-core/plugin'
@@ -431,7 +432,7 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
   // 其他网络源暂无实时帧通道，仅历史 K 线。
   useEffect(() => {
     if (!ctrl || dataSource !== 'mt5' || !sourceInstrument) return
-    const source = new Mt5LiveSource(sourceInstrument.symbol, period)
+    const source = new Mt5LiveSource(sourceInstrument.symbol, period, ORIGINAL_BAR_AGGREGATION)
     const connector = new RealtimeBarsConnector(ctrl, source)
     connector.start()
     return () => connector.stop()
