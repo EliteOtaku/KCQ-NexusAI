@@ -18,8 +18,8 @@ import type {
 } from '@363045841yyt/klinechart-core/controllers'
 import {
   marketDataProviderRegistry,
+  EUROPE_TRADITIONAL_BAR_AGGREGATION,
   Mt5LiveSource,
-  ORIGINAL_BAR_AGGREGATION,
   RealtimeBarsConnector,
 } from '@363045841yyt/klinechart-core/controllers'
 import type { DrawingObject, DrawingStyle } from '@363045841yyt/klinechart-core/plugin'
@@ -432,7 +432,9 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
   // 其他网络源暂无实时帧通道，仅历史 K 线。
   useEffect(() => {
     if (!ctrl || dataSource !== 'mt5' || !sourceInstrument) return
-    const source = new Mt5LiveSource(sourceInstrument.symbol, period, ORIGINAL_BAR_AGGREGATION)
+    // Exness 服务器时间与 UTC 重合，原生序列每个周日有一根低成交量短棒日线，扭曲窗口指标——
+    // 固定取传统欧洲口径（周日短棒并入周一首根）；需要原始形态时改回 ORIGINAL_BAR_AGGREGATION。
+    const source = new Mt5LiveSource(sourceInstrument.symbol, period, EUROPE_TRADITIONAL_BAR_AGGREGATION)
     const connector = new RealtimeBarsConnector(ctrl, source)
     connector.start()
     return () => connector.stop()

@@ -126,6 +126,7 @@ export {
   DEFAULT_MT5_SSE_URL,
   DepthConnector,
   dataSourceRegistry,
+  EUROPE_TRADITIONAL_BAR_AGGREGATION,
   finshareMarketDataProvider,
   gotdxMarketDataProvider,
   MarketDataProviderRegistry,
