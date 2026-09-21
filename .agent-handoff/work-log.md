@@ -1,89 +1,5 @@
 # Current Work Log
 
-## 2026-09-14（第四会话·批2 收尾 + 批3/批4）
-
-- Objective: 消费 cloudtradeagent 主线交接简报，完成批2 剩余 + 批3 + 批4（shell/b2-b4，worktree 实施）
-- Changed files:
-  - 新增组件：LegendBar（图例栏）、ChartContextMenu、WatchlistPanel、SettingsDialog、ObjectTreePanel、PanelSection、ShortcutsOverlay；新增 shell/periods.ts（周期目录单源）
-  - 修改：ChartStage（关 canvas 图例 + 右键钩子）、pointerBridge（contextmenu 钩子化）、NexusShellContext（setMagnet/drawings 暴露/symbolPickerRequest/shortcutsVisible/键盘路由/主题持久化）、SymbolPicker（唤起请求订阅 + closePicker 统一消费）、TopBar（设置入口）、IndicatorPanel（寻址修正）、mockData（tick）、storage（nexus.theme/nexus.panel）、labels、shell.css
-  - 探针：新增 probe-b234.mjs（49 断言）；probe-topbar B2-03 改 DOM 图例断言；probe-drawing B1-27 选择器稳定化（--templates）
-- Commits: 220a6ef9(图例栏) 7023ed32(右键菜单) a6b6fe65(B3 面板) 5ff261f6(面板折叠+主题持久化) 6cda1b38(键盘) 70d4833b(图例匹配修正+寻址加固+探针) → no-ff merge f25207ed 已 push origin/nexus/main
-- Result: 全门绿——probe-b234 49/49 + probe-drawing 39/39 + probe-topbar 15/15 + typecheck；checklist B2/B3/B4 全部闭环（B2-05 stretch 未做、B3-02 网格/坐标轴部分）
-- 实施中发现（关键）:
-  - 简报两处失实：indicators 公开信号丢弃 source 字段（改按 id 'mode:' 前缀过滤）；scrollToDataIndex 在 core 不存在（对象树定位=选中高亮）
-  - 引擎契约缺陷：removeIndicator/updateIndicatorParams 不接受 addIndicator 返回的 'main:*' 实例 id（IndicatorPanel 旧路径一直坏着），壳侧按 definitionId 寻址绕开，归一化登记 [pr] 候选
-  - 引擎图例行顺序在删除/重加后不稳定 → 图例行必须按 name↔definitionId 匹配，禁止按序拉链
-  - legendTemplateContext.currentBar 仅十字线时非空（无十字线回退 legend.bar）
-- Remaining risks: 见 risks.md（handoff 文件未跟踪待用户决定；类型债；引擎契约归一待 [pr]）
-
-## 2026-09-15（第二会话·上游 PR 合并确认 + MT5 数据源调研打包）
-
-- Objective: 确认回传 PR #174 被上游合并；调研并打包 MT5 本地数据源任务（提示词 B）
-- 确认结果: PR #174 MERGED（f730530a，上游 integrate/pr174 分支，原 SHA 零改动合入；upstream/main 未快进）；已清理本地与 origin 的 pr 分支，worktree detached 至 nexus/main
-- MT5 调研（两个 Explore 代理并行 + deepseek-flash/v4-pro 双顾问评审）:
-  - KCQ 侧: V1 行情协议（probe/instruments/bars）+ connecter 模式（connecters.mjs/setup-backends）+ Provider 装配模板（gotdx ~30 行）+ 写入即联动链（DataBuffer→IndicatorScheduler→重绘）+ 唯一 SSE 先例（depth/binance.ts）
-  - cloudtradeagent 侧: MetaTrader5 Python IPC 本机终端、时间戳为服务器墙钟伪 UTC（实测偏移转真 UTC）、Europe/Athens EET-EEST 锚重采样吸收周日短棒、WaveTrader 16 个可移植对齐用例
-  - 顾问一致结论: 架构 A+E（连接器轮询+SSE 推帧+core 消费器）；⚠️ core 无 upsert 原语（merge 保旧弃新、updateData=setData 别名）——forming 更新会被静默吞，必须先补 updateBars
-- 决策: D13（新建同级连接器仓库）D14（SSE 实时链路）D15（周日短棒不剔除，重采样吸收）D16（连接器配置+probe 上报开关）D17（updateBars 前置原语）
-- 交付: AGENT_SESSION_PROMPTS.md 新增提示词 B（自包含）；decisions/snapshot/backlog 同步
-- Remaining risks: 提示词 B 待闲时任务执行；真机 E2E 需用户 MT5 终端配合
-
-## 2026-09-15（第三会话·提示词 B 执行：MT5 数据源接入实施）
-
-- Objective: 执行 AGENT_SESSION_PROMPTS.md 提示词 B（连接器 + core 实时链路 + 壳接线）
-- Phase A — 连接器仓库（独立 git 历史）:
-  - app/: config（env）clock（偏移实测/复测/覆盖）align（锚时区重采样纯函数）gateway（单工作线程串行 IPC、全路径 initialize、Exness/登录校验、限流心跳重连）aggregator（tick 探针分级轮询 + ChangeDetector 收线判定 + 静默退避封顶 30s）hub（每流环形缓冲 500 + 单调 seq + Last-Event-ID 重放）routes（V1 三端点 + SSE）main（CORS 放开）
-  - tests/: 对齐（冬夏 4h/日线/DST 切换日/周月锚/偏移换算，语义移植自 WaveTrader）+ 检测器 + Hub + 路由（FakeGateway 无需终端）
-- Phase B — core（worktree fork/mt5-source）:
-  - KLineDataStore.updateBars（replace-on-conflict 末 2 根窗口、陈旧拒绝、批原子写）→ DataBuffer/KLineBuffer → ChartDataManager → Chart → ChartController 全链暴露；语义测试 8 用例先行（红线：forming 更新不被 merge 吞）
-  - sourceRegistry 加 mt5（:8090 + 7x24 UTC 会话 MT5）+ sources/mt5.ts Provider；data/live/mt5BarsLive.ts（EventSource 封装 + RealtimeBarsConnector：closed 暂存随 forming 合并一次原子写、快照直写、断流冲刷）；controllers 出口补 searchInstruments/mt5 系列
-- Phase C — nexus-shell:
-  - 设置对话框"数据源"段（点击时才 probe——挂载探测会给 mock 路径引入 ERR_CONNECTION_REFUSED 噪声，b234 探针收尾门拦截后修正）；SymbolPicker 双模式（mt5 走 searchInstruments 防抖 + AbortSignal，recent 存品种描述）；数据接线 effect + SSE live effect（品种/周期变化重连、离开即断）
-  - probe-mt5.mjs 冒烟探针（桩连接器内嵌 :8090）8/8：切源/跨源搜索/历史 60 根/SSE forming 写末根/切回断流
-- Phase D — 文档 + 登记与验收: docs/data-sources/mt5.zh-CN.md + docs/design/mt5-exness-alignment.md + connecters/setup-backends 登记
-- 实施中发现（关键坑，全部已修复并记录）:
-  - 探针谓词坑：`page.locator().count() > 0` 是 Promise 与 0 比较（恒 false），必须 async/await
-  - starlette TestClient/httpx ASGITransport 均不支持无限 SSE 流消费：测试用裸 ASGI send/receive 收首帧；receive 桩必须阻塞（立即返回会饿死事件循环）
-  - SourceRouter 依赖 probe 响应的 capabilities 字段筛选流转候选——连接器 probe 必须带能力声明
-  - pandas 2.x：tz-aware 索引取毫秒须 tz_localize(None)→astype ns；ms 精度索引的 astype int64 返回 ms 非 ns
-  - 服务器偏移实测字段名错配（TickProbe.time_seconds 而非 time）会让实测静默失败回落 0
-  - vue-tsc 走 package exports→dist：worktree 陈旧 dist 会造成 type-check 假阳性（+5），先 `pnpm --filter core build` 重建再对基线
-
-## 2026-09-15（第四会话·MT5 批次收尾：改名 + OpenSpec + merge push）
-
-- Objective: 用户指示——先提交；连接器归用户名下、命名 KCQ-MT5-connector；用 OpenSpec 建立连接器规范文档；上游 PR 等用户测试
-- 改名: KCQ 侧全部引用同步（connecters.mjs/setup-backends.mjs/sourceRegistry/docs/core 注释），commit 1de4a6eb（曾漏 [fork] 前缀，已 amend+rebase 修正后重做 merge）
-- 连接器仓: 目录定名 D:\AI\KCQ-MT5-connector；README/pyproject/server title 同步；remote=EliteOtaku/KCQ-MT5-connector（GitHub 未建仓未 push）
-- OpenSpec: openspec init（CLI 1.8，spec-driven schema，tools=zcode）+ config.yaml 项目上下文 + 五能力规格（v1-market-data-rest/realtime-bars-stream/exness-alignment/terminal-gateway/symbol-catalog）strict 校验 5/5 全绿 + AGENTS.md（约定/命令/domain invariants）
-- ⚠️ 事故与恢复（详见 risks.md）：① mv 连接器目录因残留 pytest 进程占用失败后误发 rm -rf——凭会话上下文逐文件全量重建，pytest 34/34 验证与删除前等价（新仓 commits: 2d599fc feat + docs OpenSpec commit）；旧 git 历史未还原。② 主工作区 `git reset --hard`（重做 merge 时）把已入库的 handoff 文件未提交更新退回旧版——已全量恢复（snapshot/decisions D12-D18/risks/backlog/work-log/PROMPTS/HANDOFF）
-- merge/push: nexus/main = e0425948（9 commits no-ff merge，含改名修正链），已 push origin；merge 后主工作区 MT5 相关测试 18/18 复验通过
-- Remaining: 真机 E2E 待用户；连接器建仓 push 待用户；上游 PR 待用户测试后再议
-
-## 2026-09-16（cloudtradeagent 消费方主线核验 + 下一阶段规划同步）
-
-- 消费方主线（cloudtradeagent worktree /?view=kcq）核验本仓：批1-4 状态与
-  checklist 一致（b1 扎实 39/39、b2 收尾项/批3/批4 由后续会话完成——legend
-  DOM 接管/右键菜单/watchlist/对象树/键盘全落地，与主线简报方案吻合）；
-  MT5 集成（nexus/main=e0425948）与连接器仓确认在位。
-- snapshot Immediate next actions 扩为完整下一阶段规划：MT5 真机 E2E（用户）→
-  上游 PR 批次（绘图交互强化+MT5+已推三分支）→ 业务 overlay 搬家（闭源主导）→
-  agent 面板；壳尾项单列。
-- 交接文档由消费方主线按 /agent-handoff 刷新并入库（本 commit）；fork 开发转向
-  「真机验证 + PR 整理 + 配合业务搬家」阶段。
-
-## 2026-09-15（第五会话·数据源管理统一化：MT5 收编进聚合源管理）
-
-- Objective: 用户建议——MT5 接口和设置放进"聚合源管理"统一管理（用户提供了 Vue 图表设置/聚合源管理截图）
-- 查证结论: 聚合源管理（Vue AggregationSourceDialog + useAggregationSources）完全注册表驱动（marketDataProviderRegistry.getAll()）——MT5 已注册，自动出现在列表（用户截图系 merge 前旧代码）；Vue demo 选品种链路（toSymbolSpec → source: item.sourceId → setSymbols fetcher 管线）对 MT5 全链可用，零改动
-- nexus-shell 统一化（主工作量）:
-  - 新增 SourceManagerDialog（React 版聚合源管理）：registry 驱动列全部源（mock 沉底）、并发拨测（5s 超时 + 地址变更防抖重拨）、聚合搜索开关（setConfig enabled）、地址与端口折叠编辑（setConfig baseUrl，与默认同则清覆盖）、"设为当前"（probe 门控，成功自动关框）；当前源高亮描边
-  - SettingsDialog "数据源"段改为 当前源展示 + "管理数据源"入口（子对话框叠加）
-  - NexusShellContext：ShellDataSource 泛化为 string（'mock' 或任意 sourceId）；selectDataSource 改 registry.get(next).probe() 通用门控；mt5Instrument → sourceInstrument；storage 键 recent-mt5-instruments → recent-source-instruments；数据接线 effect 泛化（非 mock 且有品种 → setSymbols(source=dataSource)），SSE live 仍仅 mt5
-  - SymbolPicker：isMt5 → isNetworkSource，搜索限定当前源（sourceIds=[dataSource]）
-- 连接器/Vue 补强: 连接器 probe 正常态 message 填对齐摘要（「对齐 Europe/Athens · 偏移 +3h（实测/配置/默认）」，离线时为诊断原因）；Vue useAggregationSources.probeAggregationResult 透传 message、AggregationSourceDialog 状态行拼接展示（在线=对齐摘要、离线=原因截断 40 字）——通用机制，其他源 message 为空无影响
-- 验证: nexus-shell typecheck 绿；root type-check 52=基线（先重建主工作区 core dist）；probe-mt5 更新为管理对话框路径 10/10；三探针 39/15/49；连接器 pytest 34/34
-- 未提交：等待用户确认后 commit/push（本轮改动在主工作区工作树）
-
 ## 2026-09-18（端口混乱排查：MT5 不可见根因与端口约定）
 
 - 现象: 用户访问 5173/?view=kcq 强制刷新后仍看不到 MT5
@@ -364,3 +280,75 @@
 - 验证链：install/build:packages/react+angular/core 2587/nexus-shell typecheck/attw 全绿/三探针 39-15-50；
   CI run 35522663176 全绿（build+test × node 22.23.2/24.21.0——上游 CI 矩阵升最新 LTS）
 - nexus/main = 12ca1dab 已 push
+
+## 2026-09-21（MT5-connector PR #2 review + merge）
+
+- 开发组 PR #2（+919/−267，7 commits，OpenSpec 双 change）：①barAggregation 按请求选择（original/aligned
+  必填，aligned 不可用显式 UNSUPPORTED_CAPABILITY）②对齐锚固定 UTC（删 Athens/gmt2/gmt3，ALIGN_TZ→ALIGN_UTC，
+  模式收敛 on|off）③ticks 实时流 SSE
+- Review 结论（APPROVED + MERGED）：与上游 core 560674e8 序列身份重构配套闭环（协议层全链路 barAggregation 实测
+  httpTransport:167/router:302/types:124）；UTC 锚定论证成立，original 模式的 MT5 原生边界继续承担券商图对齐
+  （D15 诉求保留，实现从锚时区重采样改为原生边界，消除 aligned 无条件重采样的 12-17s 分页延迟）；
+  pytest 38 passed；openspec validate --all --strict 7 passed 0 failed
+- 用户侧注意事项：连接器 env 更名 ALIGN_TZ→ALIGN_UTC（默认 on 不设置即可）；nexus-shell 已传
+  barAggregation=original（NexusShellContext Mt5LiveSource 构造）
+- 本地连接器仓已切 main 并 pull（pr-2 临时分支已删）
+
+## 2026-09-21（Exness 周日短棒实测证据 + issue 预览）
+
+- 背景：开发组无 Exness 经验，不知周日短棒毛病——issue 需实测证据建立体感
+- 实测（本机连接器 :8090 已起，XAUUSD daily original 120 根）：
+  - **20 根 UTC 周日 bar**（2026-05-10~09-20 每周日一根，最近=昨天 09-20）
+  - 周日短棒平均成交量 15,179 vs 正常日线 307,964 = **4.9%**（纯开盘噪声占完整 K 线位）
+  - UTC 边界无效论证：周开盘 22:00 UTC 落在 UTC 周日桶，aligned=UTC 无法消除
+  - MA(5) 扭曲实测：原始 4341.35 vs 修正 4323.51，偏差 17.84（0.41%）
+  - 修正对照：周日并入周一（传统欧洲口径）后残留 0，20 组合并
+- issue 预览：temp/issue-drafts/exness-sunday-bar-issue.md（请求 europe-traditional 第三口径
+  或 Exness 探测自动启用传统锚；待用户审后提交）
+- 数据留存：temp/exness-daily-raw.json
+
+## 2026-09-21（连接器 PR #3：europe-traditional 口径自实现）
+
+- 开发组表示无 Exness 经验，让用户自行修正后提 PR——方案从"求开发组"转为"自实现"
+- 方案（在 PR #2 新架构上 additive）：barAggregation 第三值 europe-traditional =
+  original 透传 + merge_sunday_bars 后处理（UTC 周日 bar 并入下一根周一：open=周日 open/
+  high=max/low=min/close=周一 close/volume+turnover 相加；末尾孤立周日保留；无周日 no-op）。
+  不引入 H1/D1 拉取——保持 PR #2 性能优化。挂接三处：REST fetch_bars/SSE _poll/probe capabilities
+- 测试：44 passed（merge_sunday 4 例 + 路由合并/回显/capabilities 3 例）；
+  openspec validate --all --strict 8 passed（新 change add-europe-traditional-aggregation）
+- PR #3 已提：EliteOtaku/KCQ-MT5-connector/pull/3（等开发组 review）
+- 实测证据留存：temp/exness-daily-raw.json（XAUUSD 120 根含 20 根周日短棒，
+  MA(5) 偏差 0.41% 实测）
+
+## 2026-09-21（PR #3 合并 + 真机验证周日消除）
+
+- 用户提醒连接器仓为用户自有，无需等 review → PR #3 已 merge（738bfb6），本地 main 已 pull 并删临时分支
+- 运行中旧进程需按 PID 精确替换（netstat -ano 定位 8090=PID 48560；勿盲杀 python.exe——机器上有多个无关 python 进程）
+- 真机验证：europe-traditional 拉 XAUUSD daily 25 根——**UTC 周日残留 0**，09-21 周一根
+  O=4374.16 H=4383.44 L=4322.64（周日短棒 10.4-4374.16 的 OHLC 已并入），成交量 190,706
+  （对比昨日原始周日短棒仅 15K 量级——合并语义正确）
+- 教训：bash 管道后 $! 取的是管道末命令退出码；curl 响应落盘后用 python 复读比管道稳定
+
+## 2026-09-21（Exness 品牌默认口径：底层静默修正落地）
+
+- 用户拍板：检测到 Exness → 后台静默默认修正（下游图表/入库无感），README 说明原始数据获取方式
+- 实现（连接器 PR #4，已 merge）：gateway 暴露 is_exness 属性（company/server 判定已有）；
+  BarRequest/SSE barAggregation 改可选——缺省按品牌解析（Exness→europe-traditional，其余→original），
+  显式传值覆盖默认；响应回显实际生效口径；probe 新增 defaultBarAggregation 上报
+- README/AGENTS 说明：Exness 周日短棒自动修正行为 + 三口径语义 + "需要原始数据显式传 original"
+- OpenSpec：default-aggregation-by-brand（validate strict 9/9）；测试 45 passed（品牌默认三场景）
+- 真机验证：缺省请求（不传 barAggregation）→ 回显 europe-traditional、25 根周日残留 0；
+  probe defaultBarAggregation=europe-traditional
+- 壳侧待办（下一步）：nexus-shell MT5 接线读 probe defaultBarAggregation（或先 hardcode
+  europe-traditional），当前壳仍显式传 ORIGINAL——依赖壳改动后图表默认才走修正口径
+
+## 2026-09-21（壳侧接线切换 europe-traditional + 导出链补齐）
+
+- 壳侧 MT5 实时接线固定传 EUROPE_TRADITIONAL（NexusShellContext，含 Exness 修正语义注释）
+- core 协议值域扩展：types.ts BAR_AGGREGATIONS 三值 + EUROPE_TRADITIONAL 常量定义；
+  导出链补齐（provider/index.ts 值导出 + controllers/index.ts Data access 块）——
+  首次编辑曾因分支切换时序丢失，本次用 Edit 工具补并即时验证 dist
+- 验证：core build/core 2587 测试/nexus-shell typecheck 全绿；CI run 35624903866 success
+- nexus/main = 1c87565c 已 push；5273 热加载新代码
+- 闭环确认：MT5 日线图表/入库默认拿到无周日短棒序列（壳传 europe-traditional，
+  连接器 merge_sunday_bars 执行）；需要 Exness 原始形态时改回 ORIGINAL_BAR_AGGREGATION
