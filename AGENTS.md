@@ -61,7 +61,7 @@ All READMEs are generated from `docs/fragments/` (reusable Markdown snippets) + 
 
 ## 数据源
 
-本地行情后端位于本仓库同级目录：`GoTDX-Connecter`（gotdx、Binance）、`Baostock-Tradingview-Connecter`（BaoStock、TradingView）和 `KCQ-MT5-connector`（MT5，Windows + 已登录终端，不纳入 `-c all`）。涉及后端时先阅读对应仓库的 `AGENTS.md`；使用 `pnpm setup` 安装，`pnpm dev -c <name>` 或 `pnpm connecter <name>` 启动。
+本地行情后端位于本仓库同级目录：`GoTDX-Connector`（gotdx、Binance）、`Baostock-Tradingview-Connector`（BaoStock、TradingView）和 `KCQ-MT5-connector`（MT5，Windows + 已登录终端，不纳入 `-c all`）。涉及后端时先阅读对应仓库的 `AGENTS.md`；使用 `pnpm setup` 安装，`pnpm dev -c <name>` 或 `pnpm connector <name>` 启动。
 
 ## 测试
 
@@ -154,7 +154,7 @@ Best practice: @packages/core/src/engine/state/viewportState.ts @packages/core/s
 - 注释必须简单明了，直接说明代码是什么或为什么这样实现，尽量使用一句话，避免冗长和重复代码本身的含义
 
 ## SubAgent
-- 除非用户明确要求启动子代理，否则不要启动子代理
+- 除非用户明确要求启动子代理，否则不要启动子代理!
 - 最多同时起三个子代理
 
 ## Github CLI

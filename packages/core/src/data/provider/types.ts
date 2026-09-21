@@ -4,6 +4,7 @@
  */
 
 import type { KLineData, TimeShareData } from '../../controllers/types.js'
+import type { LiveBarsDataSource } from '../live/types.js'
 import type { MarketSessionConfig } from '../../foundation/utils/sessionTimeLabels.js'
 import type { DepthSource } from '../depth/depthTypes.js'
 
@@ -102,18 +103,26 @@ export interface TimeShareRangeCapability {
 /** 单个品种可被前端启用的行情能力。 */
 export interface InstrumentCapabilities {
   bars?: BarCapability
+  /** 是否支持实时 K 线流。 */
+  liveBars?: boolean
   timeShare?: boolean
   timeShareRange?: TimeShareRangeCapability
   depth?: boolean
+  /** 是否支持实时逐笔行情流。 */
+  marketTicks?: boolean
 }
 
 /** 数据源级能力声明，用于在请求前筛选流转候选源。 */
 export interface SourceCapabilities {
   assetClasses: ReadonlyArray<AssetClass>
   bars?: BarCapability
+  /** 是否支持实时 K 线流。 */
+  liveBars?: boolean
   timeShare?: boolean
   timeShareRange?: TimeShareRangeCapability
   depth?: boolean
+  /** 是否支持实时逐笔行情流。 */
+  marketTicks?: boolean
   historyCoverage?: {
     from?: number
     to?: number
@@ -274,6 +283,8 @@ export interface MarketDataProvider {
   probe(signal?: AbortSignal): Promise<SourceProbeResult>
   readonly catalog?: InstrumentCatalog
   readonly bars?: BarDataSource
+  /** 实时 K 线流；仅在 source.capabilities.liveBars 为 true 时提供。 */
+  readonly liveBars?: LiveBarsDataSource
   readonly timeShare?: TimeShareDataSource
   readonly timeShareRange?: TimeShareRangeDataSource
   readonly depth?: DepthDataSource

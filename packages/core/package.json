@@ -1,6 +1,6 @@
 {
   "name": "@363045841yyt/klinechart-core",
-  "version": "0.11.0-alpha.5",
+  "version": "0.11.0-alpha.6",
   "description": "Headless K-line chart engine + reactive controllers. Zero framework dependencies.",
   "license": "MIT",
   "repository": {
@@ -28,6 +28,10 @@
     "./reactivity": {
       "types": "./dist/foundation/reactivity/index.d.ts",
       "import": "./dist/foundation/reactivity/index.js"
+    },
+    "./persistence": {
+      "types": "./dist/foundation/persistence/index.d.ts",
+      "import": "./dist/foundation/persistence/index.js"
     },
     "./controllers": {
       "types": "./dist/controllers/index.d.ts",
