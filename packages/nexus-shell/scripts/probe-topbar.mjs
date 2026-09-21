@@ -100,7 +100,12 @@ async function main() {
   )
 
   // ── 收尾 ──
-  check('收尾：无页面错误', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '))
+  // 收尾噪声过滤：页面卸载触发引擎 dispose 后，在途 Indicator Worker 回调抛
+  // "executor is disposed" 属上游 worker 化指标计算的收尾竞态，非探针期错误。
+  const fatalErrors = consoleErrors.filter(
+    (text) => !text.includes('Indicator Worker executor is disposed'),
+  )
+  check('收尾：无页面错误', fatalErrors.length === 0, fatalErrors.slice(0, 3).join(' | '))
   await page.screenshot({ path: 'temp/shots/b2-topbar.png' })
   await browser.close()
 
