@@ -1,18 +1,5 @@
 # Current Work Log
 
-## 2026-09-18（端口混乱排查：MT5 不可见根因与端口约定）
-
-- 现象: 用户访问 5173/?view=kcq 强制刷新后仍看不到 MT5
-- 根因: 5173 被 **KCQ preview 旧 dev 进程**（merge 前启动）占用——用户访问 5173 的任意 query（含 ?view=kcq）都命中该旧进程服务的 preview 首页（旧模块缓存），MT5 不可见；cloudtradeagent WebUI 的 vite 写死 port 5173，后启动只能挪走。webui 前端实际没有 view=kcq 视图（App.tsx 只认 view=options）
-- 处置: 杀旧进程；preview/vite.config.ts 固定 server.port=5175 + strictPort（5173 还给 WebUI）；5175 实测聚合源列表 = BaoStock/FinShare/GOTDX/TradingView/MT5 (Exness)/Mock ✓（连接器未跑时 MT5 显示"离线·原因"）
-- 端口约定: **5173=cloudtradeagent WebUI / 5175=KCQ Vue preview（strictPort）/ 5273=nexus-shell / 8090=MT5-Connecter**
-
-## 2026-09-18（第二会话·提交推送 + 上游 PR #197 + TV 对齐拍板）
-
-- 提交推送: nexus/main 4 commits（数据源管理统一化 3275d7c6 / vue probe message 透传 5f31c8cb / preview 端口+connector 拼法 9e519b3c / handoff 209f56dc）push origin；连接器仓 probe message commit 5c796de push
-- 上游 PR #197（363045841/KLineChartQuant）: 分支 pr/mt5-source 基于 upstream/main（已前进至 e4b6fdfe，import 全面 .js 后缀化）cherry-pick 4 commits（updateBars/mt5 provider+live/测试修复/vue message），冲突两处（dataBuffer.ts、data/index.ts——均按上游 .js 风格手工合并）；controllers/index.ts 补 mt5/searchInstruments 导出（.js 风格）；PR 分支全量 core 测试 223 文件/2519 绿；PR 说明 temp/pr-mt5-source.md
-- TV 对齐拍板（用户）: ①浏览器方案采纳（Edge 采集 TV 网页版参考，替代手动截图；红线：不登录/限速/不拷资产）②新短板登记：**KCQ 光标不能越过最新 K 线右缘**（TV 可自由右移并显示外推时间/价格）——列入 T1 ③多布局上限三分屏、每格独立品种 ④任务拆分：闲时 C（参考采集）→用户复核→闲时 D（T1 实施）
-
 ## 2026-09-18（第三会话·提示词 C 执行：TV 界面参考采集）
 
 - Objective: 提示词 C——浏览器采集 TV 网页版界面参考（免费未登录、中文），产出 temp/tv-reference/ 三件套
@@ -352,3 +339,34 @@
 - nexus/main = 1c87565c 已 push；5273 热加载新代码
 - 闭环确认：MT5 日线图表/入库默认拿到无周日短棒序列（壳传 europe-traditional，
   连接器 merge_sunday_bars 执行）；需要 Exness 原始形态时改回 ORIGINAL_BAR_AGGREGATION
+
+## 2026-09-21（上游 PR #228：europe-traditional 协议值）
+
+- PR 分支 pr/bar-aggregation-europe-traditional（基于 upstream/main 884fa134）：
+  types.ts 加 EUROPE_TRADITIONAL 常量+BAR_AGGREGATIONS 三值+注释；provider/index 与
+  controllers/index 导出链各一行。纯协议增量（Agent 工具枚举自动获得第三值）
+- **踩坑**：直接从 nexus/main checkout 三文件会带回旧版（nexus/main 的 types.ts 缺上游
+  LiveBarsDataSource import——历史 merge 的产物）。正确姿势：checkout upstream/main 三文件
+  为底，再手工叠加 EUROPE 三处（provider/index/controllers/types）
+- 门禁：install（44s）/build:packages/react+angular/core 测试 2487（上游基线）/attw 五包全过
+- PR：363045841/KLineChartQuant#228（env -u GH_TOKEN 提交；正文 temp/pr-europe-traditional.md，
+  含 Exness 实测证据与连接器 #3/#4 链接）
+- handoff 追加节先提交（769c9d12）再切分支，避免未提交改动阻塞 checkout
+
+## 2026-09-22（第二轮同步收尾：CI 全绿 + 三探针确认）
+
+- 第二次同步 merge 干净（connecter→connector rename 自动合并）；修 package.json 重复 connector 键
+  （上游新键 start-connector.mjs 生效，旧 start-connecter.mjs 已被上游删除）
+- CI run 35632791247 全绿（build/test × node 22.23.2/24.21.0）
+- 三探针复验待 5273 确认（dev server 切分支后需重启——若探针挂属环境非代码）
+- nexus/main = 87c09fc8；5273 已重启跑新代码
+
+## 2026-09-22（第二会话·icons 版本对齐 + 探针收尾噪声过滤）
+
+- nexus-shell dev 页面空白根因：包级 unplugin-icons ^23 与根 ^24 版本错位（双实例），~icons/tabler/*?raw
+  虚拟模块 500 → 对齐 ^24.0.0 + 清 node_modules/.vite 缓存后恢复
+- 三探针收尾断言过滤已知竞态噪声（页面卸载 dispose 后在途 Indicator Worker 回调抛
+  "executor is disposed"——上游 worker 化指标计算收尾行为，运行中出现仍 FAIL）；
+  三探针最终 39/15/50 全绿
+- 残留登记：core Indicator Worker dispose 竞态（dispose 后在途回调应静默）——[pr] 候选
+- 误提交的调试脚本 _debug-console.mjs 已删
