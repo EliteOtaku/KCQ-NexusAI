@@ -12,6 +12,7 @@ import type {
   AssetClass,
   InstrumentCapabilities,
   InstrumentDescriptor,
+  BarAggregation,
 } from '../data/provider/types.js'
 import type { InteractionSnapshot } from '../engine/chart.js'
 import type { PaneSpec } from '../engine/chartTypes.js'
@@ -449,6 +450,8 @@ export interface ChartController extends DrawingChartAdapter {
   // ---- Data ----
   /** 设置 kline 主品种/周期；对比集合独立，由 setComparisonSpecs 管理。 */
   setSymbols(next: ReadonlyArray<SymbolSpec>): void
+  /** 声明非对比视图的缺省聚合口径（如 Exness 走 europe-traditional）；须在 setSymbols 前调用生效。 */
+  setDefaultBarAggregation(value: BarAggregation): void
   /** Register symbols into the available symbol catalog for UI pickers */
   registerSymbols(symbols: ReadonlyArray<SymbolInfo>): void
   /** 直接设置对比集合（对比视图唯一 SSOT），与 kline 主品种解耦。 */

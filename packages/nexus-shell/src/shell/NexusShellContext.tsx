@@ -19,8 +19,7 @@ import type {
 import {
   marketDataProviderRegistry,
   EUROPE_TRADITIONAL_BAR_AGGREGATION,
-  Mt5LiveSource,
-  RealtimeBarsConnector,
+  ORIGINAL_BAR_AGGREGATION,
 } from '@363045841yyt/klinechart-core/controllers'
 import type { DrawingObject, DrawingStyle } from '@363045841yyt/klinechart-core/plugin'
 import { buildMockBundle, MOCK_SYMBOLS } from './mockData'
@@ -411,6 +410,10 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
   // 网络源未选品种时先回落 mock 数据，避免空图。
   useEffect(() => {
     if (!ctrl) return
+    // 缺省聚合口径按数据源声明：MT5（Exness）走传统欧洲口径，底层修正周日短棒。
+    ctrl.setDefaultBarAggregation(
+      dataSource === 'mt5' ? EUROPE_TRADITIONAL_BAR_AGGREGATION : ORIGINAL_BAR_AGGREGATION,
+    )
     if (dataSource !== 'mock' && sourceInstrument) {
       ctrl.setSymbols([
         {
@@ -427,18 +430,6 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
     }
     ctrl.applyCustomData(buildMockBundle(symbol, period))
   }, [ctrl, dataSource, sourceInstrument, period, symbol])
-
-  // MT5 实时接线：SSE 帧驱动 updateBars；品种/周期变化重连，离开 mt5 即断流。
-  // 其他网络源暂无实时帧通道，仅历史 K 线。
-  useEffect(() => {
-    if (!ctrl || dataSource !== 'mt5' || !sourceInstrument) return
-    // Exness 服务器时间与 UTC 重合，原生序列每个周日有一根低成交量短棒日线，扭曲窗口指标——
-    // 固定取传统欧洲口径（周日短棒并入周一首根）；需要原始形态时改回 ORIGINAL_BAR_AGGREGATION。
-    const source = new Mt5LiveSource(sourceInstrument.symbol, period, EUROPE_TRADITIONAL_BAR_AGGREGATION)
-    const connector = new RealtimeBarsConnector(ctrl, source)
-    connector.start()
-    return () => connector.stop()
-  }, [ctrl, dataSource, sourceInstrument, period])
 
   /** 切换当前数据源：网络源先经注册表 probe 可达性，不可达保持现状并返回 false。 */
   const selectDataSource = useCallback(async (next: ShellDataSource): Promise<boolean> => {

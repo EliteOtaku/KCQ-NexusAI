@@ -10,6 +10,7 @@
  * 不是绘制管线的一部分。绘制由 ChartRenderer 完成，Chart 仅负责代理调用并维护 runtimeProjection（批量投影）屏障。
  */
 
+import type { BarAggregation } from '../data/provider/types.js'
 import {
   type CustomDataSource,
   FIVE_DAY_TIME_SHARE_PERIOD,
@@ -1535,6 +1536,11 @@ export class Chart {
    * 设置 kline 主品种/周期。对比集合独立于主品种，由 setComparisonSpecs 管理。
    * 兼容旧入参 [primary, ...comparisons]：仅首项作为 kline 主品种，其余项不再隐式写入对比集合。
    */
+  /** 声明非对比视图的缺省聚合口径（须在 setSymbols 之前调用以作用于首个 selection）。 */
+  setDefaultBarAggregation(value: BarAggregation): void {
+    this.dataManager.setDefaultBarAggregation(value)
+  }
+
   setSymbols(specs: ReadonlyArray<SymbolSpec>): void {
     const primary = specs[0]
     const primaryPeriod = primary?.period

@@ -110,6 +110,8 @@ export class ChartDataManager {
   static readonly TIME_SHARE_INDICATOR_BAR_LIMIT = 1_500
 
   private readonly _repository = new SeriesRepository()
+  /** 非对比视图的缺省聚合口径；宿主可按数据源声明（如 Exness 走 europe-traditional）。 */
+  private _defaultBarAggregation: BarAggregation = ORIGINAL_BAR_AGGREGATION
   /** 图表与 Agent 共用的实例级行情缓存，负责分页、重试和 Provider 请求。 */
   readonly marketDataCache = new MarketDataCache(marketDataProviderRegistry)
   private get _activeSelection(): SeriesSelection | null {
@@ -186,11 +188,16 @@ export class ChartDataManager {
     }
   }
 
-  /** 比较视图统一使用 aligned，其余 K 线使用 original，避免同图混合不同桶边界。 */
+  /** 比较视图统一使用 aligned，其余 K 线使用缺省口径，避免同图混合不同桶边界。 */
   private barAggregation(): BarAggregation {
     return this.deps.comparison.readonly.active.peek()
       ? ALIGNED_BAR_AGGREGATION
-      : ORIGINAL_BAR_AGGREGATION
+      : this._defaultBarAggregation
+  }
+
+  /** 宿主声明非对比视图的缺省聚合口径（默认 original）。 */
+  setDefaultBarAggregation(value: BarAggregation): void {
+    this._defaultBarAggregation = value
   }
 
   /** 对比状态改变即切换 K 线数据身份，销毁旧 Buffer 后重新请求，禁止混用不同桶边界。 */

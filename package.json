@@ -72,8 +72,7 @@
     "lint:types": "node scripts/lint-types.mjs",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "format": "biome format --write .",
-    "connector": "node scripts/start-connecter.mjs"
+    "format": "biome format --write ."
   },
   "devDependencies": {
     "@babel/core": "^8.0.5",

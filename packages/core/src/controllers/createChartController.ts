@@ -14,7 +14,7 @@
 
 import { marketDataProviderRegistry } from '../data/provider/registry.js'
 import { BarsLiveSubscription } from '../data/live/barsLive.js'
-import { ORIGINAL_BAR_AGGREGATION } from '../data/provider/types.js'
+import { ORIGINAL_BAR_AGGREGATION, type BarAggregation } from '../data/provider/types.js'
 import { Chart } from '../engine/chart.js'
 import type {
   ChartOptions,
@@ -461,6 +461,12 @@ export async function createChartController(opts: ChartMountOptions): Promise<Ch
     const barAggregation =
       selection?.kind === 'bars' ? selection.barAggregation : ORIGINAL_BAR_AGGREGATION
     liveBars.reconcile(chart.kernel.dataManager.readonly.currentSpec.peek(), barAggregation)
+  }
+
+  /** 声明非对比视图的缺省聚合口径（如 Exness 走 europe-traditional）；变化后重协调实时订阅。 */
+  function setDefaultBarAggregation(value: BarAggregation): void {
+    chart.setDefaultBarAggregation(value)
+    reconcileLiveBars()
   }
 
   // 当前品种的 Provider 在自动路由完成后会写回 currentSpec，此时重新检查实时能力。
@@ -1018,6 +1024,7 @@ export async function createChartController(opts: ChartMountOptions): Promise<Ch
     catalog: allIndicatorDefinitions(),
     alertController: chart.alertController,
     setSymbols,
+    setDefaultBarAggregation,
     registerSymbols,
     setComparisonSpecs,
     addComparisonSymbol,
