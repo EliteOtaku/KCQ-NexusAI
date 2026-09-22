@@ -1,0 +1,68 @@
+// 验证 Provider 连接持久化与模型目录刷新保持独立。
+
+import { setActivePinia } from 'pinia'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { FakeAgentBridge } from '../../../testing/fake-agent-bridge'
+import {
+  createAgentProviderSettingsPinia,
+  useAgentProviderSettingsStore,
+} from '../impl/agent-provider-settings-store'
+
+describe('AgentProviderSettingsStore', () => {
+  beforeEach(() => {
+    setActivePinia(createAgentProviderSettingsPinia())
+  })
+
+  it('keeps connection persistence separate from model catalog refresh', async () => {
+    const bridge = new FakeAgentBridge({ providerConfigured: true })
+    const listCatalog = vi.spyOn(bridge, 'listProviderModelCatalog').mockResolvedValue({
+      models: [],
+      refreshedAt: 0,
+    })
+    const store = useAgentProviderSettingsStore()
+    store.bindBridge(bridge)
+
+    await store.show(await bridge.getProviderStatus())
+    expect(listCatalog).not.toHaveBeenCalled()
+
+    store.baseUrl = 'https://models.example.test/v1'
+    await store.persistConnection()
+    expect(listCatalog).not.toHaveBeenCalled()
+
+    await store.refreshModelCatalog()
+    expect(listCatalog).toHaveBeenCalledTimes(1)
+  })
+
+  it('adds and removes a catalog model through its pool membership switch', async () => {
+    const bridge = new FakeAgentBridge()
+    await bridge.createProviderProfile('Provider A')
+    await bridge.selectProviderProfile('Provider A')
+    const store = useAgentProviderSettingsStore()
+    store.bindBridge(bridge)
+    await store.show(await bridge.getProviderStatus())
+    store.modelCatalog = [
+      { id: 'provider-model-a', name: 'Provider Model A', compatibility: 'compatible' },
+    ]
+
+    await store.setModelPoolMembership('provider-model-a', true)
+    expect(store.modelPool.map((model) => model.id)).toEqual(['provider-model-a'])
+
+    await store.setModelPoolMembership('provider-model-a', false)
+    expect(store.modelPool).toEqual([])
+  })
+
+  it('renames and deletes saved Provider profiles through the store', async () => {
+    const bridge = new FakeAgentBridge()
+    await bridge.createProviderProfile('Provider A')
+    await bridge.createProviderProfile('Provider B')
+    const store = useAgentProviderSettingsStore()
+    store.bindBridge(bridge)
+    await store.show(await bridge.getProviderStatus())
+
+    await expect(store.renameProfile('Provider A', 'Provider A2')).resolves.toBe(true)
+    expect(store.profiles.map((profile) => profile.name)).toEqual(['Provider A2', 'Provider B'])
+
+    await expect(store.deleteProfile('Provider A2')).resolves.toBe(true)
+    expect(store.profiles.map((profile) => profile.name)).toEqual(['Provider B'])
+  })
+})

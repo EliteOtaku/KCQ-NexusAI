@@ -1,12 +1,11 @@
 // 验证浏览器 Agent bridge 可通过 runtime 根入口完成 Provider 目录请求。
 
-import type {
-  AgentChartSymbolContextItem,
-  RuntimeToolDefinition,
-} from '@363045841yyt/klinechart-agent-runtime'
+import type { AgentChartSymbolContextItem } from '@363045841yyt/klinechart-agent-runtime'
+import { KLineChartError } from '@363045841yyt/klinechart-core'
 import type { ChartAgentController } from '@363045841yyt/klinechart-core/controllers'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { BrowserAgentBridge } from '../browser-agent-bridge'
+import { BrowserAgentBridge } from '../browser-agent/bridge/impl/browser-agent-bridge'
+import { BrowserToolRegistry } from '../browser-agent/tools/impl/browser-tool-registry'
 import { createOpenAiCompatibleFetchStub } from './_agentProviderFixtures'
 import { readStoredAgentModelSettings } from './_agentSettingsFixtures'
 import { createTestChartAgent, createTestChartAgentContext } from './_testChartAgent'
@@ -38,19 +37,19 @@ describe('BrowserAgentBridge', () => {
     )
   })
 
-  it('marks web search unavailable before an Exa key is configured', async () => {
+  it('keeps web search enabled before an Exa key is configured and returns setup guidance', async () => {
     const bridge = new BrowserAgentBridge()
 
     await expect(bridge.listTools()).resolves.toContainEqual(
       expect.objectContaining({
         name: 'web_search',
-        enabled: false,
-        available: false,
-        unavailableReason: 'Enter an Exa API key to enable Web search.',
+        enabled: true,
+        available: true,
       }),
     )
-    await expect(bridge.setToolEnabled('web_search', true)).rejects.toMatchObject({
-      code: 'TOOL_NOT_ALLOWED',
+    await expect(bridge.debugTool('web_search', { query: 'KLineChart' })).resolves.toMatchObject({
+      summary: 'Web search requires an Exa API key.',
+      content: expect.stringContaining('open Agent settings and enter an Exa API key'),
     })
   })
 
@@ -353,10 +352,11 @@ describe('BrowserAgentBridge', () => {
     await expect(bridge.getProviderStatus()).resolves.toMatchObject({
       state: 'not-configured',
       baseUrl: 'https://provider.example/v1',
+      exaConfigured: false,
     })
   })
 
-  it('persists the Exa key locally and exposes the web search tool', async () => {
+  it('persists one global Exa key and exposes the web search tool without a Provider Profile', async () => {
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit) =>
         new Response(
@@ -371,21 +371,38 @@ describe('BrowserAgentBridge', () => {
     vi.stubGlobal('fetch', fetchMock)
     const bridge = new BrowserAgentBridge()
 
-    await bridge.saveProvider({
-      baseUrl: 'https://provider.example/v1',
-      apiKey: 'model-key',
-      exaApiKey: 'exa-key',
-      profileName: 'Provider example',
-      protocol: 'openai-completions',
-    })
+    await bridge.saveWebSearchApiKey('exa-key')
+    await bridge.createProviderProfile('Provider one')
+    await bridge.createProviderProfile('Provider two')
+    await bridge.selectProviderProfile('Provider one')
+    expect(readStoredAgentModelSettings()).toMatchObject({ exaApiKey: 'exa-key' })
     await expect(bridge.listTools()).resolves.toContainEqual(
       expect.objectContaining({ name: 'web_search', enabled: true, available: true }),
     )
+    await expect(bridge.getProviderStatus()).resolves.toMatchObject({ exaConfigured: true })
     await expect(bridge.debugTool('web_search', { query: 'KLineChart' })).resolves.toMatchObject({
       summary: 'Found 1 web results.',
     })
     expect(new Headers(fetchMock.mock.calls[0]![1]?.headers).get('x-api-key')).toBe('exa-key')
     expect(JSON.stringify(await bridge.listProviderProfiles())).not.toContain('exa-key')
+  })
+
+  it('migrates a legacy Profile Exa key into the global Agent settings', async () => {
+    window.localStorage.setItem(
+      'agent.model-settings',
+      JSON.stringify({
+        profiles: [
+          { name: 'Legacy provider', apiKey: '', exaApiKey: 'legacy-exa-key', active: true },
+        ],
+        modelPool: [],
+        enabledTools: [],
+      }),
+    )
+    const bridge = new BrowserAgentBridge()
+
+    await expect(bridge.getProviderStatus()).resolves.toMatchObject({ exaConfigured: true })
+    expect(readStoredAgentModelSettings()).toMatchObject({ exaApiKey: 'legacy-exa-key' })
+    expect(readStoredAgentModelSettings()).not.toHaveProperty('profiles.0.exaApiKey')
   })
 
   it('keeps an opened message snapshot isolated from a new run', async () => {
@@ -396,6 +413,39 @@ describe('BrowserAgentBridge', () => {
     await bridge.startRun({ sessionId: session!.id, prompt: 'Analyze RSI', readOnly: true })
 
     expect(snapshot.messages).toEqual([])
+  })
+
+  it('recovers the last run input when retrying a finished run', async () => {
+    const bridge = new BrowserAgentBridge()
+    const [session] = await bridge.listSessions()
+    const waitForTerminal = (runId: string) =>
+      new Promise<void>((resolve) => {
+        const unsubscribe = bridge.subscribe((event) => {
+          if (
+            event.type !== 'run.completed' &&
+            event.type !== 'run.cancelled' &&
+            event.type !== 'run.failed'
+          )
+            return
+          if (event.runId !== runId) return
+          unsubscribe()
+          resolve()
+        })
+      })
+
+    const first = await bridge.startRun({
+      sessionId: session!.id,
+      prompt: '分析 RSI',
+      readOnly: true,
+    })
+    await waitForTerminal(first.runId)
+
+    const retry = await bridge.retryRun(first.runId)
+
+    expect(retry.runId).not.toBe(first.runId)
+    await waitForTerminal(retry.runId)
+    const snapshot = await bridge.openSession(session!.id)
+    expect(snapshot.runs.map((run) => run.id)).toEqual([first.runId, retry.runId])
   })
 
   it('includes completed turns in the next Provider request', async () => {
@@ -575,17 +625,42 @@ describe('BrowserAgentBridge', () => {
     expect(drawingCommands.create).toHaveBeenCalledOnce()
   })
 
+  it('preserves non-drawing chart tool contract errors for the model', async () => {
+    const agent = createTestChartAgent({
+      queryBars: () => {
+        throw new KLineChartError('INVALID_ARGUMENTS', 'The requested period is unavailable.')
+      },
+    })
+    const bridge = new BrowserAgentBridge({ getChartAgent: () => agent })
+
+    await expect(
+      bridge.debugTool('market_bars_query', {
+        symbol: 'BTCUSDT',
+        period: 'daily',
+        adjustment: 'none',
+        barAggregation: 'original',
+        limit: 1,
+      }),
+    ).resolves.toMatchObject({
+      content: expect.stringContaining('INVALID_ARGUMENTS'),
+    })
+  })
+
   it('routes a chart tool to the primitive host that owns it, falling back to the facade', () => {
     const primitiveHost = { create: () => true }
     const agent = createTestChartAgent({ toolHosts: [primitiveHost] })
-    const bridge = new BrowserAgentBridge({ getChartAgent: () => agent })
+    const registry = new BrowserToolRegistry({
+      fetch,
+      getWebSearchApiKey: () => undefined,
+      requestQuestion: async () => ({ selectedValues: [] }),
+    })
     // 读取私有方法：private 无法静态访问，测试只断言其路由行为。
     const chartToolTarget: (
       tool: { owns(host: object): boolean },
       agent: ChartAgentController,
-    ) => object = Reflect.get(bridge, 'chartToolTarget')
+    ) => object = Reflect.get(registry, 'chartToolTarget')
     const resolveTarget = (tool: { owns(host: object): boolean }, agent: ChartAgentController) =>
-      chartToolTarget.call(bridge, tool, agent)
+      chartToolTarget.call(registry, tool, agent)
 
     // 原语工具由其真实方法宿主识别，而非按工具名匹配。
     expect(resolveTarget({ owns: (host) => host === primitiveHost }, agent)).toBe(primitiveHost)
@@ -598,15 +673,12 @@ describe('BrowserAgentBridge', () => {
       getAvailableMarketDataSourceIds: () => [],
       getAvailableDrawingPaneIds: () => ['main', 'volume'],
     })
-    const bridge = new BrowserAgentBridge({ getChartAgent: () => agent })
-    // 读取私有 catalog：private 无法静态访问，测试只断言解析出的工具描述。
-    const toolCatalog: {
-      resolve(context: {
-        agent: ChartAgentController
-        readOnly: boolean
-      }): readonly RuntimeToolDefinition[]
-    } = Reflect.get(bridge, 'toolCatalog')
-    const resolveTools = toolCatalog.resolve({ agent, readOnly: false })
+    const registry = new BrowserToolRegistry({
+      fetch,
+      getWebSearchApiKey: () => undefined,
+      requestQuestion: async () => ({ selectedValues: [] }),
+    })
+    const resolveTools = registry.catalog.resolve({ agent, readOnly: false })
 
     expect(resolveTools.find((tool) => tool.name === 'drawing_create')?.description).toContain(
       'Available runtime paneIds: main, volume.',

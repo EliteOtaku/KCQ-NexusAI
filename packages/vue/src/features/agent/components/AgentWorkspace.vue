@@ -66,7 +66,7 @@
 <script setup lang="ts">
   import { nextTick, onUnmounted, ref, watch } from 'vue'
   import type { AgentBridgeClient } from '../agent-contracts.js'
-  import { useAgentWorkspace } from '../use-agent-workspace.js'
+  import { useAgentWorkspace } from '../workspace/impl/use-agent-workspace.js'
   import AgentComposer from './AgentComposer.vue'
   import AgentContextBar from './AgentContextBar.vue'
   import AgentContextInjectionCard from './AgentContextInjectionCard.vue'
@@ -164,6 +164,7 @@
     --agent-bg: var(--klc-color-ui-background);
     --agent-surface: var(--klc-color-ui-surface);
     --agent-card: var(--klc-color-ui-card);
+    --agent-control: var(--klc-color-ui-control-background);
     --agent-input: var(--klc-color-ui-input);
     --agent-hover: var(--klc-color-ui-hover);
     --agent-user-message: var(--klc-color-agent-user-message);

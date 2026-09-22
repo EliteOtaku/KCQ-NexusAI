@@ -14,7 +14,8 @@ import { DEFAULT_DRAWING_STROKE } from '../../foundation/tokens/index.js'
 import { generateUUID } from '../../foundation/utils/uuid.js'
 import type { DrawingStateModule } from '../state/drawingState.js'
 import { PREVIEW_ID } from './DrawingState.js'
-import { isDrawingLocked } from './drawingAccess.js'
+import { areAnchorsIdentical, isDrawingLocked } from './drawingAccess.js'
+import { normalizeDrawingLabels } from './drawingLabels.js'
 import {
   getDrawingAnchorCount,
   getDrawingInputAnchorCount,
@@ -93,15 +94,23 @@ const DRAWING_STYLE_KEYS: ReadonlyArray<DrawingStyleKey> = [
   'fontSize',
 ]
 
+/**
+ * 交易日锚点的解析结果；把“找不到”拆成互相排斥的原因，
+ * 让上层按语义抛不同错误码，而不是用一个错误码覆盖多种失败。
+ */
+export type AnchorTradingDateResolution =
+  | { readonly kind: 'resolved'; readonly timestamp: number }
+  | { readonly kind: 'out-of-range'; readonly earliest: string; readonly latest: string }
+  | { readonly kind: 'not-trading' }
+  | { readonly kind: 'date-unavailable' }
+
 /** 绘图文档解析锚点坐标所需的最小数据访问能力。 */
 export interface DrawingDocumentDependencies {
   readonly drawingState: DrawingStateModule
   readonly getLogicalIndexAtTimestamp: (timestamp: number) => number | null
   readonly getDrawingTimestampAtLogicalIndex: (index: number) => number | null
   readonly getDrawingData: () => ReadonlyArray<{ timestamp: number }>
-  readonly findAnchorAtTradingDate: (tradingDate: TradingDate) => {
-    readonly timestamp: number
-  } | null
+  readonly findAnchorAtTradingDate: (tradingDate: TradingDate) => AnchorTradingDateResolution
   readonly hasPaneId: (paneId: string) => boolean
   readonly getWorkspaceId: () => DrawingWorkspaceId
 }
@@ -110,22 +119,6 @@ const DEFAULT_DRAWING_STYLE: Readonly<DrawingStyle> = {
   stroke: DEFAULT_DRAWING_STROKE,
   strokeWidth: 1,
   strokeStyle: 'solid',
-}
-
-/** 将用户 Enter 与外部输入统一为绘图文档的字面量换行控制码。 */
-function normalizeDrawingLabels(labels: DrawingLabels): DrawingLabels {
-  const normalizeText = (text: string) => text.replace(/\r\n?|\n/g, '\\n')
-  const normalizeGroup = (group: DrawingLabels['line']) =>
-    Object.fromEntries(
-      Object.entries(group).map(([key, label]) => [
-        key,
-        { ...label, text: normalizeText(label.text) },
-      ]),
-    )
-  return {
-    line: normalizeGroup(labels.line),
-    area: normalizeGroup(labels.area),
-  }
 }
 
 /** 判断图元是否需要默认半透明填充。 */
@@ -137,25 +130,6 @@ function isChannel(kind: DrawingKind): boolean {
     'flat-line',
     'disjoint-channel',
   ].includes(kind)
-}
-
-/** 判断 patch 是否触及 locked 以外的可写字段；锁定图元只接受 locked 字段。 */
-function hasEditablePatchFields(patch: {
-  readonly anchors?: unknown
-  readonly style?: unknown
-  readonly params?: unknown
-  readonly labels?: unknown
-  readonly visible?: unknown
-  readonly zIndex?: unknown
-}): boolean {
-  return (
-    patch.anchors !== undefined ||
-    patch.style !== undefined ||
-    patch.params !== undefined ||
-    patch.labels !== undefined ||
-    patch.visible !== undefined ||
-    patch.zIndex !== undefined
-  )
 }
 
 /** 已确认图元的唯一 CRUD 入口。 */
@@ -193,7 +167,7 @@ export class DrawingDocument {
       anchors,
       params:
         input.params ?? (input.kind === 'regression-channel' ? { sigma: 2 } : Object.freeze({})),
-      labels: normalizeDrawingLabels(input.labels ?? { line: {}, area: {} }),
+      labels: normalizeDrawingLabels(input.labels),
       style: {
         ...DEFAULT_DRAWING_STYLE,
         ...(isChannel(input.kind) ? { fillOpacity: 0.1 } : {}),
@@ -204,18 +178,20 @@ export class DrawingDocument {
     return this.getDrawing(drawing.id)!
   }
 
-  /** 以完整模型快照替换一个已确认图元；锁定图元拒绝。 */
+  /** 以完整模型快照替换一个已确认图元；锁定图元仅在锚点未变时接受。 */
   updateDrawing(drawing: DrawingObject): DrawingObject | null {
     const current = this.getDrawing(drawing.id)
-    if (!current || isDrawingLocked(current)) return null
+    if (!current) return null
+    if (isDrawingLocked(current) && !areAnchorsIdentical(current.anchors, drawing.anchors))
+      return null
     return this.writeDrawing(drawing)
   }
 
-  /** 将外部声明式 patch 转换为完整模型快照后提交；锁定图元只接受 locked 字段。 */
+  /** 将外部声明式 patch 转换为完整模型快照后提交；锁定图元只拒绝锚点 patch。 */
   updateDrawingFromInput(id: string, patch: UpdateDrawingPatch): DrawingObject | null {
     const current = this.getDrawing(id)
     if (!current) return null
-    if (isDrawingLocked(current) && hasEditablePatchFields(patch)) return null
+    if (isDrawingLocked(current) && patch.anchors !== undefined) return null
     const anchors =
       patch.anchors === undefined ? undefined : this.resolveAnchorsForUpdate(id, patch.anchors)
     return this.writeDrawing({
@@ -236,7 +212,7 @@ export class DrawingDocument {
     if (!current || drawing.kind !== current.kind || drawing.paneId !== current.paneId) return null
     return this.dependencies.drawingState.actions.updateDrawing(drawing.id, {
       ...drawing,
-      labels: normalizeDrawingLabels(drawing.labels ?? { line: {}, area: {} }),
+      labels: normalizeDrawingLabels(drawing.labels),
     })
   }
 
@@ -318,7 +294,7 @@ export class DrawingDocument {
     )
   }
 
-  /** 原子更新多个图元的公共属性；样式字段不合法时整批不写，含其它字段时跳过锁定目标。 */
+  /** 原子更新多个图元的公共属性；样式字段不合法时整批不写，锁定图元同样接受。 */
   updateBatch(ids: ReadonlyArray<string>, patch: BatchDrawingPatch): ReadonlyArray<DrawingObject> {
     const drawings = this.getDrawingsByIds(ids)
     if (drawings.length === 0) return Object.freeze([])
@@ -332,13 +308,8 @@ export class DrawingDocument {
       return Object.freeze([])
     }
 
-    const targets = hasEditablePatchFields(patch)
-      ? drawings.filter((drawing) => !isDrawingLocked(drawing))
-      : drawings
-    if (targets.length === 0) return Object.freeze([])
-
     return this.dependencies.drawingState.actions.updateDrawings(
-      targets.map((drawing) => drawing.id),
+      drawings.map((drawing) => drawing.id),
       patch,
     )
   }
@@ -376,7 +347,7 @@ export class DrawingDocument {
             drawing.anchors,
             () => `anchor-${generateUUID()}`,
           ),
-          labels: normalizeDrawingLabels(drawing.labels ?? { line: {}, area: {} }),
+          labels: normalizeDrawingLabels(drawing.labels),
         })),
     )
   }
@@ -399,6 +370,33 @@ export class DrawingDocument {
       inputs.map((input) => this.resolveAnchor(kind, input)),
       () => `anchor-${generateUUID()}`,
     )
+  }
+
+  /** 解析交易日锚点；按互相排斥的失败原因抛出语义明确的错误码。 */
+  private resolveAnchorTradingDate(tradingDate: TradingDate): number {
+    const resolution = this.dependencies.findAnchorAtTradingDate(tradingDate)
+    switch (resolution.kind) {
+      case 'resolved':
+        return resolution.timestamp
+      case 'out-of-range':
+        throw new KLineChartError(
+          DRAWING_ERROR_CODES.ANCHOR_DATE_OUT_OF_RANGE,
+          `Drawing anchor date ${tradingDate} is outside the loaded range ${resolution.earliest}..${resolution.latest}.`,
+          { details: { tradingDate, earliest: resolution.earliest, latest: resolution.latest } },
+        )
+      case 'not-trading':
+        throw new KLineChartError(
+          DRAWING_ERROR_CODES.ANCHOR_DATE_NOT_TRADING,
+          `No bar exists on ${tradingDate} in the loaded chart data.`,
+          { details: { tradingDate } },
+        )
+      case 'date-unavailable':
+        throw new KLineChartError(
+          DRAWING_ERROR_CODES.ANCHOR_DATE_UNAVAILABLE,
+          'The loaded chart data exposes no per-bar date to resolve a trading-date anchor.',
+          { details: { tradingDate } },
+        )
+    }
   }
 
   /** 按输入顺序读取唯一图元；任一 id 不存在时返回空数组。 */
@@ -456,22 +454,15 @@ export class DrawingDocument {
       )
     }
     if (input.tradingDate !== undefined) {
-      const resolved = this.dependencies.findAnchorAtTradingDate(input.tradingDate)
-      if (resolved === null) {
-        throw new KLineChartError(
-          DRAWING_ERROR_CODES.ANCHOR_NOT_FOUND,
-          `No chart data exists for drawing anchor trading date ${input.tradingDate}.`,
-          { details: { tradingDate: input.tradingDate } },
-        )
-      }
+      const timestamp = this.resolveAnchorTradingDate(input.tradingDate)
       return kind === 'vertical-line'
         ? {
             id: `anchor-${generateUUID()}`,
             type: 'vertical',
-            time: resolved.timestamp,
+            time: timestamp,
             price: input.price,
           }
-        : this.createPointAnchor(resolved.timestamp, undefined, input.price)
+        : this.createPointAnchor(timestamp, undefined, input.price)
     }
     const timestamp = input.timestamp
     if (typeof timestamp !== 'number' || !Number.isFinite(timestamp)) {

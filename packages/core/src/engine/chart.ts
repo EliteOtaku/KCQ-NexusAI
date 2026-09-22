@@ -23,18 +23,20 @@ import { resolveMarketDataCacheMaxBytes } from '../data/buffer/marketDataPolicy.
 import { AUTO_SOURCE_ID } from '../data/buffer/seriesRepository.js'
 import { lookupInstrumentsBySymbol } from '../data/provider/instrumentSearch.js'
 import { marketDataProviderRegistry } from '../data/provider/registry.js'
-import { createAlertController } from '../features/alerts/index.js'
+import { createAlertController } from '../features/alerts/impl/createAlertController.js'
 import {
   createVolumeLookbacks,
   pushToVolumeLookbacks,
   type VolumeLookbacks,
-} from '../features/alerts/rollingVolume.js'
+} from '../features/alerts/impl/rollingVolume.js'
 import type { AlertController, MarketSnapshot } from '../features/alerts/types.js'
 import {
   buildPaneScaleTypesFromSetting,
   type ChartSettings,
   resolvePriceScaleTypeSetting,
 } from '../foundation/config/chartSettings.js'
+import { PRICE_AXIS_RANGE_MODE } from '../foundation/config/priceAxisRangeMode.js'
+import { makePluginLayerId } from '../foundation/plugin/impl/rendererLayerId.js'
 import {
   createPluginHost,
   type PluginHostImpl,
@@ -43,7 +45,6 @@ import {
   type RendererPluginWithHost,
   wrapPaneInfo,
 } from '../foundation/plugin/index.js'
-import { makePluginLayerId } from '../foundation/plugin/rendererLayerId.js'
 import {
   type Computed,
   computed,
@@ -55,6 +56,7 @@ import {
 } from '../foundation/reactivity/signal.js'
 import { getFont } from '../foundation/tokens/fonts.js'
 import type { KLineData } from '../foundation/types/price.js'
+import { AXIS_TYPE_NONE, ScaleType } from '../foundation/types/scaleType.js'
 import {
   createDefaultRendererHostSync,
   getVisibleCanvas,
@@ -91,9 +93,7 @@ import { UpdateLevel, type VisibleRange } from './layout/pane.js'
 import type { CustomMarkerEntity, MarkerManager } from './marker/registry.js'
 import { MarketSessionRegistry } from './market/marketSessionRegistry.js'
 import { resolveSymbolMarketSession } from './market/resolveSymbolMarketSession.js'
-import { KLineMode } from './modes/kLineMode.js'
-import { TimeShareMode } from './modes/timeShareMode.js'
-import type { ChartModeHandler } from './modes/types.js'
+import { type ChartModeHandler, KLineMode, TimeShareMode } from './modes/index.js'
 import { PaneRenderer } from './paneRenderer.js'
 import { ChartRenderer, mergeUpdateLevel } from './render/chartRenderer.js'
 import type { LegendTemplateContext } from './renderers/Indicator/mainIndicatorLegendContext.js'
@@ -108,7 +108,6 @@ import {
 import type { ViewWorkspacePersistence, ViewWorkspacesSnapshot } from './state/viewWorkspace.js'
 import { ChartZoomController } from './utils/chartZoomController.js'
 import { getPhysicalKLineConfig } from './utils/klineConfig.js'
-import type { ScaleType } from './utils/tickPosition.js'
 import { ChartViewportManager } from './viewport/chartViewportManager.js'
 import { ViewportScrollBridge } from './viewport/viewportScrollBridge.js'
 
@@ -481,6 +480,7 @@ export class Chart {
       getActiveMode: () => this.activeMode,
       dataView$: this.kernel.mode.readonly.dataView,
       settings$: this.kernel.settings.readonly.settings,
+      mainPriceAxis: this.kernel.mainPriceAxis,
       customMarkers$: this.kernel.marker.readonly.customMarkers,
       drawings$: this.kernel.drawing.readonly.drawings,
       selectedDrawingIds$: this.kernel.drawing.readonly.selectedDrawingIds,
@@ -626,7 +626,7 @@ export class Chart {
       const percentMap = new Map(this.kernel.pane.readonly.paneScaleTypes.peek())
       for (const renderer of this.paneRenderers) {
         const pane = renderer.getPane()
-        if (pane.role === 'price') percentMap.set(pane.id, 'percent')
+        if (pane.role === 'price') percentMap.set(pane.id, ScaleType.Percent)
       }
       this.kernel.pane.actions.replacePaneScaleTypes(percentMap)
       this.projectPaneScaleTypes()
@@ -774,7 +774,7 @@ export class Chart {
     const types = this.kernel.pane.readonly.paneScaleTypes.peek()
     for (const renderer of this.paneRenderers) {
       const pane = renderer.getPane()
-      const t = types.get(pane.id) ?? 'linear'
+      const t = types.get(pane.id) ?? ScaleType.Linear
       if (pane.yAxis.getScaleType() !== t) pane.yAxis.setScaleType(t)
     }
   }
@@ -804,7 +804,7 @@ export class Chart {
     for (const renderer of this.paneRenderers) {
       const pane = renderer.getPane()
       if (next.has(pane.id)) continue
-      next.set(pane.id, seeded.get(pane.id) ?? 'linear')
+      next.set(pane.id, seeded.get(pane.id) ?? ScaleType.Linear)
       changed = true
     }
     if (changed) this.kernel.pane.actions.replacePaneScaleTypes(next)
@@ -846,8 +846,8 @@ export class Chart {
     const mainPane = this.paneRenderers
       .find((renderer) => renderer.getPane().role === 'price')
       ?.getPane()
-    if (!mainPane || next.get(mainPane.id) === 'percent') return
-    next.set(mainPane.id, 'percent')
+    if (!mainPane || next.get(mainPane.id) === ScaleType.Percent) return
+    next.set(mainPane.id, ScaleType.Percent)
     this.kernel.pane.actions.replacePaneScaleTypes(next)
     this.projectPaneScaleTypes()
   }
@@ -869,7 +869,7 @@ export class Chart {
 
     if (
       prev.mainRightAxisTypeSetting !== next.mainRightAxisTypeSetting &&
-      next.mainRightAxisTypeSetting !== 'none'
+      next.mainRightAxisTypeSetting !== AXIS_TYPE_NONE
     ) {
       this.applyPriceScaleSettingToKernel(
         resolvePriceScaleTypeSetting(next.mainRightAxisTypeSetting),
@@ -983,10 +983,20 @@ export class Chart {
 
     const pane = renderer.getPane()
     if (!pane.capabilities.supportsPriceTranslate) return
+    if (
+      paneId === 'main' &&
+      this.kernel.mainPriceAxis.readonly.rangeMode.peek() !== PRICE_AXIS_RANGE_MODE.HAND
+    ) {
+      return
+    }
 
     const priceOffset = pane.yAxis.deltaYToPriceOffset(deltaY)
     const currentOffset = pane.yAxis.getPriceOffset()
     pane.yAxis.setPriceOffset(currentOffset + priceOffset)
+    if (paneId === 'main') {
+      this.kernel.mainPriceAxis.actions.setHandRange(pane.yAxis.getDisplayRange())
+      pane.yAxis.resetTransform()
+    }
     this.scheduleDraw()
   }
 
@@ -1008,6 +1018,21 @@ export class Chart {
     this.scheduleDraw()
   }
 
+  /** 切换主图价格轴范围来源模式。 */
+  setMainPriceAxisRangeMode(
+    mode: import('../foundation/config/priceAxisRangeMode.js').PriceAxisRangeMode,
+  ): void {
+    const renderer = this.paneRenderers.find((item) => item.getPane().id === 'main')
+    if (!renderer) return
+    if (mode === PRICE_AXIS_RANGE_MODE.HAND) {
+      this.kernel.mainPriceAxis.actions.useHandRange(renderer.getPane().yAxis.getDisplayRange())
+    } else {
+      this.kernel.mainPriceAxis.actions.useAutoRange()
+      renderer.getPane().yAxis.resetTransform()
+    }
+    this.scheduleDraw()
+  }
+
   /**
    * 缩放价格轴（用于右侧刻度栏上下拖动）
    * @param paneId 目标 pane ID
@@ -1019,8 +1044,18 @@ export class Chart {
 
     const pane = renderer.getPane()
     if (!pane.capabilities.supportsPriceTranslate) return
+    if (
+      paneId === 'main' &&
+      this.kernel.mainPriceAxis.readonly.rangeMode.peek() !== PRICE_AXIS_RANGE_MODE.HAND
+    ) {
+      return
+    }
 
     pane.yAxis.scaleByDelta(deltaY)
+    if (paneId === 'main') {
+      this.kernel.mainPriceAxis.actions.setHandRange(pane.yAxis.getDisplayRange())
+      pane.yAxis.resetTransform()
+    }
     this.scheduleDraw()
   }
   /**

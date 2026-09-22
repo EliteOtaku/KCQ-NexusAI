@@ -1,4 +1,4 @@
-import type { ScaleType } from '../utils/tickPosition.js'
+import { ScaleType } from '../../foundation/types/scaleType.js'
 
 import {
   fromLog,
@@ -27,7 +27,7 @@ export class PriceScale {
   private verticalScale = 1
 
   /** 刻度类型：线性或对数 */
-  private scaleType: ScaleType = 'linear'
+  private scaleType: ScaleType = ScaleType.Linear
 
   /** 对数变换公式（动态计算，适配极小价格） */
   private logFormula: LogFormula = logFormulaForPriceRange(null)
@@ -67,11 +67,11 @@ export class PriceScale {
   }
 
   private isPercent(): boolean {
-    return this.scaleType === 'percent' && this.basePrice !== null && this.basePrice > 0
+    return this.scaleType === ScaleType.Percent && this.basePrice !== null && this.basePrice > 0
   }
 
   private isLog(): boolean {
-    return this.scaleType === 'log' && this.range.minPrice > 0
+    return this.scaleType === ScaleType.Log && this.range.minPrice > 0
   }
 
   private toNative(price: number): number {
@@ -90,20 +90,20 @@ export class PriceScale {
     return this.toNative(this.range.maxPrice) - this.toNative(this.range.minPrice)
   }
 
-  setRange(r: PriceRange) {
-    this.range = r
-    if (this.scaleType === 'log' && r.minPrice > 0) {
-      const newFormula = logFormulaForPriceRange(r)
+  setRange(range: PriceRange): void {
+    this.range = range
+    if (this.scaleType === ScaleType.Log && range.minPrice > 0) {
+      const newFormula = logFormulaForPriceRange(range)
       if (!logFormulasAreSame(newFormula, this.logFormula)) {
         // 将旧公式的 log 偏移量转换到新公式空间
-        const oldLogMin = toLog(r.minPrice, this.logFormula)
-        const oldLogMax = toLog(r.maxPrice, this.logFormula)
+        const oldLogMin = toLog(range.minPrice, this.logFormula)
+        const oldLogMax = toLog(range.maxPrice, this.logFormula)
         const oldCenter = (oldLogMax + oldLogMin) / 2 + this.priceOffset
 
         this.logFormula = newFormula
 
-        const newLogMin = toLog(r.minPrice, this.logFormula)
-        const newLogMax = toLog(r.maxPrice, this.logFormula)
+        const newLogMin = toLog(range.minPrice, this.logFormula)
+        const newLogMax = toLog(range.maxPrice, this.logFormula)
         const newBaseCenter = (newLogMax + newLogMin) / 2
         this.priceOffset = this.clampOffset(oldCenter - newBaseCenter)
       }
@@ -199,7 +199,7 @@ export class PriceScale {
     const realCenter = this.fromNative(nativeCenter)
 
     this.scaleType = type
-    if (type === 'log' && this.range.minPrice > 0) {
+    if (type === ScaleType.Log && this.range.minPrice > 0) {
       this.logFormula = logFormulaForPriceRange(this.range)
     }
 

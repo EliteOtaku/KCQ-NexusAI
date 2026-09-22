@@ -26,7 +26,7 @@ import {
   type StartRunInput,
   type ToolCallView,
 } from '../agent-contracts.js'
-import { ProviderModelPool } from '../provider-model-pool.js'
+import { ProviderModelPool } from '../browser-agent/provider/impl/provider-model-pool.js'
 
 interface FakeRun {
   id: string
@@ -416,6 +416,12 @@ export class FakeAgentBridge implements AgentBridgeClient {
       protocol: input.protocol,
       compatibility: 'unknown',
     }
+    this.emit({ type: 'provider.status.changed', status: this.provider })
+  }
+
+  async saveWebSearchApiKey(apiKey: string): Promise<void> {
+    if (!apiKey.trim()) return
+    this.provider = { ...this.provider, exaConfigured: true }
     this.emit({ type: 'provider.status.changed', status: this.provider })
   }
 

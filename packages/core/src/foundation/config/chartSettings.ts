@@ -2,6 +2,10 @@
  * 图表设置配置
  */
 
+import { AXIS_TYPE_NONE, ScaleType } from '../types/scaleType.js'
+
+import { PRICE_AXIS_RANGE_MODE } from './priceAxisRangeMode.js'
+
 export interface SettingItem {
   key: string
   label: string
@@ -108,13 +112,13 @@ export const DEFAULT_SETTINGS = [
     key: 'mainRightAxisTypeSetting',
     label: '主图右轴类型',
     type: 'select',
-    default: 'linear',
+    default: ScaleType.Linear,
     group: 'main',
     options: [
-      { value: 'none', label: '不显示' },
-      { value: 'linear', label: '常规轴' },
-      { value: 'log', label: '对数轴' },
-      { value: 'percent', label: '百分比轴' },
+      { value: AXIS_TYPE_NONE, label: '不显示' },
+      { value: ScaleType.Linear, label: '常规轴' },
+      { value: ScaleType.Log, label: '对数轴' },
+      { value: ScaleType.Percent, label: '百分比轴' },
     ],
   },
   {
@@ -130,11 +134,15 @@ export const DEFAULT_SETTINGS = [
     ],
   },
   {
-    key: 'disableMainPaneVerticalScroll',
-    label: '主图纵轴刻度自适应调整',
-    type: 'boolean',
-    default: true,
+    key: 'mainPriceAxisRangeMode',
+    label: '纵轴刻度',
+    type: 'select',
+    default: PRICE_AXIS_RANGE_MODE.AUTO,
     group: 'main',
+    options: [
+      { value: PRICE_AXIS_RANGE_MODE.AUTO, label: '自动适应' },
+      { value: PRICE_AXIS_RANGE_MODE.HAND, label: '锁定价格对 K 线比例' },
+    ],
   },
   {
     key: 'isAsiaMarket',
