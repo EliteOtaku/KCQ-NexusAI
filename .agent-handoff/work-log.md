@@ -1,24 +1,5 @@
 # Current Work Log
 
-## 2026-09-18（第三会话·提示词 C 执行：TV 界面参考采集）
-
-- Objective: 提示词 C——浏览器采集 TV 网页版界面参考（免费未登录、中文），产出 temp/tv-reference/ 三件套
-- 执行差异: 指定的 Edge 通道环境不可用（browser-use 仅 ZCode IAB，Chromium 隔离未登录 profile，满足 R1）；
-  语言切换：?lang=zh / setlang cookie 均不改图表应用语言 → 主页 hreflang 确认 cn.tradingview.com（zh-cn）直连
-- 交互方案沉淀: TV 应用对合成指针事件选择性响应——顶栏按钮/对话框/tab 接受"完整 pointer 事件序列派发"
-  （pointerdown→mousedown→pointerup→mouseup→click，React 根监听冒泡），且**每次整页刷新后首击必中**；
-  连续交互后左工具栏按钮/flyout 失效；右键菜单需可信事件（CUA 报 Unsupported mouse button: right）；
-  匿名推广浮层（gopro dialog，全屏 pointer-events:auto 拦截、无关闭钮、Escape 不散）周期弹出，刷新重置规避。
-  顶栏按钮有稳定 id（header-toolbar-symbol-search/-compare/-alerts/-replay/-layouts/-properties/-fullscreen 等）
-  且 DOM 存在三份断点模板拷贝——定位须做 elementFromPoint 可见性过滤
-- 采集结果: 12 项界面全覆盖，33 张截图（29 张有效 + 4 张实为推广浮层已在 notes.md 标注）；
-  notes.md（结构+控件文字清单+布局层次）；gap-analysis.md（TV↔KCQ↔批次归属，T1 六域全落地，
-  4 项标"需引擎扩展"：priceScale 对数/百分比、drawing 撤销重做栈、时间范围条解析、右缘空白 viewport+timeAxis 外推）
-- 受限项: 图表空白处右键菜单（技术）、几何/注释/图标三组 flyout 明细（技术）、告警创建+回放控制条（账号墙，
-  入口/升级文案已采）、3+ 格布局实际选择（未点击验证）——均建议用户人工补图
-- 验收门: 4/4 过（≥10 界面截图可读 / notes 12 项全覆盖 / gap 覆盖 T1 全部范围域 / 未登录+零业务代码改动+零提交）
-- 页面量: 约 11 次加载（R2 <30 ✓）；R3 无资产拷贝（仅截图与控件文字清单）；temp/ 已 gitignore
-
 ## 2026-09-18（第四会话·用户补图右键菜单 + H 批拍板）
 
 - 用户补图: TV 图表空白处右键菜单（登录态 XAUUSD）——14 项 5 组：重置视图(Alt+R)/复制价格格·粘贴(Ctrl+V)/
@@ -370,3 +351,17 @@
   三探针最终 39/15/50 全绿
 - 残留登记：core Indicator Worker dispose 竞态（dispose 后在途回调应静默）——[pr] 候选
 - 误提交的调试脚本 _debug-console.mjs 已删
+
+## 2026-09-22（滚轮缩放失效修复：pointerBridge this 绑定）
+
+- 用户报 5273 滚轮缩放完全无反应。三轮探针定位：bridge.onWheel 用裸方法引用
+  `add('wheel', this.onWheel)`，运行时 this=undefined → this.ctrl 抛 TypeError，
+  缩放静默 no-op。fork 批1（c4ad20a6）遗留，非上游回退/部署问题
+- 为什么隐蔽：preventDefault 在 this.ctrl 之前执行（事件"看似被处理"）；监听器内
+  异常走 pageerror 不走 console error；三探针不覆盖滚轮
+- 探针方法论教训已存 memory（kcq-dom-event-probe-pitfalls）：截图像素对比会假阳性
+  （渲染噪声+zoomIn/zoomOut 残差），判交互生效必须 viewport 字段 diff；
+  getZoomLevelCount 是配置常量非当前档位
+- 修复：箭头包装 `(event) => this.onWheel(event)`（与其他监听一致）
+- 验证：滚轮放大 scrollLeft 2687→5950、缩小精确回基线、wheel pageerror 零、
+  三探针 39/15/50 全绿
