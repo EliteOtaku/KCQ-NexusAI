@@ -365,3 +365,24 @@
 - 修复：箭头包装 `(event) => this.onWheel(event)`（与其他监听一致）
 - 验证：滚轮放大 scrollLeft 2687→5950、缩小精确回基线、wheel pageerror 零、
   三探针 39/15/50 全绿
+
+## 2026-09-23（第三轮同步 33 提交 + 素材 issue #241 + UI 路线定论）
+
+- **UI 路线定论**：开发组表态自推 webUI（指标/样式/图元面板/菜单陆续补齐）→ 用户拍板不自己转写，
+  需求走 issue、沿用上游成果；nexus-shell 收敛为验证场，提示词 D 作废
+- **素材 issue #241**：TV 基准库全量交付——notes.md 嵌图版（19.9K/40 图，脚本正则转换）+
+  gap-analysis 链接 + 尾部 41 张索引；23 张新截图+2 文档推 issue-assets（共 45 文件）；
+  全 URL 预置 ?v=2 防 camo，curl 抽查 200
+- **第三轮同步**（fork/sync-upstream-20260923 → merge ec0a601e，33 提交）：冲突 6 处——
+  types.ts 取 theirs（上游吸收 #228 时已规范化 EUROPE_TRADITIONAL 注释）、semantic 两文件删
+  （上游 breaking：remove semantic config API）、3 个 bench 取 theirs（semantic layout 路径迁移）
+- **上游两个真实问题**：①bf9091d3 的 redaction 测试把 exaApiKey 塞进 saveProvider 输入——
+  契约无此字段（TS2561），实现/契约是对的、测试写错（上游 CI 绿=增量缓存假绿）→ 修测试改走
+  saveWebSearchApiKey 独立入口；②上游 CI type-check:tests flaky 一红一绿同 SHA（假绿机制实锤）
+- **#205 适配**：f8a015d9 locked 语义收窄为「只冻结拖动与删除」→ 探针 B3-03 重写：
+  锁定态直接显隐（免解锁）+ 新增"锁定态删除被冻结"断言（50→51）
+- **验证链**：build/core 228 文件 2514 测试/vue 139/react 2/angular 12 全绿；type-check 三段过；
+  attw 全包过；三探针 39/15/51。⚠️ agent-runtime code-interpreter 7 项本机挂（real Python
+  subprocess 沙箱 5s 超时，Python 3.12 在但脚本起不来）——上游 CI 绿态证明非回归，本机环境限制
+- ⚠️ biome lint noConsole 报上游自带脚本——上游 CI 无 lint 门禁（library-ci 仅 type-check/
+  tests/attw REQUIRED），非阻塞
