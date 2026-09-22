@@ -83,7 +83,7 @@ export class ChartPointerBridge {
       event.preventDefault()
       this.hooks.onContextMenu?.(event)
     })
-    add('wheel', this.onWheel, { passive: false })
+    add('wheel', (event) => this.onWheel(event), { passive: false })
   }
 
   /** 解除事件接管（不 dispose 图表）。 */
