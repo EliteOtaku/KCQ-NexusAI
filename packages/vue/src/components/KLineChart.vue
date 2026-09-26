@@ -327,7 +327,6 @@
     CustomMarkerEntity,
     MarkerEntity,
   } from '@363045841yyt/klinechart-core/engine/marker/registry'
-  import type { DrawingStyle } from '@363045841yyt/klinechart-core/plugin'
   import {
     type InstrumentDescriptor,
     searchInstruments,
@@ -383,8 +382,8 @@
 
   import BatchStockDialog from './BatchStockDialog.vue'
   import CanvasToolbarStack from './common/CanvasToolbarStack.vue'
-  import DrawingStyleToolbar from './DrawingStyleToolbar.vue'
   import DrawingSettingsDialog from './DrawingSettingsDialog.vue'
+  import DrawingStyleToolbar from './DrawingStyleToolbar.vue'
   import DrawingTemplateSaveDialog from './DrawingTemplateSaveDialog.vue'
   import ExportProgressDialog from './ExportProgressDialog.vue'
   import IndicatorSelector from './IndicatorSelector.vue'
@@ -985,9 +984,12 @@
   } = useDrawingManager(controller)
 
   // ── 绘图模板（TV 式：选中浮条内套用/保存，按当前 kind 过滤）──
-  const { templates: drawingTemplates, reload: reloadDrawingTemplates, apply: loadDrawingTemplate, save: saveDrawingTemplateToStore } = useDrawingTemplates(
-    computed(() => props.drawingTemplateStore),
-  )
+  const {
+    templates: drawingTemplates,
+    reload: reloadDrawingTemplates,
+    apply: loadDrawingTemplate,
+    save: saveDrawingTemplateToStore,
+  } = useDrawingTemplates(computed(() => props.drawingTemplateStore))
   void reloadDrawingTemplates()
   const currentDrawingKind = computed(() => selectedDrawings.value[0]?.kind ?? null)
   const drawingTemplateNames = computed(() =>
@@ -1030,7 +1032,9 @@
     drawings.value.find((drawing) => drawing.id === editingDrawingId.value),
   )
   const editingDrawingStyleKeys = computed(() =>
-    editingDrawingId.value ? controller.value?.getBatchStyleKeys([editingDrawingId.value]) ?? [] : [],
+    editingDrawingId.value
+      ? (controller.value?.getBatchStyleKeys([editingDrawingId.value]) ?? [])
+      : [],
   )
 
   function onUpdateEditingDrawingStyle(style: Partial<DrawingStyle>) {

@@ -7,7 +7,7 @@
  */
 
 import { BarsLiveSubscription } from '@/data/live/barsLive.js'
-import { ORIGINAL_BAR_AGGREGATION } from '@/data/provider/types.js'
+import { type BarAggregation, ORIGINAL_BAR_AGGREGATION } from '@/data/provider/types.js'
 import type { Chart } from '@/engine/chart.js'
 import type { CustomDataSource, KLineData, SymbolInfo, SymbolSpec } from '../types.js'
 
@@ -33,6 +33,12 @@ export function createDataMethods(chart: Chart, isDisposed: () => boolean) {
   const unsubscribeLiveBars =
     chart.kernel.dataManager.readonly.currentSpec.subscribe(reconcileLiveBars)
   reconcileLiveBars()
+
+  /** 声明非对比视图的缺省聚合口径（如 Exness 走 europe-traditional）；变化后重协调实时订阅。 */
+  function setDefaultBarAggregation(value: BarAggregation): void {
+    chart.setDefaultBarAggregation(value)
+    reconcileLiveBars()
+  }
 
   function setData(next: ReadonlyArray<KLineData>): void {
     if (isDisposed()) return
@@ -168,6 +174,7 @@ export function createDataMethods(chart: Chart, isDisposed: () => boolean) {
     methods: {
       setSymbols,
       registerSymbols,
+      setDefaultBarAggregation,
       setComparisonSpecs,
       addComparisonSymbol,
       removeComparisonSymbol,

@@ -4,8 +4,10 @@
 // 语义，橡皮擦经引擎 hitTestAt 命中删除；测量（G-02）与拖拽复制仍为壳层实现。
 
 import type { ChartController } from '@363045841yyt/klinechart-core/controllers'
-import { DrawingInteractionController } from '@363045841yyt/klinechart-core/controllers'
-import type { DrawingObject } from '@363045841yyt/klinechart-core/plugin'
+import {
+  DrawingInteractionController,
+  type DrawingObject,
+} from '@363045841yyt/klinechart-core/controllers'
 import { isEngineDrawingTool, isMultiAnchorTool } from './drawingTools'
 
 /** 磁吸三态。 */
@@ -43,7 +45,7 @@ const ANGLE_LOCK_MIN_DELTA = 2
  */
 export class ChartPointerBridge {
   private container: HTMLElement | null = null
-  private readonly listeners = new Array<() => void>()
+  private readonly listeners = [] as (() => void)[]
 
   /** 当前多锚点工具已落点数（锁角基准跟踪）。 */
   private anchorClicks = 0
@@ -212,7 +214,8 @@ export class ChartPointerBridge {
     }
 
     this.ctrl.handlePointerEvent(forwarded, {
-      onPointerMove: (innerEvent, innerContainer) => this.dic.onPointerMove(innerEvent, innerContainer),
+      onPointerMove: (innerEvent, innerContainer) =>
+        this.dic.onPointerMove(innerEvent, innerContainer),
     })
   }
 

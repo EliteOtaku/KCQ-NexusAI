@@ -1,34 +1,35 @@
 // 壳上下文：图表 controller/交互桥 的挂载点，以及工具/磁吸/stay/收藏/模板/选中
 // 等壳级状态与动作的唯一提供方。组件只消费本上下文，不直接持有引擎对象。
 
+import type {
+  ChartController,
+  DrawingObject,
+  DrawingStyle,
+  DrawingToolId,
+  InstrumentDescriptor,
+} from '@363045841yyt/klinechart-core/controllers'
+import {
+  EUROPE_TRADITIONAL_BAR_AGGREGATION,
+  marketDataProviderRegistry,
+  ORIGINAL_BAR_AGGREGATION,
+} from '@363045841yyt/klinechart-core/controllers'
 import {
   createContext,
+  type ReactNode,
   useCallback,
   useContext,
   useEffect,
   useMemo,
   useRef,
   useState,
-  type ReactNode,
 } from 'react'
-import type {
-  ChartController,
-  DrawingToolId,
-  InstrumentDescriptor,
-} from '@363045841yyt/klinechart-core/controllers'
-import {
-  marketDataProviderRegistry,
-  EUROPE_TRADITIONAL_BAR_AGGREGATION,
-  ORIGINAL_BAR_AGGREGATION,
-} from '@363045841yyt/klinechart-core/controllers'
-import type { DrawingObject, DrawingStyle } from '@363045841yyt/klinechart-core/plugin'
+import { loadLastUsedTemplate, markTemplateUsed } from './drawingTemplates'
+import type { ShellToolId } from './drawingTools'
 import { buildMockBundle, MOCK_SYMBOLS } from './mockData'
 import { ALL_PERIODS } from './periods'
-import { ChartPointerBridge, type MeasureSession, type MagnetMode } from './pointerBridge'
-import type { ShellToolId } from './drawingTools'
-import { loadLastUsedTemplate, markTemplateUsed } from './drawingTemplates'
-import { readJson, writeJson, STORAGE_KEYS } from './storage'
+import { ChartPointerBridge, type MagnetMode, type MeasureSession } from './pointerBridge'
 import { EMPTY_IDS, useSignal } from './reactivity'
+import { readJson, STORAGE_KEYS, writeJson } from './storage'
 
 /** 壳偏好持久化形状（nexus.shell.prefs）。 */
 interface ShellPrefs {
@@ -142,8 +143,9 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
   const [dataSource, setDataSource] = useState<ShellDataSource>(() =>
     readJson<ShellDataSource>(STORAGE_KEYS.dataSource, 'mock'),
   )
-  const [sourceInstrument, setSourceInstrumentState] = useState<InstrumentDescriptor | null>(() =>
-    readJson<ReadonlyArray<InstrumentDescriptor>>(STORAGE_KEYS.recentSourceInstruments, [])[0] ??
+  const [sourceInstrument, setSourceInstrumentState] = useState<InstrumentDescriptor | null>(
+    () =>
+      readJson<ReadonlyArray<InstrumentDescriptor>>(STORAGE_KEYS.recentSourceInstruments, [])[0] ??
       null,
   )
   // 键盘唤起品种搜索（B4-01）与快捷键表（B4-03）。
@@ -211,25 +213,22 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
   const ctrlRef = useRef<ChartController | null>(null)
 
   // ── 挂载 / 卸载 ──
-  const attachChart = useCallback(
-    (nextCtrl: ChartController, nextBridge: ChartPointerBridge) => {
-      ctrlRef.current = nextCtrl
-      setCtrl(nextCtrl)
-      setBridge(nextBridge)
-      // demo 基线：主图 MA + 副图成交量（失败静默，目录缺失不阻塞壳）。
-      try {
-        if (!nextCtrl.indicators.peek().some((item) => item.definitionId === 'MA')) {
-          nextCtrl.addIndicator('MA', 'main')
-        }
-        if (!nextCtrl.indicators.peek().some((item) => item.definitionId === 'VOLUME')) {
-          nextCtrl.addIndicator('VOLUME', 'sub')
-        }
-      } catch {
-        /* 目录未就绪时跳过 */
+  const attachChart = useCallback((nextCtrl: ChartController, nextBridge: ChartPointerBridge) => {
+    ctrlRef.current = nextCtrl
+    setCtrl(nextCtrl)
+    setBridge(nextBridge)
+    // demo 基线：主图 MA + 副图成交量（失败静默，目录缺失不阻塞壳）。
+    try {
+      if (!nextCtrl.indicators.peek().some((item) => item.definitionId === 'MA')) {
+        nextCtrl.addIndicator('MA', 'main')
       }
-    },
-    [],
-  )
+      if (!nextCtrl.indicators.peek().some((item) => item.definitionId === 'VOLUME')) {
+        nextCtrl.addIndicator('VOLUME', 'sub')
+      }
+    } catch {
+      /* 目录未就绪时跳过 */
+    }
+  }, [])
 
   const detachChart = useCallback(() => {
     ctrlRef.current = null
@@ -640,7 +639,7 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
       clearSymbolPickerRequest,
       shortcutsVisible,
       toggleShortcuts,
-    ]
+    ],
   )
 
   return <NexusShellContext.Provider value={value}>{children}</NexusShellContext.Provider>
