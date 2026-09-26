@@ -3,7 +3,7 @@
  *
  * 数据源后端（connector）的启动逻辑，供 `scripts/dev.mjs` 与 `scripts/start-connector.mjs` 复用。
  * 支持名称与别名：gotdx（别名 tdx / g）、binance（别名 bnb）、baostock（别名 b）、mt5（别名 m）、all（全部）。
- * `all` 不含 mt5：它依赖 Windows + 已登录的 MT5 终端，仅显式启动。
+ * `all` 不含 mt5：它依赖 Windows + 已登录的 MT5 (Exness) 终端，仅显式启动。
  */
 
 import { spawn } from 'node:child_process'
@@ -23,7 +23,7 @@ const CONNECTORS = {
     logColor: LOG_COLORS.gotdx,
     dir: 'GoTDX-Connector',
     cmd: 'go',
-    args: ['run', '.', 'tdx'],
+    args: ['run', './services/tdx-api'],
   },
   binance: {
     label: 'binance（币安深度，:8081）',
@@ -31,7 +31,7 @@ const CONNECTORS = {
     logColor: LOG_COLORS.binance,
     dir: 'GoTDX-Connector',
     cmd: 'go',
-    args: ['run', '.', 'binance'],
+    args: ['run', './services/binance-api'],
   },
   baostock: {
     label: 'baostock / tradingview（:8000）',
@@ -48,7 +48,7 @@ const CONNECTORS = {
     dir: 'KCQ-MT5-connector',
     cmd: 'uv',
     args: ['run', 'python', './server.py'],
-    // 依赖 Windows + 本机已登录的 MT5 终端，不纳入 `all`，仅显式启动
+    // 依赖 Windows + 本机已登录的 MT5 (Exness) 终端，不纳入 `all`，仅显式启动
     includeInAll: false,
   },
 }
@@ -99,13 +99,14 @@ export function startConnectors(names) {
     const conn = CONNECTORS[name]
     const cwd = path.join(PARENT, conn.dir)
     if (!fs.existsSync(cwd)) {
-      console.error(`  ✗ 未找到 ${conn.dir}，请先运行 pnpm setup 克隆数据源后端`)
+      console.error(`  ✗ 未找到 ${conn.dir}，请先运行 pnpm setup:backends 克隆数据源后端`)
       continue
     }
     console.log(`  • 启动 ${conn.label}（${cwd}）`)
     const child = spawn(conn.cmd, conn.args, {
       cwd,
       stdio: ['inherit', 'pipe', 'pipe'],
+      detached: process.platform !== 'win32',
     })
     children.push(attachPrefixedOutput(child, conn.logLabel, conn.logColor))
   }

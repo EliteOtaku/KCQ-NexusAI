@@ -1,23 +1,22 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { IndicatorInstance, SymbolSpec } from '../../../controllers/types'
-import { MarketDataCache } from '../../../data/buffer/marketDataCache'
-import { MarketDataProviderRegistry } from '../../../data/provider/registry'
+import type { IndicatorInstance, SymbolSpec } from '@/controllers/types'
+import { MarketDataCache } from '@/data/buffer/marketDataCache'
+import { MarketDataProviderRegistry } from '@/data/provider/registry'
 import type {
   BarSeries,
   InstrumentDescriptor,
   InstrumentSearchQuery,
   TimeShareRange,
   TimeShareSeries,
-} from '../../../data/provider/types'
-import { ComparisonCommands } from '../../../engine/data/comparisonCommands'
-import { DrawingCommands } from '../../../engine/drawing/DrawingCommands'
-import { DrawingDocument } from '../../../engine/drawing/DrawingDocument'
-import { createDataState } from '../../../engine/state/dataState'
-import { createDrawingState } from '../../../engine/state/drawingState'
-import { CHART_AGENT_ERROR_CODES } from '../../../errors'
-import { createSignal } from '../../../foundation/reactivity/signal'
-import { AGENT_DRAWING_COLOR_VALUES } from '../../../foundation/tokens/agentDrawingColors'
-import type { KLineData } from '../../../foundation/types/price'
+} from '@/data/provider/types'
+import { ComparisonCommands } from '@/engine/data/comparisonCommands'
+import { DrawingCommands, DrawingDocument } from '@/engine/drawing/index'
+import { createDataState } from '@/engine/state/dataState'
+import { createDrawingState } from '@/engine/state/drawingState'
+import { CHART_AGENT_ERROR_CODES } from '@/errors'
+import { createSignal } from '@/foundation/reactivity/signal'
+import { AGENT_DRAWING_COLOR_VALUES } from '@/foundation/tokens/agentDrawingColors'
+import type { KLineData } from '@/foundation/types/price'
 import { createChartAgentController, getRegisteredChartTools } from '../impl/chartAgentController'
 
 const BAR_SELECTION = {
@@ -240,6 +239,7 @@ function createFixture() {
     fetchTimeShare,
     fetchTimeShareRange,
     drawingDocument,
+    drawingCommands,
     drawingState,
     requestDraw,
     paneActions,
@@ -518,6 +518,12 @@ describe('createChartAgentController', () => {
     ).resolves.toEqual({ removed: true })
     expect(fixture.drawingDocument.listDrawings()).toEqual([])
     expect(fixture.requestDraw).toHaveBeenCalledTimes(3)
+    expect(fixture.drawingCommands.history.undo()).toBe(true)
+    expect(fixture.drawingDocument.getDrawing(created.id)?.labels?.line['0']?.text).toBe('更新趋势')
+    fixture.drawingCommands.updateBatch([created.id], { locked: true })
+    expect(fixture.drawingCommands.history.canRedo.peek()).toBe(false)
+    expect(fixture.drawingCommands.history.undo()).toBe(true)
+    expect(fixture.drawingDocument.getDrawing(created.id)?.locked).toBeUndefined()
   })
 
   it('creates a horizontal line from a price-only Agent anchor', async () => {

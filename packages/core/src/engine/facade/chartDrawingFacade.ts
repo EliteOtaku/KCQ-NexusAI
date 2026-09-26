@@ -1,11 +1,17 @@
 /**
  * ChartDrawingFacade —— 绘图状态、查询与工具操作。
  */
-import type { DrawingObject, DrawingWorkspaceId } from '../../foundation/plugin/index.js'
+
 import type { ReadonlySignal } from '../../foundation/reactivity/signal.js'
 import type { ChartDataManager } from '../data/chartDataManager.js'
-import type { DrawingInteractionController } from '../drawing/interaction.js'
-import type { DrawingToolId } from '../drawing/toolConfig.js'
+import {
+  CURSOR_DRAWING_TOOL_ID,
+  type DrawingCommands,
+  type DrawingInteractionController,
+  type DrawingObject,
+  type DrawingToolId,
+  type DrawingWorkspaceId,
+} from '../drawing/index.js'
 import type { ChartRenderer } from '../render/chartRenderer.js'
 import type { ChartStateKernel } from '../state/chartStateKernel.js'
 import { resolveChartWorkspaceId } from '../state/modeState.js'
@@ -17,6 +23,7 @@ export interface ChartDrawingFacadeDependencies {
   renderer: ChartRenderer
   getSession: () => DrawingInteractionController | null
   scheduleDraw: () => void
+  getCommands: () => DrawingCommands
 }
 
 /** 提供绘图领域的公开操作，不管理交互会话生命周期。 */
@@ -38,12 +45,19 @@ export class ChartDrawingFacade {
     return this.deps.kernel.drawing.readonly.selectedDrawingIds
   }
 
+  /** 全局绘图锁定信号。 */
+  get globalLock(): ReadonlySignal<boolean> {
+    return this.deps.kernel.drawing.readonly.globalDrawingLock
+  }
+
+  /** 设置全局绘图锁定；只冻结移动，不改写各图元自身 locked。 */
+  setGlobalDrawingLock(locked: boolean): void {
+    this.deps.kernel.drawing.actions.setGlobalDrawingLock(locked)
+  }
+
   /** 写入已确认图元并剥离会话预览。 */
-  setDrawings(drawings: DrawingObject[]): void {
-    this.deps.kernel.drawing.actions.setDrawings(
-      drawings.filter((drawing) => drawing.id !== '__preview__'),
-    )
-    this.deps.scheduleDraw()
+  setDrawings(drawings: ReadonlyArray<DrawingObject>): void {
+    this.deps.getCommands().syncExternalDrawings(drawings)
   }
 
   /** 更新选中图元 ID 集合。 */
@@ -75,7 +89,7 @@ export class ChartDrawingFacade {
 
   /** 设置绘图工具，并同步清理会话副作用。 */
   setTool(tool: DrawingToolId | null): void {
-    const toolId = tool ?? 'cursor'
+    const toolId = tool ?? CURSOR_DRAWING_TOOL_ID
     this.deps.kernel.drawing.actions.setDrawingTool(toolId)
     this.deps.getSession()?.applyToolSession()
     // 悬停目标只对 cursor/box-select 有效；换工具后由下一个 hover flush 重算
@@ -83,20 +97,14 @@ export class ChartDrawingFacade {
     this.deps.scheduleDraw()
   }
 
-  /** 删除单个图元；活动会话优先修改其工作副本。 */
+  /** 删除单个已确认图元，统一经过可撤回的命令入口。 */
   remove(drawingId: string): void {
-    const session = this.deps.getSession()
-    if (session) {
-      session.removeDrawing(drawingId)
-      return
-    }
-    this.setDrawings(
-      this.deps.kernel.drawing.readonly.drawings.peek().filter((d) => d.id !== drawingId),
-    )
+    this.deps.getCommands().remove(drawingId)
   }
 
   /** 清除全部已确认图元。 */
   clear(): void {
-    this.setDrawings([])
+    this.deps.getSession()?.cancelPendingChanges()
+    this.deps.getCommands().clear()
   }
 }

@@ -1,3 +1,4 @@
+<!-- 承载图表插槽与 Agent 面板，统一管理面板开合、宽度和响应式布局。 -->
 <template>
   <div
     ref="shell"
@@ -14,18 +15,23 @@
       <slot name="chart"></slot>
     </div>
 
-    <button
+    <BaseTooltip
       v-if="!panelOpen"
-      type="button"
-      class="agent-launcher"
-      data-testid="agent-panel-open"
-      aria-label="Open Agent panel"
-      title="Open Agent panel"
-      @click="panelOpen = true"
+      :content="text.openPanel"
+      placement="left"
+      trigger-display="contents"
     >
-      <IconSparkles aria-hidden="true" />
-      <span>Agent</span>
-    </button>
+      <button
+        type="button"
+        class="agent-launcher"
+        data-testid="agent-panel-open"
+        :aria-label="text.openPanel"
+        aria-expanded="false"
+        @click="panelOpen = true"
+      >
+        <IconChevronLeft aria-hidden="true" />
+      </button>
+    </BaseTooltip>
 
     <button
       v-if="panelOpen"
@@ -51,9 +57,11 @@
 
 <script setup lang="ts">
   import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-  import IconSparkles from '~icons/tabler/sparkles'
+  import IconChevronLeft from '~icons/tabler/chevron-left'
 
+  import BaseTooltip from '../../components/common/BaseTooltip.vue'
   import type { AgentBridgeClient } from './agent-contracts.js'
+  import { getAgentCopy } from './agent-copy.js'
   import AgentWorkspace from './components/AgentWorkspace.vue'
   import type { AgentPanelWidthStorage } from './workspace/types.js'
 
@@ -79,15 +87,20 @@
   const compact = ref(false)
   let shellObserver: ResizeObserver | undefined
 
+  // 启动器文案暂只支持中文；统一国际化后改由宿主注入 locale。
+  const text = getAgentCopy('zh-CN')
+
   const shellStyle = computed(() => ({
     '--agent-panel-width': `${panelWidth.value}px`,
     '--agent-panel-track': panelOpen.value ? `${panelWidth.value}px` : '0px',
   }))
 
+  // 将传入的面板宽度限制到允许范围，并返回整数像素值。
   function clampPanelWidth(width: number): number {
     return Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, Math.round(width)))
   }
 
+  // 通过宿主注入的存储保存当前宽度，存储失败不阻断布局交互。
   function persistPanelWidth(): void {
     try {
       props.panelWidthStorage?.save(panelWidth.value)
@@ -96,12 +109,14 @@
     }
   }
 
+  // 根据指针事件的横坐标与容器右边界更新面板宽度。
   function updatePanelFromPointer(event: PointerEvent): void {
     const bounds = shell.value?.getBoundingClientRect()
     if (!bounds) return
     panelWidth.value = clampPanelWidth(bounds.right - event.clientX)
   }
 
+  // 结束拖拽，移除文档级监听并保存最终宽度。
   function stopResize(): void {
     if (!resizing.value) return
     resizing.value = false
@@ -122,6 +137,7 @@
     panelResizeReady.value = !compact.value && isPanelResizeTarget(event.clientX)
   }
 
+  // 仅在非紧凑布局的面板左边缘响应指针事件并开始拖拽。
   function startResize(event: PointerEvent): void {
     if (compact.value || !isPanelResizeTarget(event.clientX)) return
     event.preventDefault()
@@ -159,8 +175,13 @@
 <style scoped>
   .agent-workbench-shell {
     --agent-bg: var(--klc-color-ui-background);
+    --agent-surface: var(--klc-color-ui-surface);
     --agent-text: var(--klc-color-ui-text);
     --agent-focus: var(--klc-color-ui-focus);
+    --agent-header-inset: 12px;
+    --agent-header-button-size: 30px;
+    --chart-surface-padding: 16px;
+    --chart-surface-end-padding: calc(var(--agent-header-inset) + var(--agent-header-button-size));
 
     width: 100%;
     height: 100%;
@@ -169,6 +190,10 @@
     position: relative;
     overflow: hidden;
     background: var(--agent-bg);
+  }
+
+  .agent-workbench-shell--panel-open {
+    --chart-surface-end-padding: var(--chart-surface-padding);
   }
 
   .agent-workbench-shell :deep(button),
@@ -188,7 +213,8 @@
     height: 100%;
     position: relative;
     overflow: hidden;
-    padding: 0 16px;
+    /* 收起时为启动器留出独立空间，不遮挡 chart 插槽中的自选股或工具栏。 */
+    padding: 0 var(--chart-surface-end-padding) 0 var(--chart-surface-padding);
     box-sizing: border-box;
     background: var(--agent-bg);
     margin-right: var(--agent-panel-track, 0px);
@@ -225,70 +251,38 @@
     cursor: col-resize;
   }
 
-  /* 右下角 1/4 圆启动器：圆心贴合屏幕右下角，弧面朝向左上。 */
+  /* 宽度与 AgentHeader 的收起按钮一致；高度撑满 chart-surface，右侧贴屏幕边缘。 */
   .agent-launcher {
-    --agent-launcher-size: 56px;
-
-    width: var(--agent-launcher-size);
-    height: var(--agent-launcher-size);
+    width: var(--agent-header-button-size);
+    height: auto;
     position: absolute;
-    right: 0;
+    top: 0;
     bottom: 0;
+    right: 0;
     z-index: 20;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 0;
-    /* 1/4 圆质心位于圆心 4R/3π 处，相对方形盒中心偏移 (1/2 - 4/3π)R = 0.0756R；
-       padding 取 2 倍偏移量，使图标对准 1/4 圆质心（水平垂直居中）。 */
-    padding: calc(var(--agent-launcher-size) * 0.1512) 0 0 calc(var(--agent-launcher-size) * 0.1512);
+    display: inline-grid;
+    place-items: center;
+    padding: 0;
     border: 1px solid var(--klc-color-ui-border);
-    border-top-left-radius: 100% 100%;
     box-sizing: border-box;
     color: var(--agent-text);
-    background: var(--klc-color-agent-launcher-background);
-    box-shadow: 0 3px 12px var(--klc-color-agent-panel-shadow);
-    font:
-      600 12px/1 Inter,
-      ui-sans-serif,
-      system-ui,
-      sans-serif;
+    background: var(--agent-surface);
     cursor: pointer;
-    transition:
-      width 0.2s ease,
-      height 0.2s ease,
-      padding 0.2s ease;
   }
 
-  .agent-launcher:hover {
-    --agent-launcher-size: 112px;
+  .agent-launcher:hover,
+  .agent-launcher:focus-visible {
+    background: var(--klc-color-ui-hover);
+  }
+
+  .agent-launcher:focus-visible {
+    outline: 2px solid var(--agent-focus);
+    outline-offset: 2px;
   }
 
   .agent-launcher svg {
     width: 16px;
     height: 16px;
-  }
-
-  /* 默认只显示图标，hover 时文字在图标下方平滑展开。 */
-  .agent-launcher span {
-    max-height: 0;
-    margin-top: 0;
-    opacity: 0;
-    overflow: hidden;
-    white-space: nowrap;
-    /* 行高大于字号，避免 overflow 裁掉 g 等字母的下伸部。 */
-    line-height: 1.3;
-    transition:
-      max-height 0.2s ease,
-      margin-top 0.2s ease,
-      opacity 0.2s ease;
-  }
-
-  .agent-launcher:hover span {
-    max-height: 20px;
-    margin-top: 6px;
-    opacity: 1;
   }
 
   .drawer-backdrop {

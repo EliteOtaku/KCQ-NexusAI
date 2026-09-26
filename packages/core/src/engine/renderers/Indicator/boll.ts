@@ -3,11 +3,11 @@ import type {
   PluginHost,
   RenderContext,
   RendererPluginWithHost,
-} from '../../../foundation/plugin/index.js'
-import { RENDERER_PRIORITY } from '../../../foundation/plugin/index.js'
-import { type ColorTokens, resolveThemeColors } from '../../../foundation/tokens/index.js'
-import type { KLineData } from '../../../foundation/types/price.js'
-import { alignToPhysicalPixelCenter } from '../../../foundation/utils/pixelAlign.js'
+} from '@/foundation/plugin/index.js'
+import { RENDERER_PRIORITY } from '@/foundation/plugin/index.js'
+import { type ColorTokens, resolveThemeColors } from '@/foundation/tokens/index.js'
+import type { KLineData } from '@/foundation/types/price.js'
+import { alignToPhysicalPixelCenter } from '@/foundation/utils/pixelAlign.js'
 import { calcBOLLData } from '../../indicators/calculators/index.js'
 import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
 import type {
@@ -17,7 +17,7 @@ import type {
   TitleInfo,
   TitleValueItem,
 } from '../../indicators/indicatorMetadata.js'
-import { readIndicatorSeriesEntry } from '../../indicators/indicatorMetadata.js'
+import { IndicatorKind, readIndicatorSeriesEntry } from '../../indicators/indicatorMetadata.js'
 import { INDICATOR_INSTANCE_STATE_SERVICE } from '../../indicators/instances/api/indicatorRenderBinding.js'
 import type { BOLLRenderState } from '../../indicators/state/bollState.js'
 import { ChartDataViewId } from '../../state/modeState.js'
@@ -138,6 +138,7 @@ const getBOLLTitleInfo: GetTitleInfoFn = (
 @Indicator({
   name: 'boll',
   displayName: 'BOLL',
+  kind: IndicatorKind.Indicator,
   category: 'main',
   indicatorType: 'channel',
   defaultPaneId: 'main',

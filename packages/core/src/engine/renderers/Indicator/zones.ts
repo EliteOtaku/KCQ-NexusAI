@@ -3,13 +3,14 @@ import type {
   PluginHost,
   RenderContext,
   RendererPluginWithHost,
-} from '../../../foundation/plugin/index.js'
-import { RENDERER_PRIORITY } from '../../../foundation/plugin/index.js'
-import { type ColorTokens, resolveThemeColors } from '../../../foundation/tokens/index.js'
+} from '@/foundation/plugin/index.js'
+import { RENDERER_PRIORITY } from '@/foundation/plugin/index.js'
+import { type ColorTokens, resolveThemeColors } from '@/foundation/tokens/index.js'
 import { calcZonesData } from '../../indicators/calculators/index.js'
 import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
 import {
   type GetTitleInfoFn,
+  IndicatorKind,
   type TitleInfo,
   type TitleValueItem,
 } from '../../indicators/indicatorMetadata.js'
@@ -140,6 +141,7 @@ const getZonesTitleInfo: GetTitleInfoFn = (
 @Indicator({
   name: 'zones',
   displayName: 'Zones',
+  kind: IndicatorKind.Indicator,
   getTitleInfo: getZonesTitleInfo,
   category: 'main',
   indicatorType: 'structure',

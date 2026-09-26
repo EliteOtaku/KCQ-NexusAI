@@ -3,14 +3,15 @@ import type {
   PluginHost,
   RenderContext,
   RendererPluginWithHost,
-} from '../../../foundation/plugin/index.js'
-import { RENDERER_PRIORITY } from '../../../foundation/plugin/index.js'
-import type { ColorTokens } from '../../../foundation/tokens/index.js'
-import { resolveThemeColors } from '../../../foundation/tokens/index.js'
-import type { KLineData } from '../../../foundation/types/price.js'
+} from '@/foundation/plugin/index.js'
+import { RENDERER_PRIORITY } from '@/foundation/plugin/index.js'
+import type { ColorTokens } from '@/foundation/tokens/index.js'
+import { resolveThemeColors } from '@/foundation/tokens/index.js'
+import type { KLineData } from '@/foundation/types/price.js'
 import { calcKeltnerData } from '../../indicators/calculators/index.js'
 import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
 import type { TitleInfo } from '../../indicators/indicatorMetadata.js'
+import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
 import { INDICATOR_INSTANCE_STATE_SERVICE } from '../../indicators/instances/api/indicatorRenderBinding.js'
 import type { KeltnerRenderState } from '../../indicators/state/keltnerState.js'
 import { EMPTY_KELTNER_STATE } from '../../indicators/state/keltnerState.js'
@@ -146,6 +147,7 @@ function getKeltnerTitleInfo(
 @Indicator({
   name: 'keltner',
   displayName: 'Keltner',
+  kind: IndicatorKind.Indicator,
   getTitleInfo: getKeltnerTitleInfo,
   category: 'main',
   indicatorType: 'channel',

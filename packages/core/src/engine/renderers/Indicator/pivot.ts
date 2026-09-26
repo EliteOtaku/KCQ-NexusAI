@@ -3,10 +3,10 @@ import type {
   PluginHost,
   RenderContext,
   RendererPluginWithHost,
-} from '../../../foundation/plugin/index.js'
-import { RENDERER_PRIORITY } from '../../../foundation/plugin/index.js'
-import type { ColorTokens } from '../../../foundation/tokens/index.js'
-import { resolveThemeColors } from '../../../foundation/tokens/index.js'
+} from '@/foundation/plugin/index.js'
+import { RENDERER_PRIORITY } from '@/foundation/plugin/index.js'
+import type { ColorTokens } from '@/foundation/tokens/index.js'
+import { resolveThemeColors } from '@/foundation/tokens/index.js'
 import { calcPivotData } from '../../indicators/calculators/index.js'
 import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
 import type {
@@ -14,6 +14,7 @@ import type {
   TitleInfo,
   TitleValueItem,
 } from '../../indicators/indicatorMetadata.js'
+import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
 import { INDICATOR_INSTANCE_STATE_SERVICE } from '../../indicators/instances/api/indicatorRenderBinding.js'
 import type { PivotRenderState } from '../../indicators/state/pivotState.js'
 import { EMPTY_PIVOT_STATE } from '../../indicators/state/pivotState.js'
@@ -169,6 +170,7 @@ const getPivotTitleInfo: GetTitleInfoFn = (
 @Indicator({
   name: 'pivot',
   displayName: 'Pivot',
+  kind: IndicatorKind.Indicator,
   getTitleInfo: getPivotTitleInfo,
   category: 'main',
   indicatorType: 'support-resistance',

@@ -3,14 +3,15 @@ import type {
   PluginHost,
   RenderContext,
   RendererPluginWithHost,
-} from '../../../foundation/plugin/index.js'
-import { RENDERER_PRIORITY } from '../../../foundation/plugin/index.js'
-import type { ColorTokens } from '../../../foundation/tokens/index.js'
-import { resolveThemeColors } from '../../../foundation/tokens/index.js'
-import type { KLineData } from '../../../foundation/types/price.js'
+} from '@/foundation/plugin/index.js'
+import { RENDERER_PRIORITY } from '@/foundation/plugin/index.js'
+import type { ColorTokens } from '@/foundation/tokens/index.js'
+import { resolveThemeColors } from '@/foundation/tokens/index.js'
+import type { KLineData } from '@/foundation/types/price.js'
 import { calcGMMAData } from '../../indicators/calculators/index.js'
 import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
 import type { TitleInfo, TitleValueItem } from '../../indicators/indicatorMetadata.js'
+import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
 import { INDICATOR_INSTANCE_STATE_SERVICE } from '../../indicators/instances/api/indicatorRenderBinding.js'
 import {
   EMPTY_GMMA_STATE,
@@ -107,6 +108,7 @@ function getGMMATitleInfo(
 @Indicator({
   name: 'gmma',
   displayName: 'GMMA',
+  kind: IndicatorKind.Indicator,
   getTitleInfo: getGMMATitleInfo,
   category: 'main',
   indicatorType: 'moving-average',

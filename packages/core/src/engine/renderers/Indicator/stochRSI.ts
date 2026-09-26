@@ -7,13 +7,14 @@ import type {
   PluginHost,
   RenderContext,
   RendererPluginWithHost,
-} from '../../../foundation/plugin/index.js'
-import { RENDERER_PRIORITY } from '../../../foundation/plugin/index.js'
-import type { ColorTokens } from '../../../foundation/tokens/index.js'
-import { resolveThemeColors } from '../../../foundation/tokens/index.js'
-import type { KLineData } from '../../../foundation/types/price.js'
+} from '@/foundation/plugin/index.js'
+import { RENDERER_PRIORITY } from '@/foundation/plugin/index.js'
+import type { ColorTokens } from '@/foundation/tokens/index.js'
+import { resolveThemeColors } from '@/foundation/tokens/index.js'
+import type { KLineData } from '@/foundation/types/price.js'
 import { calcStochRSIData } from '../../indicators/calculators/stochRSI.js'
 import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
 import { INDICATOR_INSTANCE_STATE_SERVICE } from '../../indicators/instances/api/indicatorRenderBinding.js'
 import type { StochRSIRenderState } from '../../indicators/state/stochRSIState.js'
 import { EMPTY_STOCH_RSI_STATE } from '../../indicators/state/stochRSIState.js'
@@ -315,6 +316,7 @@ function getStochRSITitleInfo(
 @Indicator({
   name: 'stochRSI',
   displayName: 'StochRSI',
+  kind: IndicatorKind.Indicator,
   category: 'oscillator',
   indicatorType: 'momentum',
   defaultPaneId: 'sub_StochRSI',

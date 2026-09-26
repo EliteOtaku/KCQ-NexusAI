@@ -73,6 +73,9 @@ export interface MockChartController extends ChartController {
   _emitTheme: (next: 'light' | 'dark') => void
   /** test-only: 写入主图图例上下文 */
   _setLegendTemplateContext: (next: LegendTemplateContext | null) => void
+  /** test-only: 写入全部已确认图元 */
+  _setDrawings: (drawings: ReadonlyArray<DrawingObject>) => void
+  _setDrawingHistory: (canUndo: boolean, canRedo: boolean) => void
 }
 
 export function createMockChartController(
@@ -80,6 +83,8 @@ export function createMockChartController(
 ): MockChartController {
   let disposeCalls = 0
   const setThemeCalls: Array<'light' | 'dark'> = []
+  const canUndoDrawing = createSignal(false)
+  const canRedoDrawing = createSignal(false)
 
   const viewport = createSignal<ChartViewport>({
     zoomLevel: opts.initialZoomLevel ?? 3,
@@ -104,6 +109,8 @@ export function createMockChartController(
   // 与 Chart 初始值一致：右轴有效宽度由渲染帧测量后写入。
   const rightAxisEffectiveWidth = createSignal(0)
   const legendTemplateContext = createSignal<LegendTemplateContext | null>(null)
+  const drawings = createSignal<ReadonlyArray<DrawingObject>>([])
+  const globalDrawingLock = createSignal(false)
   const rendererConfigCalls: Array<{ name: string; config: Record<string, unknown> }> = []
   const alertController: AlertController = {
     rules: createSignal<ReadonlyArray<AlertRule>>([]),
@@ -136,8 +143,11 @@ export function createMockChartController(
     indicators: createSignal<ReadonlyArray<IndicatorInstance>>([]),
     subPanes: createSignal<ReadonlyArray<SubPaneInfo>>([]),
     drawingTool: createSignal('cursor' as const),
-    drawings: createSignal<ReadonlyArray<DrawingObject>>([]),
+    drawings,
+    canUndoDrawing,
+    canRedoDrawing,
     selectedDrawingIds: createSignal<ReadonlyArray<string>>([]),
+    globalDrawingLock,
     paneRatios: createSignal<Readonly<Record<string, number>>>({}),
     paneLayout,
     interactionState: createSignal(createIdleInteractionSnapshot()),
@@ -220,6 +230,8 @@ export function createMockChartController(
     setDrawingTool: () => {},
     setDrawingToolId: () => {},
     getDrawingToolId: () => 'cursor' as const,
+    setGlobalDrawingLock: (locked: boolean) => globalDrawingLock.set(locked),
+    isGlobalDrawingLocked: () => globalDrawingLock.peek(),
     registerDrawingSession: () => {},
     clearDrawings: () => {},
     createDrawing: () => ({}) as DrawingObject,
@@ -230,6 +242,9 @@ export function createMockChartController(
     removeDrawing: () => false,
     removeBatch: () => false,
     replaceDrawings: () => {},
+    importDrawings: () => {},
+    undoDrawing: () => false,
+    redoDrawing: () => false,
     getFullDrawings: () => [],
     setSelectedDrawingIds: () => {},
     getSelectedDrawingIds: () => [],
@@ -267,6 +282,11 @@ export function createMockChartController(
 
   return {
     ...(controller as ChartController),
+    _setDrawingHistory: (undo, redo) => {
+      canUndoDrawing.set(undo)
+      canRedoDrawing.set(redo)
+    },
+    _setDrawings: (next) => drawings.set(next),
     disposeCalls: () => disposeCalls,
     setThemeCalls: () => setThemeCalls,
     rendererConfigCalls: () => rendererConfigCalls,

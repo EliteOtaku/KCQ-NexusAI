@@ -7,13 +7,14 @@ import type {
   PluginHost,
   RenderContext,
   RendererPluginWithHost,
-} from '../../../foundation/plugin/index.js'
-import { RENDERER_PRIORITY } from '../../../foundation/plugin/index.js'
-import { resolveThemeColors } from '../../../foundation/tokens/index.js'
-import type { KLineData } from '../../../foundation/types/price.js'
-import { alignToPhysicalPixelCenter } from '../../../foundation/utils/pixelAlign.js'
+} from '@/foundation/plugin/index.js'
+import { RENDERER_PRIORITY } from '@/foundation/plugin/index.js'
+import { resolveThemeColors } from '@/foundation/tokens/index.js'
+import type { KLineData } from '@/foundation/types/price.js'
+import { alignToPhysicalPixelCenter } from '@/foundation/utils/pixelAlign.js'
 import { calcDPOData } from '../../indicators/calculators/dpo.js'
 import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
 import { INDICATOR_INSTANCE_STATE_SERVICE } from '../../indicators/instances/api/indicatorRenderBinding.js'
 import type { DPORenderState } from '../../indicators/state/dpoState.js'
 import { EMPTY_DPO_STATE } from '../../indicators/state/dpoState.js'
@@ -293,6 +294,7 @@ const getDPOTitleInfo = createSingleLineTitleInfo({
 @Indicator({
   name: 'dpo',
   displayName: 'DPO',
+  kind: IndicatorKind.Indicator,
   category: 'oscillator',
   indicatorType: 'momentum',
   defaultPaneId: 'sub_DPO',

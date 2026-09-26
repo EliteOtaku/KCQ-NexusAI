@@ -5,10 +5,10 @@ import { beforeAll, describe, expect, it, vi } from 'vitest'
 import {
   createTestIndicatorMetadata,
   createTestRendererPlugin,
-} from '../../../indicators/__tests__/helpers/metadataTestKit'
-import { getRegisteredIndicatorDefinition } from '../../../indicators/indicatorDefinitionRegistry'
-import type { IndicatorMetadata } from '../../../indicators/indicatorMetadata'
-import { loadBuiltinIndicators } from '../../../indicators/registerBuiltins'
+} from '@/engine/indicators/__tests__/helpers/metadataTestKit'
+import { getRegisteredIndicatorDefinition } from '@/engine/indicators/indicatorDefinitionRegistry'
+import { IndicatorKind, type IndicatorMetadata } from '@/engine/indicators/indicatorMetadata'
+import { loadBuiltinIndicators } from '@/engine/indicators/registerBuiltins'
 import { createSubIndicatorRenderer } from '../index'
 
 beforeAll(async () => {
@@ -19,7 +19,13 @@ describe('createSubIndicatorRenderer', () => {
   it('通过定义工厂创建渲染器并透传 instanceId', () => {
     const rendererFactory = vi.fn(() => createTestRendererPlugin('custom_renderer'))
     const definition: IndicatorMetadata = createTestIndicatorMetadata(
-      { name: 'customIndicator', displayName: 'CUSTOM', category: 'sub', indicatorType: 'other' },
+      {
+        name: 'customIndicator',
+        displayName: 'CUSTOM',
+        kind: IndicatorKind.Indicator,
+        category: 'sub',
+        indicatorType: 'other',
+      },
       { defaultPaneId: 'sub_CUSTOM', rendererFactory },
     )
 

@@ -78,8 +78,13 @@ import { InteractionController, type InteractionSnapshot } from './controller/in
 import { ChartDataManager } from './data/chartDataManager.js'
 import { ComparisonCommands } from './data/comparisonCommands.js'
 import { symbolInfoFromSpec } from './data/symbolInfo.js'
-import type { DrawingInteractionController } from './drawing/interaction.js'
-import type { DrawingToolId } from './drawing/toolConfig.js'
+import {
+  DrawingCommands,
+  DrawingDocument,
+  type DrawingInteractionController,
+  type DrawingToolId,
+  resolveDrawingTradingDate,
+} from './drawing/index.js'
 import { ChartDrawingFacade } from './facade/chartDrawingFacade.js'
 import { ChartIndicatorFacade } from './facade/chartIndicatorFacade.js'
 import { ChartMarkerFacade } from './facade/chartMarkerFacade.js'
@@ -182,6 +187,20 @@ export class Chart {
 
   /** 绘图领域公开 API。 */
   readonly drawing: ChartDrawingFacade
+  readonly drawingDocument: DrawingDocument
+  readonly drawingCommands: DrawingCommands
+
+  cancelDrawingSession(): void {
+    this.drawingSession?.cancelPendingChanges()
+  }
+
+  undoDrawing(): boolean {
+    return this.drawingCommands.history.undo()
+  }
+
+  redoDrawing(): boolean {
+    return this.drawingCommands.history.redo()
+  }
 
   /** 标记领域公开 API。 */
   readonly markers: ChartMarkerFacade
@@ -340,6 +359,7 @@ export class Chart {
       layoutManager: this.layoutManager,
       ensureScaleTypes: () => this.ensurePaneScaleTypesFromSettings(),
       schedulePersistence: () => this.scheduleWorkspacePersistence(),
+      invalidateDrawingHistory: () => this.drawingCommands.history.reset(),
     })
 
     this.alertController = createAlertController()
@@ -360,6 +380,7 @@ export class Chart {
         viewport: this.kernel.viewport,
         comparison: this.kernel.comparison,
         scheduleDraw: (level) => this.scheduleDraw(level),
+        onBarsReady: () => this.checkVisibleRangeGapWhenIdle(),
         resetInteraction: () => this.interaction.reset(),
         updateIndicatorData: (data, range, dataRevision, displayTimestamps) =>
           this.indicatorManager.updateIndicatorData(data, range, dataRevision, displayTimestamps),
@@ -440,6 +461,7 @@ export class Chart {
         getPlotWidth: () => this.getLeftLoadBufferWidth(),
         onChange: () => {
           this.scheduleDraw()
+          this.checkVisibleRangeGapWhenIdle()
         },
       },
       this.kernel.zoom,
@@ -501,6 +523,24 @@ export class Chart {
       renderer: this.renderer,
       getSession: () => this.drawingSession,
       scheduleDraw: () => this.scheduleDraw(),
+      getCommands: () => this.drawingCommands,
+    })
+    this.drawingDocument = new DrawingDocument({
+      drawingState: this.kernel.drawing,
+      getLogicalIndexAtTimestamp: (timestamp) => this.getLogicalIndexAtTimestamp(timestamp),
+      getDrawingTimestampAtLogicalIndex: (index) => this.drawing.getTimestampAtLogicalIndex(index),
+      getDrawingData: () => this.drawing.getData(),
+      findAnchorAtTradingDate: (tradingDate) =>
+        resolveDrawingTradingDate(this.getData(), tradingDate),
+      hasPaneId: (paneId) => this.panes.getLayoutSpecs().some((pane) => pane.id === paneId),
+      getWorkspaceId: () => this.drawing.getWorkspaceId(),
+    })
+    this.drawingCommands = new DrawingCommands({
+      document: this.drawingDocument,
+      requestDraw: () => {
+        this.cancelDrawingSession()
+        this.scheduleDraw()
+      },
     })
     this.markers = new ChartMarkerFacade({
       kernel: this.kernel,
@@ -1200,6 +1240,7 @@ export class Chart {
   /** 滚动到最右侧（最新数据位置） */
   scrollToRight(): void {
     this.dataManager.scrollToRight()
+    this.checkVisibleRangeGapWhenIdle()
   }
 
   /**
@@ -1269,6 +1310,7 @@ export class Chart {
     this.layoutManager.layoutPanes()
     this.interaction.invalidateHover()
     this.scheduleDraw()
+    this.checkVisibleRangeGapWhenIdle()
   }
 
   /**
@@ -1377,6 +1419,7 @@ export class Chart {
     this.layoutManager.destroy()
     this.dom.canvasLayer?.querySelector('canvas.gpu-scene-canvas')?.remove()
     this.rendererHost.dispose()
+    this.drawingCommands.dispose()
     this.kernel.dispose()
     this.alertController.dispose()
     await this.pluginHost.destroy()
@@ -1567,6 +1610,10 @@ export class Chart {
     this.dataManager.checkVisibleRangeGap()
   }
 
+  private checkVisibleRangeGapWhenIdle(): void {
+    if (!this.interaction.isPointerDown()) this.checkVisibleRangeGap()
+  }
+
   /**
    * 设置 kline 主品种/周期。对比集合独立于主品种，由 setComparisonSpecs 管理。
    * 兼容旧入参 [primary, ...comparisons]：仅首项作为 kline 主品种，其余项不再隐式写入对比集合。
@@ -1755,7 +1802,8 @@ export class Chart {
           this.interaction.onPointerMove(e)
         }
         return false
-      case 'pointerup':
+      case 'pointerup': {
+        const hadPointer = this.interaction.isPointerDown()
         // 优先让绘图控制器处理
         if (drawingController?.onPointerUp) {
           const handled = drawingController.onPointerUp(e, this.dom.container)
@@ -1766,7 +1814,9 @@ export class Chart {
         } else {
           this.interaction.onPointerUp(e)
         }
+        if (hadPointer) this.checkVisibleRangeGapWhenIdle()
         return false
+      }
       case 'pointerleave':
         // 指针离开画布：先清绘图悬停，再交给 interaction 处理
         this.clearDrawingHover()
@@ -1806,6 +1856,7 @@ export class Chart {
     if (!container || !this.viewportScrollBridge.isExternalScroll(container.scrollLeft)) return
     if (this.kernel.viewport.actions.syncFromDomScroll()) {
       this.interaction.onScroll()
+      this.checkVisibleRangeGapWhenIdle()
     }
   }
 

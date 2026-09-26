@@ -1,8 +1,8 @@
 /** 绘图状态模块：工具、图元与选中图元集合的 SSOT。 */
 
-import type { DrawingObject, DrawingStyle } from '../../foundation/plugin/index.js'
+import type { DrawingStyle } from '../../foundation/plugin/index.js'
 import { batch, createSubState } from '../../foundation/reactivity/signal.js'
-import type { DrawingToolId } from '../drawing/toolConfig.js'
+import { CURSOR_DRAWING_TOOL_ID, type DrawingObject, type DrawingToolId } from '../drawing/index.js'
 import { deepFreezeSnapshot } from './immutable.js'
 
 function snapshotDrawings(drawings: ReadonlyArray<DrawingObject>): ReadonlyArray<DrawingObject> {
@@ -33,9 +33,10 @@ function hasSameIds(left: ReadonlyArray<string>, right: ReadonlyArray<string>): 
 
 export function createDrawingState() {
   const { signals, readonly } = createSubState({
-    drawingTool: 'cursor' as DrawingToolId,
+    drawingTool: CURSOR_DRAWING_TOOL_ID,
     drawings: Object.freeze([]) as ReadonlyArray<DrawingObject>,
     selectedDrawingIds: Object.freeze([]) as ReadonlyArray<string>,
+    globalDrawingLock: false,
   })
 
   return {
@@ -45,6 +46,12 @@ export function createDrawingState() {
       setDrawingTool(tool: DrawingToolId) {
         if (signals.drawingTool.peek() === tool) return
         signals.drawingTool.set(tool)
+      },
+
+      /** 设置全局绘图锁定；全局锁只冻结图元移动，不改写各图元自身 locked。 */
+      setGlobalDrawingLock(locked: boolean) {
+        if (signals.globalDrawingLock.peek() === locked) return
+        signals.globalDrawingLock.set(locked)
       },
 
       setDrawings(drawings: ReadonlyArray<DrawingObject>): ReadonlyArray<DrawingObject> {
@@ -57,6 +64,19 @@ export function createDrawingState() {
           }
         })
         return next
+      },
+
+      /** 历史回放：在同一次通知中恢复图元与选中集合。 */
+      restoreDocument(
+        drawings: ReadonlyArray<DrawingObject>,
+        selectedIds: ReadonlyArray<string>,
+      ): void {
+        const next = snapshotDrawings(drawings)
+        const selected = snapshotSelectedDrawingIds(selectedIds, next)
+        batch(() => {
+          signals.drawings.set(next)
+          signals.selectedDrawingIds.set(selected)
+        })
       },
 
       /** 新增图元并在同一次通知内将其设为唯一选中，创建与选中不可分割。 */
@@ -162,9 +182,10 @@ export function createDrawingState() {
 
     dispose() {
       batch(() => {
-        signals.drawingTool.set('cursor')
+        signals.drawingTool.set(CURSOR_DRAWING_TOOL_ID)
         signals.drawings.set(Object.freeze([]))
         signals.selectedDrawingIds.set(Object.freeze([]))
+        signals.globalDrawingLock.set(false)
       })
     },
   }

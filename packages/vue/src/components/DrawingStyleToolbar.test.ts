@@ -1,6 +1,6 @@
 /** 绘图工具栏锁定/解锁按钮行为测试。 */
 
-import type { DrawingObject } from '@363045841yyt/klinechart-core/plugin'
+import type { DrawingObject } from '@363045841yyt/klinechart-core/controllers'
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import DrawingStyleToolbar from './DrawingStyleToolbar.vue'
@@ -58,6 +58,31 @@ describe('DrawingStyleToolbar 锁定按钮', () => {
     expect(wrapper.get('input[type="color"]').attributes('disabled')).toBeUndefined()
     expect(wrapper.get('.toolbar-btn--delete').attributes('disabled')).toBeDefined()
 
+    wrapper.unmount()
+  })
+
+  it('shows icon positions in the canvas toolbar while editing text', async () => {
+    const wrapper = mount(DrawingStyleToolbar, {
+      props: { drawings: [], editableStyleKeys: [], lineLabelPosition: 'center' },
+    })
+
+    expect(wrapper.findAll('.label-position__button')).toHaveLength(3)
+    expect(wrapper.get('[aria-label="居中"]').attributes('aria-pressed')).toBe('true')
+    expect(wrapper.find('.toolbar-btn--delete').exists()).toBe(false)
+    await wrapper.get('[aria-label="起点"]').trigger('click')
+    expect(wrapper.emitted('updateLineLabelPosition')).toEqual([['start']])
+    wrapper.unmount()
+  })
+
+  it('opens settings for the single selected drawing only', async () => {
+    const drawing = createDrawing('a')
+    const wrapper = mount(DrawingStyleToolbar, {
+      props: { drawings: [drawing], editableStyleKeys: [] },
+    })
+    await wrapper.get('.toolbar-btn--settings').trigger('click')
+    expect(wrapper.emitted('openSettings')).toEqual([['a']])
+    await wrapper.setProps({ drawings: [drawing, createDrawing('b')] })
+    expect(wrapper.find('.toolbar-btn--settings').exists()).toBe(false)
     wrapper.unmount()
   })
 })

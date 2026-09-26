@@ -2,6 +2,7 @@
 
 import type { ChartSettings } from '../../foundation/config/chartSettings.js'
 import { PRICE_AXIS_RANGE_MODE } from '../../foundation/config/priceAxisRangeMode.js'
+import { pointInRect, rectFromPoints } from '../../foundation/geometry/index.js'
 import { batch } from '../../foundation/reactivity/signal.js'
 import { isTimeShareDataView } from '../../foundation/types/chartView.js'
 import type { KLineData } from '../../foundation/types/price.js'
@@ -196,7 +197,13 @@ export class InteractionController {
   onPointerDown(e: PointerEvent) {
     this.isTouchSession = e.pointerType === 'touch'
     if (this.pinchTracker.handlePointerDown(e, this.isTouchSession)) {
-      this.endDragSession()
+      // 保留首指的 capture；第二指也需 capture，离开容器后仍能收到最后的 pointerup。
+      this.endDragSession(false)
+      try {
+        this.chart.getDom().container?.setPointerCapture(e.pointerId)
+      } catch {
+        // 不支持 capture 的宿主继续依赖 pointerup / pointercancel。
+      }
       return
     }
 
@@ -272,9 +279,7 @@ export class InteractionController {
    */
   onPointerUp(e: PointerEvent) {
     this.pinchTracker.handlePointerUp(e)
-
-    if (e.isPrimary === false) return
-    if (!this.isActivePointer(e)) return
+    if (e.isPrimary === false || !this.isActivePointer(e)) return
     const wasPanning = this._state.readonly.dragMode.peek() === 'pan'
     const wasExploring = this._state.readonly.dragMode.peek() === 'explore'
 
@@ -307,11 +312,6 @@ export class InteractionController {
       }
     }
 
-    // 鼠标和触屏拖拽结束后都检查左侧缺口 → 触发增量加载
-    if (wasPanning) {
-      this.chart.checkVisibleRangeGap()
-    }
-
     this.endDragSession()
     // 鼠标平移结束后按当前指针位置恢复 hover；触屏由 explore 模式单独控制。
     if (wasPanning && !this.isTouchSession) {
@@ -324,8 +324,6 @@ export class InteractionController {
    * @param e PointerEvent
    */
   onPointerLeave(e: PointerEvent) {
-    this.pinchTracker.handlePointerLeave(e)
-
     if (e.isPrimary === false) return
 
     // 容器尺寸或相邻轴宽度变化也可能触发 pointerleave。拖拽会话由
@@ -1040,7 +1038,7 @@ export class InteractionController {
    * 未命中时返回 false。
    */
   private hitTestCandle(ctx: HoverContext, bar: NearestBar): boolean {
-    const { mouseY, worldX, dpr } = ctx
+    const { mouseY, worldX } = ctx
     const data = this.chart.getInternalData()
     const k =
       typeof this.crosshairIndex === 'number'
@@ -1085,17 +1083,17 @@ export class InteractionController {
 
     const HIT_WICK_HALF_EXTENDED = 3
 
-    const hitBody =
-      localY >= effectiveBodyTop &&
-      localY <= effectiveBodyBottom &&
-      inUnitX >= 0 &&
-      inUnitX <= bar.widthLogical
-    const hitWick =
-      Math.abs(inUnitX - cxLogical) <= HIT_WICK_HALF_EXTENDED &&
-      localY >= effectiveWickTop &&
-      localY <= effectiveWickBottom
+    const point = { x: inUnitX, y: localY }
+    const bodyRect = rectFromPoints(
+      { x: 0, y: effectiveBodyTop },
+      { x: bar.widthLogical, y: effectiveBodyBottom },
+    )
+    const wickRect = rectFromPoints(
+      { x: cxLogical - HIT_WICK_HALF_EXTENDED, y: effectiveWickTop },
+      { x: cxLogical + HIT_WICK_HALF_EXTENDED, y: effectiveWickBottom },
+    )
 
-    return hitBody || hitWick
+    return pointInRect(point, bodyRect) || pointInRect(point, wickRect)
   }
 
   /**

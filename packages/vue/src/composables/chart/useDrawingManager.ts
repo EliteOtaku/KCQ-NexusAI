@@ -7,14 +7,12 @@
 import {
   type ChartController,
   DrawingInteractionController,
-  type DrawingToolId,
-} from '@363045841yyt/klinechart-core/controllers'
-import {
   type DrawingLabelIndex,
   type DrawingLabelPosition,
   type DrawingObject,
   type DrawingStyle,
-} from '@363045841yyt/klinechart-core/plugin'
+  type DrawingToolId,
+} from '@363045841yyt/klinechart-core/controllers'
 import { computed, onUnmounted, type Ref, shallowRef } from 'vue'
 
 export function useDrawingManager(ctrl: Ref<ChartController | null>) {
@@ -32,8 +30,12 @@ export function useDrawingManager(ctrl: Ref<ChartController | null>) {
     drawings.value
     return ctrl.value?.getBatchStyleKeys(selectedDrawingIds.value) ?? []
   })
+  /** 全局绘图锁定镜像（shallowRef 避免 deep proxy 破坏 Object.is）。 */
+  const globalDrawingLock = shallowRef(false)
+  const readonlyGlobalDrawingLock = computed(() => globalDrawingLock.value)
   let unsubDrawings: (() => void) | null = null
   let unsubSelected: (() => void) | null = null
+  let unsubGlobalLock: (() => void) | null = null
 
   function handleSelectTool(toolId: string) {
     // Chart 单写路径：kernel + session side effects
@@ -81,6 +83,11 @@ export function useDrawingManager(ctrl: Ref<ChartController | null>) {
     ctrl.value?.updateBatch(ids, { locked })
   }
 
+  /** 切换全局绘图锁定；只冻结移动，不改写各图元自身 locked。 */
+  function onSetGlobalDrawingLock(locked: boolean) {
+    ctrl.value?.setGlobalDrawingLock(locked)
+  }
+
   function setupDrawing(chartCtrl: ChartController): void {
     drawingController.value = new DrawingInteractionController(chartCtrl)
     chartCtrl.registerDrawingSession(drawingController.value)
@@ -96,6 +103,12 @@ export function useDrawingManager(ctrl: Ref<ChartController | null>) {
     }
     unsubSelected = chartCtrl.selectedDrawingIds.subscribe(syncSelected)
     syncSelected()
+
+    const syncGlobalLock = () => {
+      globalDrawingLock.value = chartCtrl.globalDrawingLock.peek()
+    }
+    unsubGlobalLock = chartCtrl.globalDrawingLock.subscribe(syncGlobalLock)
+    syncGlobalLock()
   }
 
   onUnmounted(() => {
@@ -103,6 +116,8 @@ export function useDrawingManager(ctrl: Ref<ChartController | null>) {
     unsubDrawings = null
     unsubSelected?.()
     unsubSelected = null
+    unsubGlobalLock?.()
+    unsubGlobalLock = null
   })
 
   /** 模板套用：合并式写入（可新增样式键）；updateBatch 的字段交集守卫会拒绝新键。 */
@@ -121,12 +136,14 @@ export function useDrawingManager(ctrl: Ref<ChartController | null>) {
     selectedDrawings,
     selectedDrawingStyleKeys,
     drawings: readonlyDrawings,
+    globalDrawingLock: readonlyGlobalDrawingLock,
     handleSelectTool,
     onUpdateDrawingStyle,
     applyTemplateToSelected,
     updateDrawingLabel,
     onDeleteDrawing,
     onToggleDrawingLock,
+    onSetGlobalDrawingLock,
     setupDrawing,
   }
 }

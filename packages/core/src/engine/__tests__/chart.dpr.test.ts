@@ -23,7 +23,99 @@ const defaultOptions: ChartOptions = {
   priceLabelWidth: 60,
 }
 
+function pointerEvent(
+  type: string,
+  target: HTMLElement,
+  overrides: Partial<PointerEvent> = {},
+): PointerEvent {
+  return {
+    type,
+    clientX: 100,
+    clientY: 40,
+    isPrimary: true,
+    pointerType: 'touch',
+    pointerId: 1,
+    target,
+    ...overrides,
+  } as PointerEvent
+}
+
 describe('Chart DPR pipeline', () => {
+  it('checks history only after the last pinch pointer is lifted, not on leave or render', async () => {
+    const dom = createChartDom(1000, 600)
+    dom.container.setPointerCapture = () => {}
+    dom.container.hasPointerCapture = () => false
+    dom.container.releasePointerCapture = () => {}
+    const chart = new Chart(dom, defaultOptions)
+    chart.resize()
+    const check = vi.spyOn(chart, 'checkVisibleRangeGap').mockImplementation(() => {})
+    const first = pointerEvent('pointerdown', dom.container)
+    const second = pointerEvent('pointerdown', dom.container, {
+      clientX: 200,
+      isPrimary: false,
+      pointerId: 2,
+    })
+
+    chart.handlePointerEvent(first)
+    chart.handlePointerEvent(second)
+    chart.handlePointerEvent(pointerEvent('pointerleave', dom.container))
+    chart.draw()
+    expect(check).not.toHaveBeenCalled()
+
+    chart.handlePointerEvent(pointerEvent('pointerup', dom.container))
+    expect(check).not.toHaveBeenCalled()
+    chart.handlePointerEvent(
+      pointerEvent('pointerup', dom.container, {
+        isPrimary: false,
+        pointerId: 2,
+      }),
+    )
+    expect(check).toHaveBeenCalledOnce()
+    await chart.destroy()
+  })
+
+  it('checks after mouse pointerup and wheel zoom, but never during a held pointer', async () => {
+    const dom = createChartDom(1000, 600)
+    dom.container.setPointerCapture = () => {}
+    dom.container.hasPointerCapture = () => false
+    dom.container.releasePointerCapture = () => {}
+    const chart = new Chart(dom, defaultOptions)
+    chart.resize()
+    const check = vi.spyOn(chart, 'checkVisibleRangeGap').mockImplementation(() => {})
+    const mouse = { pointerType: 'mouse' }
+
+    chart.handlePointerEvent(pointerEvent('pointerdown', dom.container, mouse))
+    chart.handleWheelEvent({ deltaY: -1, clientX: 100 } as WheelEvent)
+    chart.draw()
+    expect(check).not.toHaveBeenCalled()
+
+    chart.handlePointerEvent(pointerEvent('pointerup', dom.container, mouse))
+    expect(check).toHaveBeenCalledOnce()
+    chart.handleWheelEvent({ deltaY: -1, clientX: 100 } as WheelEvent)
+    expect(check).toHaveBeenCalledTimes(2)
+    await chart.destroy()
+  })
+
+  it('checks the viewport after an external DOM scroll while idle', async () => {
+    const dom = createChartDom(1000, 600)
+    const chart = new Chart(dom, defaultOptions)
+    chart.resize()
+    chart.setData(
+      Array.from({ length: 200 }, (_, timestamp) => ({
+        timestamp,
+        open: 10,
+        high: 11,
+        low: 9,
+        close: 10,
+      })),
+    )
+    const check = vi.spyOn(chart, 'checkVisibleRangeGap').mockImplementation(() => {})
+    dom.container.scrollLeft = 900
+    chart.handleScrollEvent()
+    expect(check).toHaveBeenCalledOnce()
+    await chart.destroy()
+  })
+
   let restoreChartDomStubs: () => void
 
   beforeAll(async () => {
@@ -76,6 +168,24 @@ describe('Chart DPR pipeline', () => {
     }).name
     expect(rsiRendererName).toBeDefined()
     expect(chart.getRenderer(rsiRendererName!)).toBeDefined()
+    await chart.destroy()
+  })
+
+  it('registers the latest price line and label layers and follows the data view', async () => {
+    const chart = new Chart(createChartDom(1000, 600), defaultOptions)
+    const scene = chart['renderer'].getScene()
+    for (const name of ['lastPriceLine', 'lastPriceLabelRegistrar']) {
+      expect(chart.getRenderer(name)).toBeDefined()
+      expect(scene.getLayer(`plugin:${name}`)).toBeDefined()
+    }
+
+    chart['kernel'].actions.setDataView('timeshare')
+    expect(scene.getLayer('plugin:lastPriceLine')?.visible).toBe(false)
+    expect(scene.getLayer('plugin:lastPriceLabelRegistrar')?.visible).toBe(false)
+
+    chart['kernel'].actions.setDataView('kline')
+    expect(scene.getLayer('plugin:lastPriceLine')?.visible).toBe(true)
+    expect(scene.getLayer('plugin:lastPriceLabelRegistrar')?.visible).toBe(true)
     await chart.destroy()
   })
 
@@ -576,11 +686,16 @@ describe('Chart pane layout regressions', () => {
     chart.drawing.remove('d1')
     expect(chart.kernel.drawing.readonly.drawings.peek().map((d) => d.id)).toEqual(['d2'])
     expect(chart.kernel.drawing.readonly.selectedDrawingIds.peek()).toEqual([])
+    expect(chart.undoDrawing()).toBe(true)
+    expect(chart.drawing.drawings.peek().map((d) => d.id)).toEqual(['d1', 'd2'])
+    expect(chart.drawing.selectedIds.peek()).toEqual(['d1'])
+    expect(chart.redoDrawing()).toBe(true)
+    expect(chart.drawing.drawings.peek().map((d) => d.id)).toEqual(['d2'])
     await chart.destroy()
   })
 
   it('removeDrawing with registered session updates kernel only', async () => {
-    const { DrawingInteractionController } = await import('../drawing/interaction')
+    const { DrawingInteractionController } = await import('../drawing/index')
     const chart = new Chart(createChartDom(1000, 600), defaultOptions)
     const d1 = {
       id: 'd1',
@@ -600,11 +715,7 @@ describe('Chart pane layout regressions', () => {
         replaceDrawings: (list) => chart.drawing.setDrawings([...list]),
         getFullDrawings: () => [...chart.kernel.drawing.readonly.drawings.peek()],
         createDrawing: () => d1,
-        removeDrawing: (id) => {
-          const removed = chart.kernel.drawing.actions.removeDrawing(id)
-          if (removed) chart.scheduleDraw()
-          return removed
-        },
+        removeDrawing: (id) => chart.drawingCommands.remove(id),
         clearDrawings: () => chart.drawing.clear(),
         setSelectedDrawingIds: (ids) => chart.drawing.setSelectedIds(ids),
         getSelectedDrawingIds: () => chart.kernel.drawing.readonly.selectedDrawingIds.peek(),

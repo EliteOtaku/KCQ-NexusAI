@@ -1,9 +1,11 @@
 import type { RenderContext, RendererPlugin } from '../../foundation/plugin/index.js'
-import { RENDERER_PRIORITY } from '../../foundation/plugin/index.js'
+import { AXIS_LABEL_KIND, RENDERER_PRIORITY } from '../../foundation/plugin/index.js'
 import { resolveThemeColors } from '../../foundation/tokens/index.js'
 import { ChartDataViewId } from '../../foundation/types/chartView.js'
 import type { KLineData } from '../../foundation/types/price.js'
+import { formatLastPriceCountdown, registerAxisLabel } from '../axisLabels/index.js'
 import { Indicator } from '../indicators/indicatorDefinitionRegistry.js'
+import { IndicatorKind } from '../indicators/indicatorMetadata.js'
 
 function getLastPriceInfo(context: RenderContext) {
   const { pane, data } = context
@@ -16,14 +18,20 @@ function getLastPriceInfo(context: RenderContext) {
     return null
   }
 
+  // 涨跌以前收为基准；无前收（仅一根 K 线）时回退到当根开盘价。
+  const previous = klineData[klineData.length - 2]
+  const baseline = previous ? previous.close : last.open
+
   return {
     price: last.close,
+    timestamp: last.timestamp,
     y: Math.round(pane.yAxis.priceToY(last.close)),
+    isUp: last.close >= baseline,
   }
 }
 
 /**
- * 最新价 label 注册渲染器（overlay 层，确保悬停时 label 也注册到 yAxisLabels）
+ * 最新价 label 注册渲染器（overlay 层，确保悬停时 label 也注册到右轴 overlay 表面）
  */
 export function createLastPriceLabelRegistrarPlugin(): RendererPlugin {
   return {
@@ -45,15 +53,19 @@ export function createLastPriceLabelRegistrarPlugin(): RendererPlugin {
       const info = getLastPriceInfo(context)
       if (!info) return
 
-      context.yAxisLabels.push({
-        price: info.price,
-        y: info.y,
+      registerAxisLabel(context, 'yRightOverlay', {
+        kind: AXIS_LABEL_KIND.TAG,
         type: 'lastPrice',
-        style: {
-          bgColor: colors.lastPriceLabel.bg,
-          borderColor: colors.price.lastPrice,
-          textColor: colors.price.lastPrice,
-        },
+        text: info.price.toFixed(2),
+        countdown: formatLastPriceCountdown(context.period, info.timestamp) ?? undefined,
+        pos: info.y + context.pane.top,
+        origin: context.pane.top,
+        variant: 'label',
+        // 价格标签色块跟随涨跌，文字取通用标签文字色保证对比度。
+        bgColor: info.isUp ? colors.candleUpBody : colors.candleDownBody,
+        borderColor: info.isUp ? colors.candleUpBorder : colors.candleDownBorder,
+        textColor: colors.label.text,
+        fontSize: 12,
       })
     },
   }
@@ -66,6 +78,7 @@ export function createLastPriceLabelRegistrarPlugin(): RendererPlugin {
   indicatorType: 'other',
   defaultPaneId: 'main',
   dataViews: [ChartDataViewId.KLine],
+  kind: IndicatorKind.System,
   mainPane: { rendererName: 'lastPriceLabelRegistrar' },
 })
 export class LastPriceLabelRegistrarIndicatorDefinition {
@@ -107,7 +120,7 @@ export function createLastPriceLineRendererPlugin(): RendererPlugin {
       const startX = scrollLeft
       const endX = paneWidth + scrollLeft
 
-      ctx.strokeStyle = colors.price.lastPrice
+      ctx.strokeStyle = info.isUp ? colors.candleUpBorder : colors.candleDownBorder
       ctx.lineWidth = 1
       ctx.setLineDash([4, 3])
       ctx.beginPath()
@@ -129,6 +142,7 @@ export function createLastPriceLineRendererPlugin(): RendererPlugin {
   indicatorType: 'other',
   defaultPaneId: 'main',
   dataViews: [ChartDataViewId.KLine],
+  kind: IndicatorKind.System,
   mainPane: { rendererName: 'lastPriceLine' },
 })
 export class LastPriceLineIndicatorDefinition {

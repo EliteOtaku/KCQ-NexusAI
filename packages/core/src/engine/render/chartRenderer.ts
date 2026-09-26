@@ -2,14 +2,12 @@ import type { SymbolSpec } from '../../controllers/types.js'
 import type { ChartSettings } from '../../foundation/config/chartSettings.js'
 import { PRICE_AXIS_RANGE_MODE } from '../../foundation/config/priceAxisRangeMode.js'
 import type {
+  AxisLabelsFrame,
   FiveDayTimeShareGeometry,
   PluginHostImpl,
   RenderContext,
-  XAxisLabel,
   XAxisRange,
-  YAxisLabel,
   YAxisRange,
-  YAxisTick,
 } from '../../foundation/plugin/index.js'
 import { RendererPluginManager, wrapPaneInfo } from '../../foundation/plugin/index.js'
 import {
@@ -40,6 +38,7 @@ import type {
   PaneRole,
   Scene,
 } from '../../rendering/scene/types.js'
+import { createAxisLabelsFrame, getLastPriceRemainingMs } from '../axisLabels/index.js'
 import type {
   ChartDom,
   ChartOptions,
@@ -50,15 +49,15 @@ import type {
 } from '../chartTypes.js'
 import { InteractionController } from '../controller/interaction.js'
 import { ChartDataManager } from '../data/chartDataManager.js'
-import { projectDrawingsForFrame } from '../drawing/frameProjection.js'
 import {
+  createDrawingRendererPlugin,
   DrawingDefinitionRegistry,
+  type DrawingSelectionMarquee,
   DrawingStore,
   type DrawingStoreDeps,
+  projectDrawingsForFrame,
   registerDefaultDrawingDefinitions,
 } from '../drawing/index.js'
-import { createDrawingRendererPlugin } from '../drawing/plugin.js'
-import type { DrawingSelectionMarquee } from '../drawing/selectionMarquee.js'
 import { ChartIndicatorManager } from '../indicators/chartIndicatorManager.js'
 import type { VisibleRange } from '../layout/pane.js'
 import { UpdateLevel } from '../layout/pane.js'
@@ -82,7 +81,7 @@ import type { OptionsStateModule } from '../state/optionsState.js'
 import type { ViewportStateModule } from '../state/viewportState.js'
 import type { ZoomStateModule } from '../state/zoomState.js'
 import { calcKBarWidthPx, getPhysicalKLineConfig } from '../utils/klineConfig.js'
-import { calculateTickCount } from '../utils/tickCount.js'
+import { createYAxisTicks } from '../utils/axisTicks.js'
 import { findVisibleBarRange } from '../utils/visibleBarIndex.js'
 import {
   computeVisiblePriceExtrema,
@@ -219,6 +218,8 @@ export class ChartRenderer {
 
   /** 已排队的 rAF 句柄；null 表示当前没有挂起的帧调度 */
   private raf: number | null = null
+  /** 最新价签的秒级倒计时计时器；只请求 overlay 重绘。 */
+  private lastPriceCountdownTimer: ReturnType<typeof setTimeout> | null = null
 
   readonly markerManager: MarkerManager
   readonly drawingStore: DrawingStore
@@ -289,7 +290,6 @@ export class ChartRenderer {
         this.drawWithFrame(snapshot.level, snapshot.frame)
         if (snapshot.frame) {
           this.cacheDrawFrame(snapshot.frame)
-          this.checkVisibleRangeGapAfterRender(snapshot.frame)
         }
       },
       schedule: (run) => {
@@ -558,6 +558,7 @@ export class ChartRenderer {
 
     // 当前视图无可绘制数据时必须清空所有 canvas，不能保留前一视图的像素。
     if (!frame) {
+      this.clearLastPriceCountdownTimer()
       this.clearAllCanvases()
       return
     }
@@ -582,7 +583,7 @@ export class ChartRenderer {
       : this.deps.getIndicatorManager().getMainIndicatorPriceRange()
 
     // 遍历所有 pane，清 canvas → 构建 RenderContext → scene.paintPane
-    const { sharedXAxisLabels, sharedXAxisRanges } = this.renderPanes(
+    const { axisLabelsFrame, sharedXAxisRanges } = this.renderPanes(
       vp,
       range,
       kLinePositions,
@@ -606,18 +607,46 @@ export class ChartRenderer {
       kLineCenters,
       kBarRects,
       kWidthPx,
-      sharedXAxisLabels,
+      axisLabelsFrame,
       sharedXAxisRanges,
       renderData,
       fiveDayTimeShareGeometry,
     )
+    this.scheduleLastPriceCountdown(renderData)
+  }
+
+  /** 停止本根 K 线倒计时的刷新计时器。 */
+  private clearLastPriceCountdownTimer(): void {
+    if (this.lastPriceCountdownTimer !== null) {
+      clearTimeout(this.lastPriceCountdownTimer)
+      this.lastPriceCountdownTimer = null
+    }
+  }
+
+  /** 有效的最新 K 线只在秒边界申请 overlay 帧；切换周期或收线时停止。 */
+  private scheduleLastPriceCountdown(data: ChartSeriesDatum[]): void {
+    this.clearLastPriceCountdownTimer()
+    const last = data[data.length - 1]
+    if (!last || this.deps.dataView$.peek() !== ChartDataViewId.KLine) return
+    const now = Date.now()
+    const remaining = getLastPriceRemainingMs(
+      this.deps.getDataManager().currentPeriod,
+      last.timestamp,
+      now,
+    )
+    if (remaining === null) return
+    const delay = Math.min(remaining, 1_000 - (now % 1_000) + 1)
+    this.lastPriceCountdownTimer = setTimeout(() => {
+      this.lastPriceCountdownTimer = null
+      this.scheduleDraw(UpdateLevel.Overlay)
+    }, delay)
   }
 
   /**
    * 计算一帧的 viewport、可见区间、K 线位置。
    *
    * Overlay 时复用 cachedDrawFrame 跳过重算，Main/All 强制刷新缓存。
-   * range 变化时调 checkVisibleRangeGapWhenIdle 触发空闲补数据。
+   * 帧缓存用于复用当前可见区几何。
    * TimeShare 模式按 plotWidth 平分 bar，覆盖 K 线位置。
    */
   /** viewWidth 为 0 表示尚未完成首帧尺寸 */
@@ -860,9 +889,10 @@ export class ChartRenderer {
     fiveDayTimeShareGeometry: FiveDayTimeShareGeometry | null,
     visiblePriceExtrema: VisiblePriceExtrema | null,
     requiresRightAxisWidthMeasurement: boolean,
-  ): { sharedXAxisLabels: XAxisLabel[]; sharedXAxisRanges: XAxisRange[] } {
+  ): { axisLabelsFrame: AxisLabelsFrame; sharedXAxisRanges: XAxisRange[] } {
     // X 轴由多个 Pane 共享；Y 轴装饰必须保持 Pane 隔离。
-    const sharedXAxisLabels: XAxisLabel[] = []
+    // 轴标签收集统一走 axisLabels 模块的单帧聚合：X 表面共享 + 每 Pane 独立 Y 表面。
+    const axisLabelsFrame = createAxisLabelsFrame()
     const sharedXAxisRanges: XAxisRange[] = []
     const indicatorManager = this.deps.getIndicatorManager()
     const indicatorStateReader = indicatorManager.createRenderStateReader()
@@ -1048,10 +1078,9 @@ export class ChartRenderer {
           preClose:
             dataManager.getTimeSharePreClose() ?? (this.settings.preClose as number | undefined),
         },
-        yAxisLabels: [],
-        xAxisLabels: sharedXAxisLabels,
         yAxisRanges: [],
         xAxisRanges: sharedXAxisRanges,
+        axisLabels: axisLabelsFrame,
         theme: this.deps.theme$.peek(),
         isAsiaMarket: this.settings.isAsiaMarket as boolean,
         colorPresetSettings: this.settings.colorPresetSettings,
@@ -1064,28 +1093,16 @@ export class ChartRenderer {
         context,
         this.deps.getSelectionMarquee?.() ?? null,
       )
-      context.yAxisLabels.push(...context.drawingProjection.yAxisLabels)
       context.yAxisRanges.push(...context.drawingProjection.yAxisRanges)
-      sharedXAxisLabels.push(...context.drawingProjection.xAxisLabels)
       sharedXAxisRanges.push(...context.drawingProjection.xAxisRanges)
 
-      // 计算本 pane 的 Y 轴刻度（等分 + yToPrice 映射）
-      {
-        const pt = pane.yAxis.getPaddingTop()
-        const pb = pane.yAxis.getPaddingBottom()
-        const yStart = pt
-        const yEnd = Math.max(pt, pane.height - pb)
-        const viewH = Math.max(0, yEnd - yStart)
-        const tickCount = Math.max(2, calculateTickCount(pane.height, pane.role === 'price'))
-        const yAxisTicks: YAxisTick[] = []
-        for (let i = 0; i < tickCount; i++) {
-          const t = tickCount <= 1 ? 0 : i / (tickCount - 1)
-          const y = yStart + t * viewH
-          const value = pane.yAxis.yToPrice(y)
-          yAxisTicks.push({ y, value })
-        }
-        context.yAxisTicks = yAxisTicks
-      }
+      // 刻度锚定轴数值，再投影到本帧的价格坐标系；网格与左右轴共用。
+      context.yAxisTicks = createYAxisTicks(pane, {
+        period: context.period,
+        comparisonActive: (context.comparisonSymbols?.length ?? 0) > 0,
+        leftSetting: context.settings?.mainLeftAxisDisplaySetting,
+        rightTypeSetting: context.settings?.mainRightAxisTypeSetting,
+      })
 
       this.paneCtxMap.set(pane.id, context)
       this.currentPaneId = pane.id
@@ -1131,7 +1148,7 @@ export class ChartRenderer {
     // 所有 pane 绘制完成后统一提交 GPU（WebGPU 单次 queue.submit，WebGL 单次 flush）
     this.deps.getSceneRenderer().endFrame()
 
-    return { sharedXAxisLabels, sharedXAxisRanges }
+    return { axisLabelsFrame, sharedXAxisRanges }
   }
 
   private renderXAxis(
@@ -1141,7 +1158,7 @@ export class ChartRenderer {
     kLineCenters: number[],
     kBarRects: Array<{ x: number; width: number }>,
     kWidthPx: number,
-    sharedXAxisLabels: XAxisLabel[],
+    axisLabelsFrame: AxisLabelsFrame,
     sharedXAxisRanges: XAxisRange[],
     renderData: ChartSeriesDatum[],
     fiveDayTimeShareGeometry: FiveDayTimeShareGeometry | null,
@@ -1212,10 +1229,9 @@ export class ChartRenderer {
           plotWidth: vp.plotWidth,
           plotHeight: vp.plotHeight,
         },
-        yAxisLabels: [],
-        xAxisLabels: sharedXAxisLabels,
         yAxisRanges: [],
         xAxisRanges: sharedXAxisRanges,
+        axisLabels: axisLabelsFrame,
         theme: this.deps.theme$.peek(),
         isAsiaMarket: this.settings.isAsiaMarket as boolean,
         colorPresetSettings: this.settings.colorPresetSettings,
@@ -1255,33 +1271,13 @@ export class ChartRenderer {
     return centers
   }
 
-  private checkVisibleRangeGapWhenIdle(): void {
-    if (this.deps.getInteraction().isPointerDown()) return
-    this.deps.getDataManager().checkVisibleRangeGap()
-  }
-
-  /** 在成功绘制后记录本帧可见区，并按需触发缺口加载。 */
-  private checkVisibleRangeGapAfterRender(frame: FrameContext): void {
+  /** 在成功绘制后缓存主层几何，供下一帧 Overlay 复用。 */
+  private cacheDrawFrame(frame: FrameContext): void {
     if (frame.useCachedFrame) return
-    const previous = this._prevFrameRange
-    const changed =
-      !previous ||
-      frame.range.start !== previous.visible.start ||
-      frame.range.end !== previous.visible.end ||
-      frame.rawRange.start !== previous.raw.start ||
-      frame.rawRange.end !== previous.raw.end
-    if (!changed) return
-
     this._prevFrameRange = {
       visible: { ...frame.range },
       raw: { ...frame.rawRange },
     }
-    this.checkVisibleRangeGapWhenIdle()
-  }
-
-  /** 在成功绘制后缓存主层几何，供下一帧 Overlay 复用。 */
-  private cacheDrawFrame(frame: FrameContext): void {
-    if (frame.useCachedFrame) return
     this.cachedDrawFrame = {
       viewport: { ...frame.vp },
       range: { ...frame.range },
@@ -1299,6 +1295,7 @@ export class ChartRenderer {
   }
 
   destroy(): void {
+    this.clearLastPriceCountdownTimer()
     if (this.raf !== null) {
       cancelAnimationFrame(this.raf)
       this.raf = null

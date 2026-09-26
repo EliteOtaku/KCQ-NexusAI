@@ -39,6 +39,10 @@
           :renderer-runtime="rendererRuntime"
           :market-data-cache-stats="marketDataCacheStats"
           :drawing-tool-id="drawingToolId"
+          :can-undo-drawing="canUndoDrawing"
+          :can-redo-drawing="canRedoDrawing"
+          :has-drawings="drawings.length > 0"
+          :global-drawing-locked="globalDrawingLock"
           :is-range-select-mode="isRangeSelectMode"
           :aggregation-sources="aggregationSources"
           :enabled-source-names="enabledSourceNameSet"
@@ -48,6 +52,9 @@
           @toggle-fullscreen="handleToggleFullscreen"
           @zoom-in="applyZoomToLevel(zoomLevel + 1)"
           @zoom-out="applyZoomToLevel(zoomLevel - 1)"
+          @undo-drawing="controller?.undoDrawing()"
+          @redo-drawing="controller?.redoDrawing()"
+          @set-global-drawing-lock="onSetGlobalDrawingLock"
           @settings-change="handleSettingsChange"
           @clear-market-data-cache="controller?.clearMarketDataCache()"
           @toggle-aggregation-source="setAggregationSourceEnabled"
@@ -72,6 +79,8 @@
           ></div>
           <div
             ref="containerRef"
+            tabindex="0"
+            @keydown="onDrawingHistoryKeydown"
             class="chart-container"
             :style="chartContainerStyle"
             @pointerdown="onPointerDown"
@@ -117,31 +126,19 @@
                     @batch-setting="showBatchStockDialog = true"
                   />
                   <DrawingStyleToolbar
-                    v-if="selectedDrawings.length > 0"
+                    v-if="selectedDrawings.length > 0 || isEditingLineLabel"
                     :drawings="selectedDrawings"
                     :editable-style-keys="selectedDrawingStyleKeys"
                     :templates="drawingTemplateNames"
+                    :line-label-position="isEditingLineLabel ? lineLabelPosition : undefined"
                     @update-style="onUpdateDrawingStyle"
                     @apply-template="onApplyDrawingTemplate"
                     @save-template="onSaveDrawingTemplate"
                     @delete="onDeleteDrawing"
                     @toggle-lock="onToggleDrawingLock"
+                    @update-line-label-position="setLineLabelPosition"
+                    @open-settings="openDrawingSettings"
                   />
-                  <CanvasToolbar v-if="isEditingLineLabel" class="drawing-label-position-toolbar">
-                    <button
-                      v-for="position in lineLabelPositionOptions"
-                      :key="position.value"
-                      type="button"
-                      class="drawing-label-position-toolbar__button"
-                      :class="{ 'is-active': lineLabelPosition === position.value }"
-                      :title="position.label"
-                      :aria-label="position.label"
-                      @mousedown.prevent
-                      @click="setLineLabelPosition(position.value)"
-                    >
-                      {{ position.label }}
-                    </button>
-                  </CanvasToolbar>
                 </CanvasToolbarStack>
                 <div
                   v-if="lineLabelTarget"
@@ -282,6 +279,15 @@
       @close="showBatchStockDialog = false"
       @apply="onBatchApply"
     />
+    <DrawingSettingsDialog
+      v-if="editingDrawing"
+      :show="showDrawingSettingsDialog"
+      :drawing="editingDrawing"
+      :editable-style-keys="editingDrawingStyleKeys"
+      @update-style="onUpdateEditingDrawingStyle"
+      @update-text="onUpdateEditingDrawingText"
+      @close="showDrawingSettingsDialog = false"
+    />
     <IndicatorSelector
       ref="indicatorSelectorRef"
       :active-indicators="activeIndicators"
@@ -309,6 +315,7 @@
     type CustomDataSource,
     createChartController,
     type DrawingLineLabelTarget,
+    type DrawingStyle,
     type InteractionSnapshot,
     type LegendTemplateContext,
     marketDataProviderRegistry,
@@ -375,9 +382,9 @@
   import { useWatchlist } from '../composables/useWatchlist.js'
 
   import BatchStockDialog from './BatchStockDialog.vue'
-  import CanvasToolbar from './common/CanvasToolbar.vue'
   import CanvasToolbarStack from './common/CanvasToolbarStack.vue'
   import DrawingStyleToolbar from './DrawingStyleToolbar.vue'
+  import DrawingSettingsDialog from './DrawingSettingsDialog.vue'
   import DrawingTemplateSaveDialog from './DrawingTemplateSaveDialog.vue'
   import ExportProgressDialog from './ExportProgressDialog.vue'
   import IndicatorSelector from './IndicatorSelector.vue'
@@ -550,15 +557,19 @@
   const { watchlistItems, watchlistKeys, restoreWatchlist, addWatchlistItem, removeWatchlistItem } =
     useWatchlist()
 
-  function onKLineLevelChange(level: string) {
-    if (level === 'timeshare') {
-      const item = currentSymbolItem.value
-      if (item?.capabilities && (item.capabilities.timeShare !== true || !item.sessionId)) {
-        symbolStatus.value = 'error'
-        symbolErrorMessage.value = `暂不支持该品种分时（${item.exchange || item.symbol}）`
-        return
-      }
+  /** 分时入口统一校验：品种未声明分时能力或缺会话时写入错误态，返回是否允许进入。 */
+  function ensureTimeShareSupported(): boolean {
+    const item = currentSymbolItem.value
+    if (item?.capabilities && (item.capabilities.timeShare !== true || !item.sessionId)) {
+      symbolStatus.value = 'error'
+      symbolErrorMessage.value = `暂不支持该品种分时（${item.exchange || item.symbol}）`
+      return false
     }
+    return true
+  }
+
+  function onKLineLevelChange(level: string) {
+    if (level === 'timeshare' && !ensureTimeShareSupported()) return
     emit('kLineLevelChange', level)
     try {
       controller.value?.setCurrentPeriod(level)
@@ -843,6 +854,8 @@
   }
 
   const showBatchStockDialog = ref(false)
+  const showDrawingSettingsDialog = ref(false)
+  const editingDrawingId = ref<string | null>(null)
   const batchSymbols = ref<string[]>([])
   const replacementPaneId = ref<string | null>(null)
 
@@ -860,6 +873,28 @@
 
   /** 镜像 kernel.drawingTool，供工具栏高亮 */
   const drawingToolId = shallowRef('cursor')
+  const canUndoDrawing = shallowRef(false)
+  const canRedoDrawing = shallowRef(false)
+
+  function onDrawingHistoryKeydown(event: KeyboardEvent) {
+    if (!(event.ctrlKey || event.metaKey) || event.altKey || event.isComposing) return
+    const target = event.target
+    if (
+      target instanceof Element &&
+      target.closest('input, textarea, select, [contenteditable], [role="textbox"]')
+    )
+      return
+    const redo =
+      event.key.toLowerCase() === 'y' || (event.shiftKey && event.key.toLowerCase() === 'z')
+    const undo = !event.shiftKey && event.key.toLowerCase() === 'z'
+    if (redo && canRedoDrawing.value) {
+      event.preventDefault()
+      controller.value?.redoDrawing()
+    } else if (undo && canUndoDrawing.value) {
+      event.preventDefault()
+      controller.value?.undoDrawing()
+    }
+  }
   /** 镜像 kernel.rendererRuntime，供设置页显示有效后端 */
   const rendererRuntime = shallowRef<RendererBackendRuntime | null>(null)
 
@@ -944,6 +979,8 @@
     updateDrawingLabel,
     onDeleteDrawing,
     onToggleDrawingLock,
+    globalDrawingLock,
+    onSetGlobalDrawingLock,
     setupDrawing,
   } = useDrawingManager(controller)
 
@@ -989,16 +1026,34 @@
     })
   }
 
+  const editingDrawing = computed(() =>
+    drawings.value.find((drawing) => drawing.id === editingDrawingId.value),
+  )
+  const editingDrawingStyleKeys = computed(() =>
+    editingDrawingId.value ? controller.value?.getBatchStyleKeys([editingDrawingId.value]) ?? [] : [],
+  )
+
+  function onUpdateEditingDrawingStyle(style: Partial<DrawingStyle>) {
+    if (editingDrawing.value) controller.value?.updateBatch([editingDrawing.value.id], { style })
+  }
+  function openDrawingSettings(drawingId: string) {
+    editingDrawingId.value = drawingId
+    showDrawingSettingsDialog.value = true
+  }
+  function onUpdateEditingDrawingText(
+    target: 'line' | 'area',
+    text: string,
+    position: 'start' | 'center' | 'end',
+  ) {
+    const drawing = editingDrawing.value
+    if (!drawing) return
+    updateDrawingLabel(drawing.id, target, 0, text, position)
+  }
   const lineLabelTarget = shallowRef<DrawingLineLabelTarget | null>(null)
   const lineLabelInput = ref<HTMLInputElement | null>(null)
   const lineLabelDraft = ref('')
   const lineLabelPosition = ref<'start' | 'center' | 'end'>('center')
   const isEditingLineLabel = ref(false)
-  const lineLabelPositionOptions = [
-    { label: '起点', value: 'start' },
-    { label: '居中', value: 'center' },
-    { label: '终点', value: 'end' },
-  ] as const
 
   /**
    * 命中框按被命中标签的绘制参数摆放：锚点贴文本块的对应边（基线定纵向、对齐定横向），
@@ -1103,6 +1158,8 @@
   let _prevTooltipIdx: number | null = null
   let _unsubTooltip: (() => void) | null = null
   let _tooltipSlots: _TooltipSlots | null = null
+  let _tooltipVisibilityEl: HTMLDivElement | null = null
+  let _tooltipHidden = false
 
   const NEUTRAL_COLOR = '#6b7280'
   interface _KLineData {
@@ -1228,7 +1285,7 @@
     const closeC = closeDiff > 0 ? upColor : closeDiff < 0 ? downColor : NEUTRAL_COLOR
     const changeC = changePct > 0 ? upColor : changePct < 0 ? downColor : NEUTRAL_COLOR
 
-     slots.date.textContent = formatTimeInTimeZone(kline.timestamp, { timeZone: timezone, showTime })
+    slots.date.textContent = formatTimeInTimeZone(kline.timestamp, { timeZone: timezone, showTime })
     if (slots.symbol) slots.symbol.textContent = kline.symbol ?? ''
 
     slots.open.textContent = kline.open.toFixed(2)
@@ -1268,11 +1325,16 @@
       const data = ctrl.getData()
       const kline =
         typeof idx === 'number' && data && idx >= 0 && idx < data.length ? data[idx] : undefined
-      if (!kline || !data || ctrl.chartMode.peek() === 'comparison' || isMobile) {
-        el.style.display = 'none'
-        return
+      const hidden = !kline || !data || ctrl.chartMode.peek() === 'comparison' || isMobile
+      if (_tooltipVisibilityEl !== el) {
+        _tooltipVisibilityEl = el
+        _tooltipHidden = false
       }
-      el.style.display = ''
+      if (_tooltipHidden !== hidden) {
+        el.style.display = hidden ? 'none' : ''
+        _tooltipHidden = hidden
+      }
+      if (hidden) return
       positionDefaultKLineTooltip()
       if (idx !== _prevTooltipIdx) {
         _prevTooltipIdx = idx
@@ -1551,6 +1613,7 @@
   }
 
   function onPointerDown(e: PointerEvent) {
+    if (e.target instanceof HTMLCanvasElement) containerRef.value?.focus({ preventScroll: true })
     // 记录按下瞬间的光标：若随后进入图元拖拽会话，期间沿用该 cursor 而不回落成十字线。
     drawingDragCursor =
       e.pointerType === 'touch' ? null : (containerRef.value?.style.cursor ?? 'crosshair')
@@ -1634,12 +1697,19 @@
   }
 
   function onDoubleClick(e: MouseEvent) {
-    if (kLineLevel.value !== 'daily' || !controller.value) return
-
     const container = containerRef.value
     if (!container) return
     const rect = container.getBoundingClientRect()
     const mouseX = e.clientX - rect.left
+    const mouseY = e.clientY - rect.top
+
+    const hitDrawing = drawingController.value?.hitTestAt(mouseX, mouseY)
+    if (hitDrawing) {
+      openDrawingSettings(hitDrawing.id)
+      return
+    }
+
+    if (kLineLevel.value !== 'daily' || !controller.value) return
 
     const index = controller.value.getLogicalIndexAtX(mouseX)
     if (index == null) return
@@ -1647,11 +1717,22 @@
     const timestamp = controller.value.getTimestampAtLogicalIndex(index)
     if (timestamp == null) return
 
+    // 双击进入分时前复用与分时下拉一致的品种能力校验；无会话的数据源（如 MT5）直接忽略，避免触发未注册会话异常。
+    if (!ensureTimeShareSupported()) return
+
     const d = new Date(timestamp)
     const shD = new Date(d.toLocaleString('en-US', { timeZone: 'Asia/Shanghai' }))
     const yyyymmdd = shD.getFullYear() * 10000 + (shD.getMonth() + 1) * 100 + shD.getDate()
 
-    controller.value.switchToTimeShareForDate(yyyymmdd)
+    try {
+      controller.value.switchToTimeShareForDate(yyyymmdd)
+    } catch (error) {
+      symbolStatus.value = 'error'
+      if (currentSymbolItem.value) {
+        symbolErrorMessage.value = formatUnsupportedSymbolMessage(currentSymbolItem.value, error)
+      }
+      return
+    }
     emit('kLineLevelChange', 'timeshare')
   }
 
@@ -1858,6 +1939,14 @@
     const unsubscribeDrawingTool = ctrl.drawingTool.subscribe(() => {
       drawingToolId.value = ctrl.drawingTool.peek()
     })
+    canUndoDrawing.value = ctrl.canUndoDrawing.peek()
+    canRedoDrawing.value = ctrl.canRedoDrawing.peek()
+    const unsubscribeUndo = ctrl.canUndoDrawing.subscribe(() => {
+      canUndoDrawing.value = ctrl.canUndoDrawing.peek()
+    })
+    const unsubscribeRedo = ctrl.canRedoDrawing.subscribe(() => {
+      canRedoDrawing.value = ctrl.canRedoDrawing.peek()
+    })
 
     rendererRuntime.value = ctrl.rendererRuntime.peek()
     const unsubscribeRendererRuntime = ctrl.rendererRuntime.subscribe(() => {
@@ -1955,6 +2044,8 @@
       unsubscribePaneLayout()
       unsubscribeTheme()
       unsubscribeDrawingTool()
+      unsubscribeUndo()
+      unsubscribeRedo()
       unsubscribeRendererRuntime()
       unsubscribeComparisonColors()
       unsubscribeComparisonLoading()
@@ -2409,36 +2500,6 @@
 
   .drawing-line-label-editor__input::placeholder {
     color: var(--klc-color-ui-muted);
-  }
-
-  .drawing-label-position-toolbar {
-    display: flex;
-    gap: 2px;
-  }
-
-  .drawing-label-position-toolbar__button {
-    height: 26px;
-    padding: 0 10px;
-    border: 0;
-    border-radius: 4px;
-    color: var(--klc-color-ui-muted);
-    background: transparent;
-    font: inherit;
-    font-size: var(--klc-typography-font-size-md);
-    cursor: pointer;
-    transition:
-      background var(--klc-motion-duration-fast) var(--klc-motion-easing-standard),
-      color var(--klc-motion-duration-fast) var(--klc-motion-easing-standard);
-  }
-
-  .drawing-label-position-toolbar__button:hover {
-    color: var(--klc-color-ui-text);
-    background: var(--klc-color-ui-hover);
-  }
-
-  .drawing-label-position-toolbar__button.is-active {
-    color: var(--klc-color-ui-accent);
-    background: color-mix(in srgb, var(--klc-color-ui-accent) 16%, transparent);
   }
 
   .chart-container::-webkit-scrollbar {

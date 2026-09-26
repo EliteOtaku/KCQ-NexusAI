@@ -7,12 +7,13 @@ import type {
   PluginHost,
   RenderContext,
   RendererPluginWithHost,
-} from '../../../foundation/plugin/index.js'
-import { RENDERER_PRIORITY } from '../../../foundation/plugin/index.js'
-import { resolveThemeColors } from '../../../foundation/tokens/index.js'
-import type { KLineData } from '../../../foundation/types/price.js'
+} from '@/foundation/plugin/index.js'
+import { RENDERER_PRIORITY } from '@/foundation/plugin/index.js'
+import { resolveThemeColors } from '@/foundation/tokens/index.js'
+import type { KLineData } from '@/foundation/types/price.js'
 import { calcFRAMAData } from '../../indicators/calculators/frama.js'
 import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
 import { INDICATOR_INSTANCE_STATE_SERVICE } from '../../indicators/instances/api/indicatorRenderBinding.js'
 import type { FRAMARenderState } from '../../indicators/state/framaState.js'
 import { EMPTY_FRAMA_STATE } from '../../indicators/state/framaState.js'
@@ -123,6 +124,7 @@ const getFRAMATitleInfo = createSingleLineTitleInfo({
 @Indicator({
   name: 'frama',
   displayName: 'frama',
+  kind: IndicatorKind.Indicator,
   getTitleInfo: getFRAMATitleInfo,
   category: 'main',
   indicatorType: 'moving-average',

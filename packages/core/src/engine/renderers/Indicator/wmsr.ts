@@ -3,12 +3,13 @@ import type {
   PluginHost,
   RenderContext,
   RendererPluginWithHost,
-} from '../../../foundation/plugin/index.js'
-import { RENDERER_PRIORITY } from '../../../foundation/plugin/index.js'
-import { resolveThemeColors } from '../../../foundation/tokens/index.js'
-import { alignToPhysicalPixelCenter } from '../../../foundation/utils/pixelAlign.js'
+} from '@/foundation/plugin/index.js'
+import { RENDERER_PRIORITY } from '@/foundation/plugin/index.js'
+import { resolveThemeColors } from '@/foundation/tokens/index.js'
+import { alignToPhysicalPixelCenter } from '@/foundation/utils/pixelAlign.js'
 import { calcWMSRData } from '../../indicators/calculators/index.js'
 import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
 import { INDICATOR_INSTANCE_STATE_SERVICE } from '../../indicators/instances/api/indicatorRenderBinding.js'
 import type { WMSRRenderState } from '../../indicators/state/wmsrState.js'
 import { EMPTY_WMSR_STATE } from '../../indicators/state/wmsrState.js'
@@ -300,6 +301,7 @@ const getWMSRTitleInfo = createSingleLineTitleInfo({
 @Indicator({
   name: 'wmsr',
   displayName: 'WMSR',
+  kind: IndicatorKind.Indicator,
   category: 'oscillator',
   indicatorType: 'momentum',
   defaultPaneId: 'sub_WMSR',

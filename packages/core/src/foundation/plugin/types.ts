@@ -2,7 +2,8 @@
  * 插件系统核心类型定义
  */
 
-import type { ChartDataView, ChartWorkspaceId } from '../types/chartView.js'
+import type { Point } from '../geometry/types.js'
+import type { ChartDataView } from '../types/chartView.js'
 import type { ChartSeriesDatum, KLineData } from '../types/price.js'
 import type { ScaleType } from '../types/scaleType.js'
 
@@ -169,33 +170,90 @@ export interface PaneInfo {
   }
 }
 
-/** Y轴标签（价格标签） */
-export interface YAxisLabel {
-  /** 价格值 */
-  price: number
-  /** 标签在轴上的Y坐标（世界坐标，相对pane） */
-  y: number
-  /** 标签类型，用于区分不同渲染外观 */
-  type?: 'lastPrice' | 'extrema' | 'anchor' | string
-  /** 标签样式覆盖 */
-  style?: {
-    bgColor?: string
-    borderColor?: string
-    textColor?: string
-  }
+/**
+ * 轴标签目标表面：决定绘制到哪块轴 canvas 以及在该 canvas 内的绘制相位。
+ *
+ * X 表面跨 Pane 共享（底部时间轴唯一）；Y 表面按 Pane 隔离。
+ */
+export type AxisLabelSurface =
+  | 'xTicks' // 底部时间轴刻度文字
+  | 'xCrosshair' // 底部时间轴十字线时间签
+  | 'xLabels' // 底部时间轴图元装饰标签
+  | 'yRightStatic' // 右 Y 轴静态 canvas 内容（主图刻度 / 副图指标刻度与十字线）
+  | 'yRightOverlay' // 右 Y 轴 overlay canvas 内容（装饰标签、十字线价签）
+  | 'yLeftStatic' // 左 Y 轴静态 canvas 内容（主图刻度）
+  | 'yLeftOverlay' // 左 Y 轴 overlay canvas 内容（十字线价签）
+
+/** 轴刻度文字标签：纯文本，无底色。 */
+export const AXIS_LABEL_KIND = {
+  TICK: 'tick',
+  TAG: 'tag',
+} as const
+
+export interface AxisTickLabel {
+  kind: typeof AXIS_LABEL_KIND.TICK
+  /** 已按所在轴显示语义格式化好的文本。 */
+  text: string
+  /** X 表面为屏幕 x（逻辑像素）；Y 表面为 pane 内 y。 */
+  pos: number
+  color: string
+  fontSize?: number
+  /** 年份等需要加粗的刻度。 */
+  bold?: boolean
+  /** Y 表面文本水平对齐；默认 center。 */
+  align?: 'left' | 'center' | 'right'
 }
 
-/** X轴标签（时间标签） */
-export interface XAxisLabel {
-  /** 时间戳（毫秒） */
-  timestamp: number
-  /** 标签在轴上的X坐标（世界坐标，未减去scrollLeft） */
-  x: number
-  /** 标签样式覆盖 */
-  style?: {
-    bgColor?: string
-    textColor?: string
-  }
+/** 轴色块标签：底矩形 + 居中文字（价格签 / 时间签）。 */
+export interface AxisTagLabel {
+  kind: typeof AXIS_LABEL_KIND.TAG
+  /** 业务类型；最新价签可按此选择专属布局。 */
+  type?: 'lastPrice'
+  /** 已格式化好的文本。 */
+  text: string
+  /** 最新价签的本根 K 线收线倒计时；无有效倒计时时不显示。 */
+  countdown?: string
+  /** X 表面为屏幕 x（逻辑像素）；Y 表面为标签的 pane 内 y。 */
+  pos: number
+  /**
+   * 锚点坐标的画布原点偏移（逻辑像素），用于复现各轴 renderer 既有的 clamp 原点
+   * （价格签沿用 pane.top）；默认 0。
+   */
+  origin?: number
+  /** 价格签基线微调：'label' 文本下移 1px，'crosshair' 物理像素中心对齐；默认 'label'。 */
+  variant?: 'label' | 'crosshair'
+  bgColor: string
+  borderColor?: string
+  textColor: string
+  fontSize?: number
+  /** X 时间签左右内边距，默认 8。 */
+  paddingX?: number
+}
+
+/** 单条轴标签：生产者计算好的 ready-to-draw 数据，由轴标签模块统一布局绘制。 */
+export type AxisLabel = AxisTickLabel | AxisTagLabel
+
+/** 单表面轴标签收集器：生产者经 register 写入，渲染器直接消费 labels。 */
+export interface AxisLabelCollector {
+  /** 渲染器直接消费的可变标签缓冲区；“当前帧”语义由每帧重建保证。 */
+  readonly labels: AxisLabel[]
+  register(label: AxisLabel): void
+}
+
+/**
+ * 帧级轴标签聚合：按表面取收集器。
+ *
+ * X 表面跨 Pane 共享；Y 表面按 paneId 隔离。每帧由渲染器新建，
+ * 帧内累积、帧结束后随对象释放，不持有跨帧状态。
+ */
+export interface AxisLabelsFrame {
+  /**
+   * 取指定表面的收集器；X 表面忽略 paneId，同一 (surface, paneId) 稳定返回同一实例。
+   *
+   * @param surface - 目标轴表面
+   * @param paneId - Y 表面的 Pane 隔离键；X 表面忽略
+   */
+  forSurface(surface: AxisLabelSurface, paneId?: string): AxisLabelCollector
 }
 
 /** Y轴范围带（半透明填充区域） */
@@ -222,12 +280,15 @@ export interface XAxisRange {
   opacity: number
 }
 
-/** 单个 Pane 内绘图在当前帧的纯投影结果。 */
+/**
+ * 单个 Pane 内绘图在当前帧的纯投影结果。
+ *
+ * 轴标签不经返回值传递：投影时通过帧级 axisLabels 模块的注册入口注册到本帧表面，
+ * 此处只保留范围带。
+ */
 export interface DrawingFrameProjection {
   primitives: ReadonlyArray<DrawingPrimitive>
-  yAxisLabels: ReadonlyArray<YAxisLabel>
   yAxisRanges: ReadonlyArray<YAxisRange>
-  xAxisLabels: ReadonlyArray<XAxisLabel>
   xAxisRanges: ReadonlyArray<XAxisRange>
 }
 
@@ -235,7 +296,7 @@ export interface DrawingFrameProjection {
 export interface YAxisTick {
   /** Y像素位置（相对 pane 顶部，逻辑像素） */
   y: number
-  /** 该Y位置通过 pane.yAxis.yToPrice 反算的价格值 */
+  /** 刻度锚定的价格值，Y 位置通过 pane.yAxis.priceToY 投影 */
   value: number
 }
 
@@ -329,15 +390,16 @@ export interface RenderGeometryContext {
 
 /** 坐标轴子契约：本帧待绘制的轴标签、范围带与刻度。 */
 export interface RenderAxisContext {
-  /** 需要在Y轴上绘制的标签列表（由各类标记渲染器填充） */
-  yAxisLabels: YAxisLabel[]
-  /** 需要在X轴上绘制的标签列表（由各类标记渲染器填充） */
-  xAxisLabels: XAxisLabel[]
+  /**
+   * 帧级轴标签收集器。生产者经 `registerAxisLabel` 写入本帧表面；
+   * 轴渲染器按表面读取并由轴标签模块统一绘制，不再直接操作标签数组。
+   */
+  axisLabels: AxisLabelsFrame
   /** 需要在Y轴上绘制的范围带列表（由绘图渲染器填充，先于标签绘制） */
   yAxisRanges: YAxisRange[]
   /** 需要在X轴上绘制的范围带列表（由绘图渲染器填充，先于标签绘制） */
   xAxisRanges: XAxisRange[]
-  /** 预计算的 Y 轴刻度列表（统一像素均匀分布 → yToPrice 反算），所有 Y 轴渲染器共用 */
+  /** 预计算的 Y 轴刻度列表（锚定数值 → priceToY 投影），所有 Y 轴渲染器共用 */
   yAxisTicks?: YAxisTick[]
 }
 
@@ -400,45 +462,7 @@ export interface RenderContext
     RenderSurfaceContext,
     RenderThemeContext {}
 
-/** 锚点语义：普通点、价格水平线或时间垂线。 */
-export type DrawingAnchorType = 'point' | 'horizontal' | 'vertical'
-
-/** 图元持久化锚点。所有新图元必须显式声明 type。 */
-export type PersistedDrawingAnchor = {
-  id: string
-  type?: DrawingAnchorType
-  /**
-   * 数据锚点的时间；futureOffset 存在时表示创建时最后一根 K 线的时间。
-   */
-  time?: number | string
-  /**
-   * 基准 K 线之后的未来时间轴槽位数。只用于未来锚点，必须为正整数。
-   */
-  futureOffset?: number
-  price: number
-}
-
-/** 当前帧或交互会话使用的锚点坐标；逻辑索引不得进入绘图持久化快照。 */
-export type ResolvedDrawingAnchor = PersistedDrawingAnchor & {
-  index: number
-}
-
-export type DrawingKind =
-  | 'trend-line'
-  | 'ray'
-  | 'extended-line'
-  | 'fib-retracement'
-  | 'rectangle'
-  | 'arrow'
-  | 'horizontal-line'
-  | 'horizontal-ray'
-  | 'vertical-line'
-  | 'cross-line'
-  | 'info-line'
-  | 'parallel-channel'
-  | 'regression-channel'
-  | 'flat-line'
-  | 'disjoint-channel'
+/** 绘图渲染 primitive 契约：仅保留 `RenderContext`/`DrawingFrameProjection` 依赖的屏幕原语。 */
 
 export type DrawingStyle = {
   stroke?: string
@@ -453,50 +477,6 @@ export type DrawingStyle = {
 
 /** 绘图线段文字在线段语义方向上的位置。 */
 export type DrawingLabelPosition = 'start' | 'center' | 'end'
-
-/** 绘图附属文本的持久化内容与位置。 */
-export type DrawingLabel = {
-  text: string
-  position: DrawingLabelPosition
-}
-
-/** 绘图标签的键：图元定义输出的线段或填充区域序号。 */
-export type DrawingLabelIndex = `${number}`
-
-/** 绘图附属文本；键为图元定义输出的线段或填充区域序号。 */
-export type DrawingLabels = {
-  line: Record<DrawingLabelIndex, DrawingLabel>
-  area: Record<DrawingLabelIndex, DrawingLabel>
-}
-
-/** 绘图所属的数据工作区。 */
-export type DrawingWorkspaceId = ChartWorkspaceId
-
-export type DrawingObject<TParams = Record<string, unknown>> = {
-  id: string
-  kind: DrawingKind
-  paneId: string
-  /** 未标记的历史图元按 K 线工作区处理。 */
-  workspaceId?: DrawingWorkspaceId
-  visible: boolean
-  locked?: boolean
-  zIndex?: number
-  anchors: PersistedDrawingAnchor[]
-  /** 用户输入的附属文本；几何位置和方向始终在渲染期推导。 */
-  labels?: DrawingLabels
-  params: TParams
-  style: DrawingStyle
-}
-
-/** 当前数据帧已按时间戳解析逻辑索引的绘图对象。 */
-export type ResolvedDrawingObject<TParams = Record<string, unknown>> = Omit<
-  DrawingObject<TParams>,
-  'anchors'
-> & {
-  anchors: ResolvedDrawingAnchor[]
-}
-
-export type ScreenPoint = { x: number; y: number }
 
 /** 图元附属文字；位置由所属图元在渲染期计算。 */
 export type PrimitiveTextAttachment = {
@@ -514,7 +494,7 @@ export type ScreenVerticalAnchor = { type: 'vertical'; x: number }
 
 /** 锚点的屏幕投影，按锚点语义保留缺失的坐标轴。 */
 export type ScreenDrawingAnchor =
-  | ({ type: 'point' } & ScreenPoint)
+  | ({ type: 'point' } & Point)
   | ScreenHorizontalAnchor
   | ScreenVerticalAnchor
 
@@ -527,7 +507,7 @@ export type PointRole = 'anchor' | 'translate-handle'
 /** 点图元：锚点圆点统一填白底、描图元色环，没有填充色开关。 */
 export type PointPrimitive = {
   kind: 'point'
-  point: ScreenPoint
+  point: Point
   role?: PointRole
   text?: PrimitiveTextAttachment
   style?: DrawingStyle
@@ -535,8 +515,8 @@ export type PointPrimitive = {
 
 export type LinePrimitive = {
   kind: 'line'
-  a: ScreenPoint
-  b: ScreenPoint
+  a: Point
+  b: Point
   extend?: 'none' | 'left' | 'right' | 'both'
   showEndpoints?: boolean
   text?: PrimitiveTextAttachment
@@ -545,7 +525,7 @@ export type LinePrimitive = {
 
 export type AreaPrimitive = {
   kind: 'area'
-  points: ScreenPoint[]
+  points: Point[]
   closed: boolean
   text?: PrimitiveTextAttachment
   style?: DrawingStyle
@@ -553,7 +533,7 @@ export type AreaPrimitive = {
 
 export type TextPrimitive = {
   kind: 'text'
-  point: ScreenPoint
+  point: Point
   text: string
   align?: 'left' | 'center' | 'right'
   baseline?: 'top' | 'middle' | 'bottom'
@@ -563,8 +543,8 @@ export type TextPrimitive = {
 /** 箭头图元：由渲染器作为一个整体绘制轴线和实心箭头头部。 */
 export type ArrowPrimitive = {
   kind: 'arrow'
-  start: ScreenPoint
-  end: ScreenPoint
+  start: Point
+  end: Point
   headLength?: number
   headAngle?: number
   text?: PrimitiveTextAttachment
@@ -577,40 +557,6 @@ export type DrawingPrimitive =
   | AreaPrimitive
   | TextPrimitive
   | ArrowPrimitive
-
-export type DrawingGeometry = {
-  primitives: DrawingPrimitive[]
-  bounds?: { left: number; top: number; right: number; bottom: number }
-  meta?: Record<string, unknown>
-  computedAnchors?: ResolvedDrawingAnchor[]
-}
-
-export type DrawingComputeContext = {
-  pane: PaneInfo
-  visibleData: KLineData[]
-  seriesData: KLineData[]
-  range: { start: number; end: number }
-  kLinePositions: number[]
-  kLineCenters: number[]
-  kBarRects: Array<{ x: number; width: number }>
-  kWidth: number
-  kGap: number
-  dpr: number
-  paneWidth: number
-  viewport: {
-    scrollLeft: number
-    plotWidth: number
-    plotHeight: number
-  }
-  toScreen(anchor: ResolvedDrawingAnchor): ScreenPoint
-}
-
-export interface DrawingDefinition<TParams = Record<string, unknown>> {
-  kind: DrawingKind
-  minAnchors: number
-  maxAnchors: number
-  compute(drawing: ResolvedDrawingObject<TParams>, context: DrawingComputeContext): DrawingGeometry
-}
 
 /** 渲染器插件接口（独立定义，不继承 Plugin） */
 export interface RendererPlugin {

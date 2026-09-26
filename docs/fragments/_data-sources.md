@@ -17,7 +17,7 @@ Backend repos live alongside this one (outside the monorepo).
 Clone the data-source backends first (idempotent: skips directories that already exist):
 
 ```bash
-pnpm setup
+pnpm setup:backends
 ```
 
 Then run `pnpm dev` with a `-c` argument to start the frontend and the selected connectors together:
@@ -44,6 +44,8 @@ pnpm dev:lan:all              # frontend (0.0.0.0) + all backends
 
 Parallel process logs stay in one terminal and are separated by colored source prefixes: `[vite]`, `[gotdx]`, `[binance]`, `[baostock]`, and `[mt5]`.
 
+In Windows PowerShell, run `node scripts/dev.mjs -c gotdx` (or use the other `-c` arguments above) to finish shutdown logs before the next prompt after Ctrl+C. `pnpm dev` adds a pnpm process that also receives Ctrl+C; the child script cannot control when pnpm prints `[ELIFECYCLE]`.
+
 Backend only (no frontend):
 
 ```bash
@@ -53,4 +55,6 @@ pnpm connector baostock       # BaoStock / TradingView :8000
 pnpm connector mt5            # MT5 local terminal :8090 (Windows + logged-in MT5 terminal)
 ```
 
-After `pnpm setup`, no extra setup is needed. The dev server proxies `/api/stock` → `:8000` (Baostock-Tradingview-Connector) and `/api/public` → `:8080` (GoTDX-Connector).
+For backend only with the same shutdown ordering, run `node scripts/start-connector.mjs gotdx`.
+
+After `pnpm setup:backends`, no extra setup is needed. The dev server proxies `/api/stock` → `:8000` (Baostock-Tradingview-Connector) and `/api/public` → `:8080` (GoTDX-Connector).

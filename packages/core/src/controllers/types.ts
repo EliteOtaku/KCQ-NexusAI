@@ -19,20 +19,21 @@ import type { PaneSpec } from '../engine/chartTypes.js'
 import type {
   BatchDrawingPatch,
   CreateDrawingInput,
+  DrawingLabelIndex,
+  DrawingLabelPosition,
+  DrawingStyle,
   DrawingStyleKey,
+  DrawingToolId,
+  PersistedDrawingAnchor,
+  DrawingObject as PluginDrawingObject,
   UpdateDrawingPatch,
-} from '../engine/drawing/DrawingDocument.js'
-import type { DrawingToolId } from '../engine/drawing/toolConfig.js'
+} from '../engine/drawing/index.js'
 import type { CustomMarkerEntity } from '../engine/marker/registry.js'
 import type { CreatePaneInput, PanePatch } from '../engine/paneManager.js'
 import type { ChartAgentController } from '../features/agent/types.js'
 import type { AlertController } from '../features/alerts/types.js'
 import type { ChartSettings } from '../foundation/config/chartSettings.js'
-import type {
-  PersistedDrawingAnchor,
-  DrawingObject as PluginDrawingObject,
-} from '../foundation/plugin/index.js'
-import type { ReadonlySignal, Signal } from '../foundation/reactivity/index.js'
+import type { ReadonlySignal } from '../foundation/reactivity/index.js'
 import type { ChartDataView } from '../foundation/types/chartView.js'
 
 export {
@@ -57,7 +58,13 @@ export interface ChartViewport {
   kGap: number
 }
 
-export type IndicatorRole = 'main' | 'sub'
+/** 指标角色运行时取值，作为 IndicatorRole 的单一事实来源。 */
+export const INDICATOR_ROLE = {
+  MAIN: 'main',
+  SUB: 'sub',
+} as const
+
+export type IndicatorRole = (typeof INDICATOR_ROLE)[keyof typeof INDICATOR_ROLE]
 
 /** 组件受控指标实例配置。 */
 export interface ChartIndicatorConfig {
@@ -87,7 +94,15 @@ export interface SubPaneInfo {
 }
 
 export type DrawingObject = PluginDrawingObject
-export type { BatchDrawingPatch, CreateDrawingInput, DrawingStyleKey, UpdateDrawingPatch }
+export type {
+  BatchDrawingPatch,
+  CreateDrawingInput,
+  DrawingLabelIndex,
+  DrawingLabelPosition,
+  DrawingStyle,
+  DrawingStyleKey,
+  UpdateDrawingPatch,
+}
 
 export type IndicatorPaneRole = IndicatorRole
 
@@ -245,7 +260,7 @@ export interface DrawingChartViewport {
  * 拖拽覆盖与预览等会话态不在本契约内。
  */
 export interface DrawingDocumentPort {
-  /** 原子替换完整绘图文档，仅供受控组件和导入导出使用。 */
+  /** 外部权威文档同步：替换并重设撤回历史基线。 */
   replaceDrawings(drawings: ReadonlyArray<DrawingObject>): void
   /** read the full drawing list (plugin-level DrawingObject) */
   getFullDrawings(): ReadonlyArray<DrawingObject>
@@ -277,9 +292,11 @@ export interface DrawingDocumentPort {
   /** 读取当前选中图元集合。 */
   getSelectedDrawingIds(): ReadonlyArray<string>
   /** write drawing tool id via Chart (kernel SSOT + session side effects) */
-  setDrawingToolId(toolId: import('../engine/drawing/toolConfig.js').DrawingToolId): void
+  setDrawingToolId(toolId: import('../engine/drawing/index.js').DrawingToolId): void
   /** read current drawing tool id from kernel */
-  getDrawingToolId(): import('../engine/drawing/toolConfig.js').DrawingToolId
+  getDrawingToolId(): import('../engine/drawing/index.js').DrawingToolId
+  /** 读取全局绘图锁定：全局锁只冻结移动，不阻止删除。 */
+  isGlobalDrawingLocked(): boolean
 }
 
 /**
@@ -306,7 +323,7 @@ export interface DrawingViewportPort {
   /** unix timestamp (ms) → current logical index */
   getLogicalIndexAtTimestamp(timestamp: number): number | null
   /** 当前绘图所属的数据工作区。 */
-  getDrawingWorkspaceId(): import('../foundation/plugin/index.js').DrawingWorkspaceId
+  getDrawingWorkspaceId(): import('../engine/drawing/index.js').DrawingWorkspaceId
   /** price → Y within the given pane */
   priceToY(paneId: string, price: number): number
   /** Y within the given pane → price */
@@ -410,10 +427,14 @@ export interface ChartController extends DrawingChartAdapter {
   readonly indicators: ReadonlySignal<ReadonlyArray<IndicatorInstance>>
   readonly subPanes: ReadonlySignal<ReadonlyArray<SubPaneInfo>>
   /** 当前绘图工具（DrawingToolId，默认 cursor） */
-  readonly drawingTool: ReadonlySignal<import('../engine/drawing/toolConfig.js').DrawingToolId>
+  readonly drawingTool: ReadonlySignal<import('../engine/drawing/index.js').DrawingToolId>
   readonly drawings: ReadonlySignal<ReadonlyArray<DrawingObject>>
+  readonly canUndoDrawing: ReadonlySignal<boolean>
+  readonly canRedoDrawing: ReadonlySignal<boolean>
   /** 当前选中绘图 id 集合（kernel.drawing SSOT） */
   readonly selectedDrawingIds: ReadonlySignal<ReadonlyArray<string>>
+  /** 全局绘图锁定信号：为 true 时冻结全部图元的几何移动。 */
+  readonly globalDrawingLock: ReadonlySignal<boolean>
   readonly paneRatios: ReadonlySignal<Readonly<Record<string, number>>>
   readonly paneLayout: ReadonlySignal<ReadonlyArray<PaneSpec>>
   readonly interactionState: ReadonlySignal<InteractionSnapshot>
@@ -513,7 +534,7 @@ export interface ChartController extends DrawingChartAdapter {
   // ---- Indicators ----
   addIndicator(
     definitionId: string,
-    role: 'main' | 'sub',
+    role: IndicatorRole,
     params?: Record<string, unknown>,
   ): string | null
   removeIndicator(instanceId: string): boolean
@@ -525,8 +546,10 @@ export interface ChartController extends DrawingChartAdapter {
    * 设置绘图工具；null 视为 cursor。
    */
   setDrawingTool(tool: DrawingToolId | null): void
-  setDrawingToolId(toolId: import('../engine/drawing/toolConfig.js').DrawingToolId): void
-  getDrawingToolId(): import('../engine/drawing/toolConfig.js').DrawingToolId
+  setDrawingToolId(toolId: import('../engine/drawing/index.js').DrawingToolId): void
+  getDrawingToolId(): import('../engine/drawing/index.js').DrawingToolId
+  /** 设置全局绘图锁定；只冻结移动，不改写各图元自身 locked。 */
+  setGlobalDrawingLock(locked: boolean): void
   /** 注册绘图交互会话到 Chart，使工具切换能清会话副作用 */
   registerDrawingSession(session: unknown | null): void
   clearDrawings(): void
@@ -536,8 +559,12 @@ export interface ChartController extends DrawingChartAdapter {
   getBatchStyleKeys(ids: ReadonlyArray<string>): ReadonlyArray<DrawingStyleKey>
   removeDrawing(drawingId: string): boolean
   removeBatch(ids: ReadonlyArray<string>): boolean
-  /** 原子替换完整绘图文档，仅供受控组件和导入导出使用。 */
+  /** 外部权威文档同步：替换并重设撤回历史基线。 */
   replaceDrawings(drawings: ReadonlyArray<DrawingObject>): void
+  /** 用户导入，作为一条可撤回的文档替换事务。 */
+  importDrawings(drawings: ReadonlyArray<DrawingObject>): void
+  undoDrawing(): boolean
+  redoDrawing(): boolean
 
   // ---- Pane ----
   createPane(input: CreatePaneInput): boolean
@@ -576,74 +603,17 @@ export interface ChartController extends DrawingChartAdapter {
 /**
  * Factory contract — adapters call this on mount.
  *
- * Implementation lives in packages/core/src/controllers/createChartController.ts
- * (Phase 1 deliverable). It wires the existing Chart engine in src/core/chart.ts.
+ * Implementation lives in controllers/chart/impl/createChartController.ts and wires
+ * the Chart engine behind this framework-agnostic contract.
  */
 export type ChartControllerFactory = (
   opts: ChartMountOptions,
 ) => ChartController | Promise<ChartController>
 
 // ---------------------------------------------------------------------------
-// Legacy type aliases (deprecated — kept for internal sub-controller tests)
+// 旧类型入口：小型控制器的契约现由各自的语义模块维护。
 // ---------------------------------------------------------------------------
 
-export interface ActiveIndicator {
-  id: string
-  definitionId: string
-  label: string
-  name: string
-  role: IndicatorPaneRole
-  params: Readonly<Record<string, number | string | boolean>>
-}
-
-export interface IndicatorSelectorController {
-  readonly catalog: Signal<ReadonlyArray<IndicatorDefinition>>
-  readonly active: Signal<ReadonlyArray<ActiveIndicator>>
-  readonly menuOpen: Signal<boolean>
-  readonly searchQuery: Signal<string>
-  readonly filteredMain: Signal<ReadonlyArray<IndicatorDefinition>>
-  readonly filteredSub: Signal<ReadonlyArray<IndicatorDefinition>>
-  add(definitionId: string): string | null
-  remove(instanceId: string): boolean
-  updateParams(instanceId: string, params: Record<string, number | string | boolean>): boolean
-  reorder(fromInstanceId: string, toInstanceId: string): boolean
-  openMenu(): void
-  closeMenu(): void
-  toggleMenu(): void
-  setSearchQuery(q: string): void
-  isActive(definitionId: string): boolean
-  dispose(): void
-}
-
-export type ToolId = string
-
-export interface ToolDefinition {
-  id: ToolId
-  label: string
-  icon?: string
-  group?: string
-  disabled?: boolean
-}
-
-export interface ToolbarController {
-  readonly tools: Signal<ReadonlyArray<ToolDefinition>>
-  readonly activeTool: Signal<ToolId | null>
-  readonly disabledTools: Signal<ReadonlySet<ToolId>>
-  selectTool(id: ToolId): void
-  clearSelection(): void
-  setDisabled(id: ToolId, disabled: boolean): void
-  dispose(): void
-}
-
-export interface DrawingState {
-  readonly activeTool: DrawingToolId | null
-  readonly drawingCount: number
-}
-
-export interface DrawingController {
-  readonly state: Signal<DrawingState>
-  setActiveTool(tool: DrawingToolId | null): void
-  clearAll(): void
-  deleteLast(): void
-  dispose(): void
-}
+export type { DrawingController, DrawingState } from './drawing/types.js'
+export type { ActiveIndicator, IndicatorSelectorController } from './indicatorSelector/types.js'
+export type { ToolbarController, ToolDefinition, ToolId } from './toolbar/types.js'
