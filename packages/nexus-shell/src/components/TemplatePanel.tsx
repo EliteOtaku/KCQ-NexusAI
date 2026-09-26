@@ -3,7 +3,6 @@
 // 外壳（分区标题/折叠）由 PanelSection 提供。
 
 import { useMemo, useState } from 'react'
-import { useNexusShell } from '../shell/NexusShellContext'
 import {
   listTemplates,
   loadLastUsedTemplateName,
@@ -12,8 +11,9 @@ import {
   renameTemplate,
 } from '../shell/drawingTemplates'
 import { kindToolLabel } from '../shell/drawingTools'
-import { SHELL_LABELS } from '../shell/labels'
 import { ToolIcon } from '../shell/icons'
+import { SHELL_LABELS } from '../shell/labels'
+import { useNexusShell } from '../shell/NexusShellContext'
 
 /** 模板面板组件。 */
 export function TemplatePanel() {
@@ -38,7 +38,7 @@ export function TemplatePanel() {
   function confirmRename() {
     if (renaming === null) return
     const next = renaming.draft.trim()
-      if (next !== '' && next !== renaming.name) {
+    if (next !== '' && next !== renaming.name) {
       renameTemplate(renaming.kind, renaming.name, next)
       if (loadLastUsedTemplateName(renaming.kind) === renaming.name) {
         markTemplateUsed(renaming.kind, next)
@@ -52,11 +52,7 @@ export function TemplatePanel() {
     <>
       <label className="nx-side-panel__row nx-side-panel__row--toggle">
         <span>{SHELL_LABELS.templateAutoApply}</span>
-        <input
-          type="checkbox"
-          checked={shell.autoApply}
-          onChange={shell.toggleAutoApply}
-        />
+        <input type="checkbox" checked={shell.autoApply} onChange={shell.toggleAutoApply} />
       </label>
 
       {records.length === 0 ? (
@@ -80,7 +76,12 @@ export function TemplatePanel() {
                       if (event.key === 'Escape') setRenaming(null)
                     }}
                   />
-                  <button type="button" className="nx-iconbtn" title={SHELL_LABELS.templateRenameConfirm} onClick={confirmRename}>
+                  <button
+                    type="button"
+                    className="nx-iconbtn"
+                    title={SHELL_LABELS.templateRenameConfirm}
+                    onClick={confirmRename}
+                  >
                     <ToolIcon name="device-floppy" className="nx-iconbtn__icon" />
                   </button>
                 </>

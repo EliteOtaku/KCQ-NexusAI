@@ -16,7 +16,7 @@ body,
 
 body {
   font-family:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei',
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei",
     sans-serif;
   font-size: 13px;
   color: var(--nx-text-primary);
@@ -309,7 +309,7 @@ body {
 }
 
 .nx-toolbtn__corner::after {
-  content: '';
+  content: "";
   position: absolute;
   right: 0;
   bottom: 0;
@@ -434,7 +434,13 @@ body {
 }
 
 .nx-flybar__swatch--fill {
-  background-image: linear-gradient(45deg, transparent 45%, #ffffff55 45%, #ffffff55 55%, transparent 55%);
+  background-image: linear-gradient(
+    45deg,
+    transparent 45%,
+    #ffffff55 45%,
+    #ffffff55 55%,
+    transparent 55%
+  );
 }
 
 /* 混合态色板：斜杠提示多值。 */
@@ -819,8 +825,8 @@ body {
   color: var(--nx-text-secondary);
 }
 
-.nx-legend__editor-row input[type='number'],
-.nx-legend__editor-row input[type='text'],
+.nx-legend__editor-row input[type="number"],
+.nx-legend__editor-row input[type="text"],
 .nx-legend__editor-row select {
   width: 64px;
   background: var(--nx-bg);

@@ -1,8 +1,8 @@
 // core 信号 → React 桥：useSyncExternalStore 适配。
 // core 信号文档明示支持该用法（subscribe 返回取消函数 + 快照引用稳定）。
 
-import { useCallback, useSyncExternalStore } from 'react'
 import type { ReadonlySignal } from '@363045841yyt/klinechart-core/reactivity'
+import { useCallback, useSyncExternalStore } from 'react'
 
 /**
  * 订阅一个 core 信号；信号未就绪（图表尚未挂载）时返回 fallback。

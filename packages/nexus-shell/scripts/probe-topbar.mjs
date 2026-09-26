@@ -36,7 +36,10 @@ async function main() {
   })
   page.on('pageerror', (error) => consoleErrors.push(`pageerror: ${error}`))
   await page.goto(URL, { waitUntil: 'domcontentloaded' })
-  check('启动：dev 钩子就绪', await waitFor(page, () => nx(page, 'Boolean(window.__nx && window.__nx.ctrl)')))
+  check(
+    '启动：dev 钩子就绪',
+    await waitFor(page, () => nx(page, 'Boolean(window.__nx && window.__nx.ctrl)')),
+  )
 
   // ── B2-02：周期分组下拉 ──
   const groupsCount = await page.locator('.nx-topbar__period optgroup').count()
@@ -75,7 +78,10 @@ async function main() {
   const symbolAfter = await nx(page, 'window.__nx.ctrl.symbols.peek()[0].symbol')
   check('B2-01：Enter 选中并切换品种', symbolAfter === 'MOCK-SH501', `symbol=${symbolAfter}`)
   const recentStored = await page.evaluate(() => localStorage.getItem('nexus.shell.recent-symbols'))
-  check('B2-01：最近使用写入 localStorage', recentStored !== null && recentStored.includes('MOCK-SH501'))
+  check(
+    'B2-01：最近使用写入 localStorage',
+    recentStored !== null && recentStored.includes('MOCK-SH501'),
+  )
   // 再次打开应显示最近使用分组
   await page.click('.nx-symbol-picker__trigger')
   const recentGroupVisible = await waitFor(page, () =>
@@ -92,7 +98,10 @@ async function main() {
   check('B2-03：图例行显示当前品种', legendSymbol === 'MOCK-SH501', `symbol=${legendSymbol}`)
   const legendPeriod = await page.locator('.nx-legend__period').textContent()
   check('B2-03：图例行显示周期', legendPeriod === '日线', `period=${legendPeriod}`)
-  const ohlcText = await page.locator('.nx-legend__ohlc').textContent().catch(() => '')
+  const ohlcText = await page
+    .locator('.nx-legend__ohlc')
+    .textContent()
+    .catch(() => '')
   check(
     'B2-03：图例 OHLC 行渲染',
     ohlcText !== null && ohlcText.includes('O') && ohlcText.includes('C'),

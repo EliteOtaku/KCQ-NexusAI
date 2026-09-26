@@ -47,13 +47,16 @@ async function chartPoint(page, x, y) {
 
 /** 原生设置颜色输入值并派发 input（须用原型 setter 绕过 React 值追踪，否则 onChange 不触发）。 */
 async function setColor(page, selector, value) {
-  await page.evaluate(({ selector, value }) => {
-    const input = document.querySelector(selector)
-    if (!(input instanceof HTMLInputElement)) throw new Error(`input not found: ${selector}`)
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
-    setter.call(input, value)
-    input.dispatchEvent(new Event('input', { bubbles: true }))
-  }, { selector, value })
+  await page.evaluate(
+    ({ selector, value }) => {
+      const input = document.querySelector(selector)
+      if (!(input instanceof HTMLInputElement)) throw new Error(`input not found: ${selector}`)
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+      setter.call(input, value)
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    },
+    { selector, value },
+  )
   await page.waitForTimeout(200)
 }
 
@@ -69,7 +72,10 @@ async function main() {
   await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 60_000 })
 
   // ── 基础启动 ──
-  check('启动：dev 钩子就绪', await waitFor(page, () => nx(page, 'Boolean(window.__nx && window.__nx.ctrl)')))
+  check(
+    '启动：dev 钩子就绪',
+    await waitFor(page, () => nx(page, 'Boolean(window.__nx && window.__nx.ctrl)')),
+  )
   const sampleCanvas = () =>
     page.evaluate(() => {
       const host = document.querySelector('.nx-chart-stage__host')
@@ -96,7 +102,10 @@ async function main() {
   // ── B1-02：趋势线两次点击绘制 ──
   await clickTool(page, '线条')
   await page.click('.nx-flyout button[aria-label="线段"]')
-  check('B1-02：工具切换为 trend-line', (await nx(page, 'window.__nx.ctrl.drawingTool.peek()')) === 'trend-line')
+  check(
+    'B1-02：工具切换为 trend-line',
+    (await nx(page, 'window.__nx.ctrl.drawingTool.peek()')) === 'trend-line',
+  )
   const p1 = await chartPoint(page, 500, 260)
   const p2 = await chartPoint(page, 760, 320)
   await page.mouse.click(p1.x, p1.y)
@@ -106,7 +115,10 @@ async function main() {
     (await nx(page, 'window.__nx.ctrl.drawings.peek().length')) === 1 &&
       (await nx(page, 'window.__nx.ctrl.selectedDrawingIds.peek().length')) === 1,
   )
-  check('B1-02：画完自动回光标', (await nx(page, 'window.__nx.ctrl.drawingTool.peek()')) === 'cursor')
+  check(
+    'B1-02：画完自动回光标',
+    (await nx(page, 'window.__nx.ctrl.drawingTool.peek()')) === 'cursor',
+  )
   const flybarVisible = await page.locator('.nx-flybar').isVisible()
   check('B1-06：属性浮条浮出', flybarVisible)
 
@@ -153,16 +165,21 @@ async function main() {
     (await nx(page, 'window.__nx.ctrl.selectedDrawingIds.peek().length')) === 2,
     `selected=${await nx(page, 'window.__nx.ctrl.selectedDrawingIds.peek().length')}`,
   )
-  const countText = await page.locator('.nx-flybar__count').textContent().catch(() => null)
-  check('B1-10：浮条显示已选数量', countText !== null && countText.includes('2'), `text=${countText}`)
+  const countText = await page
+    .locator('.nx-flybar__count')
+    .textContent()
+    .catch(() => null)
+  check(
+    'B1-10：浮条显示已选数量',
+    countText !== null && countText.includes('2'),
+    `text=${countText}`,
+  )
 
   // ── B1-10：批量改样式 + 批量删除 ──
   await setColor(page, '.nx-flybar input[type="color"]', '#00c853')
   const allColored = await page.evaluate(() => {
     const ctrl = window.__nx.ctrl
-    return ctrl.drawings
-      .peek()
-      .every((drawing) => drawing.style.stroke === '#00c853')
+    return ctrl.drawings.peek().every((drawing) => drawing.style.stroke === '#00c853')
   })
   check('B1-10：批量改色应用到全部选中', allColored)
   await page.keyboard.press('Delete')
@@ -216,14 +233,23 @@ async function main() {
   await page.mouse.down()
   await page.mouse.move(m2.x, m2.y, { steps: 8 })
   await page.mouse.up()
-  const measureText = await page.locator('.nx-measure__label').textContent().catch(() => null)
+  const measureText = await page
+    .locator('.nx-measure__label')
+    .textContent()
+    .catch(() => null)
   check(
     'B1-22：测量浮层显示读数',
     measureText !== null && measureText.includes('%'),
     `text=${measureText}`,
   )
   await page.mouse.click(m1.x, m1.y) // 再次点击清除
-  check('B1-22：点击清除测量', !(await page.locator('.nx-measure').isVisible().catch(() => false)))
+  check(
+    'B1-22：点击清除测量',
+    !(await page
+      .locator('.nx-measure')
+      .isVisible()
+      .catch(() => false)),
+  )
 
   // ── B1-01：光标拖拽移动图元 ──
   await page.evaluate(() => window.__nx.ctrl.clearDrawings())
@@ -239,7 +265,11 @@ async function main() {
   await page.mouse.up()
   await page.waitForTimeout(200)
   const priceAfter = await nx(page, 'window.__nx.ctrl.drawings.peek()[0].anchors[0].price')
-  check('B1-01：拖拽移动图元（锚点价格变化）', priceBefore !== priceAfter, `${priceBefore?.toFixed(2)} → ${priceAfter?.toFixed(2)}`)
+  check(
+    'B1-01：拖拽移动图元（锚点价格变化）',
+    priceBefore !== priceAfter,
+    `${priceBefore?.toFixed(2)} → ${priceAfter?.toFixed(2)}`,
+  )
 
   // ── B1-11：Shift 点选多选（归一化为 Ctrl 语义） ──
   await clickTool(page, '线条')
@@ -286,7 +316,10 @@ async function main() {
     (await nx(page, 'window.__nx.ctrl.drawings.peek()[0].kind')) === 'parallel-channel' &&
       (await nx(page, 'window.__nx.ctrl.drawings.peek()[0].anchors.length')) === 4,
   )
-  const hasOpacity = await page.locator('.nx-flybar input[type="range"]').isVisible().catch(() => false)
+  const hasOpacity = await page
+    .locator('.nx-flybar input[type="range"]')
+    .isVisible()
+    .catch(() => false)
   check('B1-07：通道显示填充不透明度控制（fillOpacity 键）', hasOpacity)
   if (hasOpacity) {
     await page.evaluate(() => {
@@ -298,7 +331,8 @@ async function main() {
     await page.waitForTimeout(200)
     check(
       'B1-07：不透明度写入样式',
-      Math.abs((await nx(page, 'window.__nx.ctrl.drawings.peek()[0].style.fillOpacity')) - 0.8) < 0.01,
+      Math.abs((await nx(page, 'window.__nx.ctrl.drawings.peek()[0].style.fillOpacity')) - 0.8) <
+        0.01,
     )
   }
   await page.keyboard.press('Delete')
@@ -403,13 +437,8 @@ async function main() {
   await page.click('.nx-dialog__actions .nx-btn--primary')
   await page.waitForTimeout(200)
   const tplStored = await page.evaluate(() => localStorage.getItem('nexus.drawing-templates'))
-  check(
-    'B1-24：保存为模板（localStorage）',
-    tplStored !== null && tplStored.includes('probe-tpl'),
-  )
-  const panelRow = await page
-    .locator('.nx-side-panel__name', { hasText: 'probe-tpl' })
-    .count()
+  check('B1-24：保存为模板（localStorage）', tplStored !== null && tplStored.includes('probe-tpl'))
+  const panelRow = await page.locator('.nx-side-panel__name', { hasText: 'probe-tpl' }).count()
   check('B1-27：模板面板列出模板', panelRow === 1)
 
   // 自动套用：删掉重画，颜色应为模板色
@@ -441,7 +470,11 @@ async function main() {
 
   // ── B1-20：收藏星标 ──
   await clickTool(page, '线条')
-  const starVisible = await page.locator('.nx-flyout__star').first().isVisible().catch(() => false)
+  const starVisible = await page
+    .locator('.nx-flyout__star')
+    .first()
+    .isVisible()
+    .catch(() => false)
   check('B1-21：flyout 展开渲染子工具', starVisible || true)
   await page.hover('.nx-flyout__item:first-child')
   await page.click('.nx-flyout__star')

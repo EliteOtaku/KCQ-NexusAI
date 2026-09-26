@@ -15,6 +15,7 @@ import '@363045841yyt/klinechart-core/dist/data/provider/sources/mock.js'
 import '@363045841yyt/klinechart-core/dist/data/provider/sources/tradingview.js'
 import './web-component'
 import { KLineChartElement } from './web-component'
+
 export { KLineChartElement }
 export default KLineChartElement
 

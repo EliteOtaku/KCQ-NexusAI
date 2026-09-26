@@ -2,14 +2,14 @@
 // 指针/滚轮事件经 ChartPointerBridge 改写后转发引擎。
 // 属性浮条与测量浮层是舞台内的覆盖层，不参与引擎 DOM。
 
-import { useEffect, useRef, useState, type RefObject } from 'react'
 import {
   createChartController,
   DrawingInteractionController,
 } from '@363045841yyt/klinechart-core/controllers'
-import { ChartPointerBridge } from '../shell/pointerBridge'
-import { useNexusShell } from '../shell/NexusShellContext'
+import { type RefObject, useEffect, useRef, useState } from 'react'
 import { SHELL_LABELS } from '../shell/labels'
+import { useNexusShell } from '../shell/NexusShellContext'
+import { ChartPointerBridge } from '../shell/pointerBridge'
 import { ChartContextMenu, type ContextMenuState } from './ChartContextMenu'
 import { DrawingStyleFlybar } from './DrawingStyleFlybar'
 import { LegendBar } from './LegendBar'
@@ -156,7 +156,9 @@ function MeasureOverlay({ hostRef }: { hostRef: RefObject<HTMLDivElement | null>
         style={{ left: width, top: height }}
       >
         {deltaText}
-        {bars !== null && <span className="nx-measure__bars">{SHELL_LABELS.measureBars(bars)}</span>}
+        {bars !== null && (
+          <span className="nx-measure__bars">{SHELL_LABELS.measureBars(bars)}</span>
+        )}
       </span>
     </div>
   )

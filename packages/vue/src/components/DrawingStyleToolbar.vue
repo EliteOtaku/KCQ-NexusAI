@@ -119,10 +119,14 @@
 
 <script setup lang="ts">
   import { DEFAULT_DRAWING_STROKE } from '@363045841yyt/klinechart-core'
-  import type { DrawingLabelPosition, DrawingObject, DrawingStyle } from '@363045841yyt/klinechart-core/controllers'
+  import type {
+    DrawingLabelPosition,
+    DrawingObject,
+    DrawingStyle,
+  } from '@363045841yyt/klinechart-core/controllers'
   import { computed, onMounted, onUnmounted } from 'vue'
-  import IconTablerAlignLeft from '~icons/tabler/align-left'
   import IconTablerAlignCenter from '~icons/tabler/align-center'
+  import IconTablerAlignLeft from '~icons/tabler/align-left'
   import IconTablerAlignRight from '~icons/tabler/align-right'
   import IconTablerLock from '~icons/tabler/lock'
   import IconTablerLockOpen from '~icons/tabler/lock-open'
@@ -170,7 +174,7 @@
   const SAVE_SENTINEL = '__save__'
 
   const templateOptions = computed(() => [
-    ...props.templates?.map((name) => ({ label: name, value: name })) ?? [],
+    ...(props.templates?.map((name) => ({ label: name, value: name })) ?? []),
     { label: '＋保存为模板', value: SAVE_SENTINEL },
   ])
 

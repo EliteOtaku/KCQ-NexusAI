@@ -488,13 +488,17 @@
 
   useClickOutside(
     () => [triggerRef.value, menuRef.value],
-    () => { openGroupId.value = null },
+    () => {
+      openGroupId.value = null
+    },
     { enabled: () => openGroupId.value !== null },
   )
 
   watch(openGroupId, (id, _previous, onCleanup) => {
     if (!id) return
-    const close = () => { openGroupId.value = null }
+    const close = () => {
+      openGroupId.value = null
+    }
     const onScroll = (event: Event) => {
       if (menuRef.value?.contains(event.target as Node)) return
       close()

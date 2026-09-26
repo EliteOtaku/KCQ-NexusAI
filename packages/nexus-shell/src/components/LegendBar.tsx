@@ -3,17 +3,17 @@
 // 行2+ = 主图指标行（值行与用户实例按序对齐）+ 副图指标行（引擎图例不覆盖副图，自建）。
 // 指标行 hover 出 眼睛/设置/删除：引擎无可见性 API，眼睛=移除并 stash（再点按 stash 恢复）。
 
-import { useState, type ChangeEvent } from 'react'
 import type {
   IndicatorDefinition,
   IndicatorInstance,
   IndicatorParamDef,
+  LegendTemplateContext,
 } from '@363045841yyt/klinechart-core/controllers'
-import type { LegendTemplateContext } from '@363045841yyt/klinechart-core/controllers'
-import { useNexusShell } from '../shell/NexusShellContext'
-import { useSignal } from '../shell/reactivity'
-import { periodLabel } from '../shell/periods'
+import { type ChangeEvent, useState } from 'react'
 import { SHELL_LABELS } from '../shell/labels'
+import { useNexusShell } from '../shell/NexusShellContext'
+import { periodLabel } from '../shell/periods'
+import { useSignal } from '../shell/reactivity'
 
 /** 图例信号空态兜底（稳定引用）。 */
 const NO_LEGEND: LegendTemplateContext | null = null
@@ -178,10 +178,7 @@ export function LegendBar() {
           )}
         </span>
         {editing && instance !== null && (
-          <ParamsEditor
-            instance={instance}
-            onDone={() => setEditingKey(null)}
-          />
+          <ParamsEditor instance={instance} onDone={() => setEditingKey(null)} />
         )}
       </div>
     )
@@ -270,13 +267,7 @@ export function LegendBar() {
 }
 
 /** 参数内联编辑器：按定义逐键渲染输入控件，确认经 updateIndicatorParams 写回。 */
-function ParamsEditor({
-  instance,
-  onDone,
-}: {
-  instance: IndicatorInstance
-  onDone: () => void
-}) {
+function ParamsEditor({ instance, onDone }: { instance: IndicatorInstance; onDone: () => void }) {
   const shell = useNexusShell()
   const definition = shell.ctrl?.catalog.find((item) => item.id === instance.definitionId)
   const [draft, setDraft] = useState<Record<string, unknown>>(() => {
@@ -298,7 +289,9 @@ function ParamsEditor({
         <input
           type="checkbox"
           checked={value === true}
-          onChange={(event: ChangeEvent<HTMLInputElement>) => setParam(param.key, event.target.checked)}
+          onChange={(event: ChangeEvent<HTMLInputElement>) =>
+            setParam(param.key, event.target.checked)
+          }
         />
       )
     }
@@ -310,7 +303,9 @@ function ParamsEditor({
           max={param.max}
           step={param.step}
           value={typeof value === 'number' ? value : Number(value ?? 0)}
-          onChange={(event: ChangeEvent<HTMLInputElement>) => setParam(param.key, Number(event.target.value))}
+          onChange={(event: ChangeEvent<HTMLInputElement>) =>
+            setParam(param.key, Number(event.target.value))
+          }
         />
       )
     }
@@ -319,7 +314,9 @@ function ParamsEditor({
         <input
           type="color"
           value={typeof value === 'string' ? value : '#2962ff'}
-          onChange={(event: ChangeEvent<HTMLInputElement>) => setParam(param.key, event.target.value)}
+          onChange={(event: ChangeEvent<HTMLInputElement>) =>
+            setParam(param.key, event.target.value)
+          }
         />
       )
     }
@@ -327,7 +324,9 @@ function ParamsEditor({
       return (
         <select
           value={typeof value === 'string' ? value : ''}
-          onChange={(event: ChangeEvent<HTMLSelectElement>) => setParam(param.key, event.target.value)}
+          onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+            setParam(param.key, event.target.value)
+          }
         >
           {param.options?.map((option) => (
             <option key={option.value} value={option.value}>

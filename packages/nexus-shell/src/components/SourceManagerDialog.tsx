@@ -2,13 +2,13 @@
 // 注册表驱动列出全部行情源：拨测状态 / 聚合搜索开关 / 地址与端口覆盖 / 设为当前源。
 // 开关与地址写回 core 注册表运行时配置（enabled/baseUrl），持久化由消费方自行处理。
 
-import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  marketDataProviderRegistry,
   type MarketDataProvider,
+  marketDataProviderRegistry,
 } from '@363045841yyt/klinechart-core/controllers'
-import { useNexusShell } from '../shell/NexusShellContext'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { SHELL_LABELS } from '../shell/labels'
+import { useNexusShell } from '../shell/NexusShellContext'
 
 /** 拨测超时（毫秒）。 */
 const PROBE_TIMEOUT_MS = 5000
@@ -211,7 +211,9 @@ export function SourceManagerDialog({ onClose }: { onClose: () => void }) {
                     <span className="nx-source-item__description">
                       {provider.source.description ?? ''}
                     </span>
-                    <span className={`nx-source-item__status is-${probes[id]?.status ?? 'checking'}`}>
+                    <span
+                      className={`nx-source-item__status is-${probes[id]?.status ?? 'checking'}`}
+                    >
                       {statusText(id)}
                     </span>
                   </div>

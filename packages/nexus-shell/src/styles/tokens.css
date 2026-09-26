@@ -5,7 +5,7 @@
  */
 
 :root,
-[data-theme='dark'] {
+[data-theme="dark"] {
   --nx-bg: #131722;
   --nx-bg-elevated: #1e222d;
   --nx-bg-hover: #2a2e39;
@@ -20,7 +20,7 @@
   --nx-down: #26a69a;
 }
 
-[data-theme='light'] {
+[data-theme="light"] {
   --nx-bg: #ffffff;
   --nx-bg-elevated: #f0f3fa;
   --nx-bg-hover: #e0e3eb;

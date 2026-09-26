@@ -57,7 +57,13 @@ export const SHELL_TOOL_CATALOG: ReadonlyArray<ShellToolDef> = [
     group: 'channels',
     anchorCount: 3,
   },
-  { id: 'fib-retracement', label: '斐波那契回撤', icon: 'chart-dots-3', group: 'annotations', anchorCount: 2 },
+  {
+    id: 'fib-retracement',
+    label: '斐波那契回撤',
+    icon: 'chart-dots-3',
+    group: 'annotations',
+    anchorCount: 2,
+  },
   { id: 'rectangle', label: '矩形', icon: 'shape', group: 'annotations', anchorCount: 2 },
   { id: 'arrow', label: '箭头', icon: 'arrow-up-right', group: 'annotations', anchorCount: 2 },
 ]

@@ -49,7 +49,10 @@ async function main() {
   })
   page.on('pageerror', (error) => consoleErrors.push(`pageerror: ${error}`))
   await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 60_000 })
-  check('启动：dev 钩子就绪', await waitFor(page, () => nx(page, 'Boolean(window.__nx && window.__nx.ctrl)')))
+  check(
+    '启动：dev 钩子就绪',
+    await waitFor(page, () => nx(page, 'Boolean(window.__nx && window.__nx.ctrl)')),
+  )
   // 等首帧绘制完成，图例上下文才有数据。
   const canvasPainted = () =>
     page.evaluate(() => {
@@ -76,15 +79,29 @@ async function main() {
   check('B2-03：图例品种', legendSymbol === 'MOCK-SZ300', `symbol=${legendSymbol}`)
   const legendPeriod = await page.locator('.nx-legend__period').textContent()
   check('B2-03：图例周期', legendPeriod === '日线', `period=${legendPeriod}`)
-  const ohlcText = (await page.locator('.nx-legend__ohlc').textContent().catch(() => '')) ?? ''
-  check('B2-03：OHLC 行渲染', ohlcText.includes('O') && ohlcText.includes('C'), `text=${ohlcText.slice(0, 48)}`)
+  const ohlcText =
+    (await page
+      .locator('.nx-legend__ohlc')
+      .textContent()
+      .catch(() => '')) ?? ''
+  check(
+    'B2-03：OHLC 行渲染',
+    ohlcText.includes('O') && ohlcText.includes('C'),
+    `text=${ohlcText.slice(0, 48)}`,
+  )
 
   // ── B2-04：指标行 + 眼睛/设置/删除 ──
   const mainInstances = () =>
-    nx(page, 'window.__nx.ctrl.indicators.peek().filter(i => i.definitionId === "MA" && i.id.indexOf("mode:") !== 0).length')
+    nx(
+      page,
+      'window.__nx.ctrl.indicators.peek().filter(i => i.definitionId === "MA" && i.id.indexOf("mode:") !== 0).length',
+    )
   const maRow = page.locator('.nx-legend__row', { hasText: 'MA' }).first()
   check('B2-04：主图指标行渲染', (await mainInstances()) === 1)
-  check('B2-04：副图指标行渲染', (await page.locator('.nx-legend__row', { hasText: 'VOL' }).count()) === 1)
+  check(
+    'B2-04：副图指标行渲染',
+    (await page.locator('.nx-legend__row', { hasText: 'VOL' }).count()) === 1,
+  )
   await maRow.hover()
   await maRow.locator('[title="隐藏指标"]').click()
   await page.waitForTimeout(200)
@@ -118,21 +135,28 @@ async function main() {
     page,
     'JSON.stringify(window.__nx.ctrl.indicators.peek().find(i => i.definitionId === "HMA").params)',
   )
-  check('B2-04：参数写回（含 9）', hmaParams !== null && hmaParams.includes('9'), `params=${hmaParams}`)
+  check(
+    'B2-04：参数写回（含 9）',
+    hmaParams !== null && hmaParams.includes('9'),
+    `params=${hmaParams}`,
+  )
   await hmaRow.hover()
   await hmaRow.locator('[title="删除指标"]').click()
   await page.waitForTimeout(200)
   check(
     'B2-04：HMA 删除（实例与行均移除）',
-    (await nx(page, 'window.__nx.ctrl.indicators.peek().filter(i => i.definitionId === "HMA").length')) === 0 &&
-      (await page.locator('.nx-legend__row', { hasText: 'HMA' }).count()) === 0,
+    (await nx(
+      page,
+      'window.__nx.ctrl.indicators.peek().filter(i => i.definitionId === "HMA").length',
+    )) === 0 && (await page.locator('.nx-legend__row', { hasText: 'HMA' }).count()) === 0,
   )
   await maRow.hover()
   await maRow.locator('[title="删除指标"]').click()
   await page.waitForTimeout(200)
   check(
     'B2-04：删除指标（实例与行均移除）',
-    (await mainInstances()) === 0 && (await page.locator('.nx-legend__row', { hasText: 'MA' }).count()) === 0,
+    (await mainInstances()) === 0 &&
+      (await page.locator('.nx-legend__row', { hasText: 'MA' }).count()) === 0,
   )
   await page.screenshot({ path: 'temp/shots/b234-legend.png' })
 
@@ -146,7 +170,10 @@ async function main() {
   check('B2-06：命中图元菜单弹出', await page.locator('.nx-ctx-menu').isVisible())
   await page.click('.nx-ctx-menu__item', { hasText: '样式' })
   await page.waitForTimeout(150)
-  check('B2-06：样式项选中图元（浮条唤起）', (await nx(page, 'window.__nx.ctrl.selectedDrawingIds.peek().length')) === 1)
+  check(
+    'B2-06：样式项选中图元（浮条唤起）',
+    (await nx(page, 'window.__nx.ctrl.selectedDrawingIds.peek().length')) === 1,
+  )
   await page.mouse.click(hPoint.x, hPoint.y, { button: 'right' })
   await page.locator('.nx-ctx-menu__item', { hasText: '锁定' }).first().click()
   await page.waitForTimeout(150)
@@ -154,10 +181,16 @@ async function main() {
   check('B2-06：锁定写入 locked', lockedNow === true, `locked=${lockedNow}`)
   const blank = await chartPoint(page, 200, 550)
   await page.mouse.click(blank.x, blank.y, { button: 'right' })
-  const bgMenuText = (await page.locator('.nx-ctx-menu').textContent().catch(() => '')) ?? ''
+  const bgMenuText =
+    (await page
+      .locator('.nx-ctx-menu')
+      .textContent()
+      .catch(() => '')) ?? ''
   check(
     'B2-06：背景菜单（主题/周期/添加指标）',
-    bgMenuText.includes('切换主题') && bgMenuText.includes('周期') && bgMenuText.includes('添加指标'),
+    bgMenuText.includes('切换主题') &&
+      bgMenuText.includes('周期') &&
+      bgMenuText.includes('添加指标'),
   )
   await page.keyboard.press('Escape')
   await page.waitForTimeout(150)
@@ -167,12 +200,18 @@ async function main() {
   await page.locator('.nx-ctx-menu__item--sub').filter({ hasText: '周期' }).first().hover()
   await page.locator('.nx-ctx-menu__submenu .nx-ctx-menu__item', { hasText: '1小时' }).click()
   await page.waitForTimeout(500)
-  check('B2-06：周期子菜单切换 60min', (await nx(page, 'window.__nx.ctrl.symbols.peek()[0].period')) === '60min')
+  check(
+    'B2-06：周期子菜单切换 60min',
+    (await nx(page, 'window.__nx.ctrl.symbols.peek()[0].period')) === '60min',
+  )
   await page.mouse.click(blank.x, blank.y, { button: 'right' })
   await page.locator('.nx-ctx-menu__item--sub').filter({ hasText: '周期' }).first().hover()
   await page.locator('.nx-ctx-menu__submenu .nx-ctx-menu__item', { hasText: '日线' }).click()
   await page.waitForTimeout(500)
-  check('B2-06：周期子菜单切回日线', (await nx(page, 'window.__nx.ctrl.symbols.peek()[0].period')) === 'daily')
+  check(
+    'B2-06：周期子菜单切回日线',
+    (await nx(page, 'window.__nx.ctrl.symbols.peek()[0].period')) === 'daily',
+  )
   // 添加指标子菜单：实例数 +1，随后移除清理
   const beforeAdd = await nx(page, 'window.__nx.ctrl.indicators.peek().length')
   await page.mouse.click(blank.x, blank.y, { button: 'right' })
@@ -181,15 +220,26 @@ async function main() {
   await addSub.locator('.nx-ctx-menu__submenu .nx-ctx-menu__item', { hasText: 'HMA' }).click()
   await page.waitForTimeout(200)
   const afterAdd = await nx(page, 'window.__nx.ctrl.indicators.peek().length')
-  check('B2-06：添加指标子菜单（实例 +1）', afterAdd === beforeAdd + 1, `${beforeAdd} → ${afterAdd}`)
-  await page.evaluate(`window.__nx.ctrl.removeIndicator(window.__nx.ctrl.indicators.peek()[window.__nx.ctrl.indicators.peek().length - 1].id)`)
+  check(
+    'B2-06：添加指标子菜单（实例 +1）',
+    afterAdd === beforeAdd + 1,
+    `${beforeAdd} → ${afterAdd}`,
+  )
+  await page.evaluate(
+    `window.__nx.ctrl.removeIndicator(window.__nx.ctrl.indicators.peek()[window.__nx.ctrl.indicators.peek().length - 1].id)`,
+  )
 
   // ── B3-01：自选列表 ──
-  const watchRows = await page.locator('.nx-side-panel__section--watchlist .nx-watchlist__row').count()
+  const watchRows = await page
+    .locator('.nx-side-panel__section--watchlist .nx-watchlist__row')
+    .count()
   check('B3-01：自选列表渲染品种', watchRows === 6, `rows=${watchRows}`)
   await page.locator('.nx-watchlist__row', { hasText: 'MOCK-TECH' }).click()
   await page.waitForTimeout(500)
-  check('B3-01：点选切品种', (await nx(page, 'window.__nx.ctrl.symbols.peek()[0].symbol')) === 'MOCK-TECH')
+  check(
+    'B3-01：点选切品种',
+    (await nx(page, 'window.__nx.ctrl.symbols.peek()[0].symbol')) === 'MOCK-TECH',
+  )
   check(
     'B3-01：当前品种高亮',
     (await page.locator('.nx-watchlist__row--active', { hasText: 'MOCK-TECH' }).count()) === 1,
@@ -223,20 +273,35 @@ async function main() {
   const objectRows = page.locator('.nx-side-panel__section--objects .nx-object__row')
   check('B3-03：对象树列出图元', (await objectRows.count()) === 1)
   await objectRows.first().click()
-  check('B3-03：行点击选中图元', (await nx(page, 'window.__nx.ctrl.selectedDrawingIds.peek().length')) === 1)
+  check(
+    'B3-03：行点击选中图元',
+    (await nx(page, 'window.__nx.ctrl.selectedDrawingIds.peek().length')) === 1,
+  )
   // 上游 f8a015d9（#205）locked 语义收窄为「只冻结几何拖动与删除」：
   // 锁定态下 visible/style 等写入直接放行（显隐免解锁）；删除仍被冻结，须先解锁。
   // 探针图元经 B2 系列创建后即为锁定态（按钮显示「解锁」）。
-  check('B3-03：图元初始锁定态', (await nx(page, 'window.__nx.ctrl.drawings.peek()[0].locked')) === true)
+  check(
+    'B3-03：图元初始锁定态',
+    (await nx(page, 'window.__nx.ctrl.drawings.peek()[0].locked')) === true,
+  )
   await page.click('.nx-side-panel__section--objects [title="隐藏"]')
   await page.waitForTimeout(150)
-  check('B3-03：锁定态显隐切换（visible=false）', (await nx(page, 'window.__nx.ctrl.drawings.peek()[0].visible')) === false)
+  check(
+    'B3-03：锁定态显隐切换（visible=false）',
+    (await nx(page, 'window.__nx.ctrl.drawings.peek()[0].visible')) === false,
+  )
   await page.click('.nx-side-panel__section--objects [title="显示"]')
   await page.waitForTimeout(150)
-  check('B3-03：锁定态显隐恢复（visible=true）', (await nx(page, 'window.__nx.ctrl.drawings.peek()[0].visible')) === true)
+  check(
+    'B3-03：锁定态显隐恢复（visible=true）',
+    (await nx(page, 'window.__nx.ctrl.drawings.peek()[0].visible')) === true,
+  )
   await page.click('.nx-side-panel__section--objects [title="删除"]')
   await page.waitForTimeout(150)
-  check('B3-03：锁定态删除被冻结', (await nx(page, 'window.__nx.ctrl.drawings.peek().length')) === 1)
+  check(
+    'B3-03：锁定态删除被冻结',
+    (await nx(page, 'window.__nx.ctrl.drawings.peek().length')) === 1,
+  )
   await page.click('.nx-side-panel__section--objects [title="解锁"]')
   await page.waitForTimeout(150)
   check('B3-03：解锁切换', (await nx(page, 'window.__nx.ctrl.drawings.peek()[0].locked')) === false)
@@ -254,13 +319,23 @@ async function main() {
   )
   await page.keyboard.press('Enter')
   await page.waitForTimeout(500)
-  check('B4-01：Enter 选中 BOND', (await nx(page, 'window.__nx.ctrl.symbols.peek()[0].symbol')) === 'MOCK-BOND')
+  check(
+    'B4-01：Enter 选中 BOND',
+    (await nx(page, 'window.__nx.ctrl.symbols.peek()[0].symbol')) === 'MOCK-BOND',
+  )
 
   // ── B4-02：数字键切周期 ──
   await page.keyboard.press('4')
   await page.waitForTimeout(800)
-  const periodDump4 = await nx(page, 'window.__nx.ctrl.symbols.peek()[0].period + "|" + window.__nx.ctrl.drawingTool.peek()')
-  check('B4-02：数字 4 → 30min（第 4 个周期）', periodDump4 === '30min|cursor', `state=${periodDump4}`)
+  const periodDump4 = await nx(
+    page,
+    'window.__nx.ctrl.symbols.peek()[0].period + "|" + window.__nx.ctrl.drawingTool.peek()',
+  )
+  check(
+    'B4-02：数字 4 → 30min（第 4 个周期）',
+    periodDump4 === '30min|cursor',
+    `state=${periodDump4}`,
+  )
   await page.keyboard.press('7')
   await page.waitForTimeout(800)
   const periodDump7 = await nx(page, 'window.__nx.ctrl.symbols.peek()[0].period')
@@ -279,11 +354,20 @@ async function main() {
   const nudgePoint = await chartPoint(page, 520, 300)
   await page.mouse.click(nudgePoint.x, nudgePoint.y)
   await page.waitForTimeout(150)
-  const selPriceExpr = 'window.__nx.ctrl.drawings.peek().find(d => d.id === window.__nx.ctrl.selectedDrawingIds.peek()[0]).anchors[0].price'
+  const selPriceExpr =
+    'window.__nx.ctrl.drawings.peek().find(d => d.id === window.__nx.ctrl.selectedDrawingIds.peek()[0]).anchors[0].price'
   const priceBefore = await nx(page, selPriceExpr)
   const idsNow = await nx(page, 'window.__nx.ctrl.selectedDrawingIds.peek().length')
   const tickNow = await nx(page, 'window.__nx.ctrl.symbols.peek()[0].symbol')
-  const tick = { 'MOCK-SZ300': 0.2, 'MOCK-SH501': 0.2, 'MOCK-CSI500': 0.2, 'MOCK-TECH': 0.01, 'MOCK-ENERGY': 0.01, 'MOCK-BOND': 0.001 }[tickNow] ?? 0.01
+  const tick =
+    {
+      'MOCK-SZ300': 0.2,
+      'MOCK-SH501': 0.2,
+      'MOCK-CSI500': 0.2,
+      'MOCK-TECH': 0.01,
+      'MOCK-ENERGY': 0.01,
+      'MOCK-BOND': 0.001,
+    }[tickNow] ?? 0.01
   await page.keyboard.press('ArrowUp')
   await page.waitForTimeout(150)
   const priceUp = await nx(page, selPriceExpr)
@@ -297,7 +381,11 @@ async function main() {
   await page.waitForTimeout(150)
   const priceDown = await nx(page, selPriceExpr)
   const expectedDown = Math.round((priceUp - tick) * 1000) / 1000
-  check('B4-04：↓ 回落一个 tick', priceDown === expectedDown, `${priceUp} → ${priceDown} (期望 ${expectedDown})`)
+  check(
+    'B4-04：↓ 回落一个 tick',
+    priceDown === expectedDown,
+    `${priceUp} → ${priceDown} (期望 ${expectedDown})`,
+  )
 
   // ── B4-05：面板折叠持久化 ──
   await page.click('.nx-side-panel__section--templates .nx-side-panel__title-btn')
@@ -307,7 +395,10 @@ async function main() {
     (await page.locator('.nx-side-panel__section--templates .nx-side-panel__row').count()) === 0,
   )
   const panelStored = await page.evaluate(() => localStorage.getItem('nexus.panel'))
-  check('B4-05：折叠状态写入 nexus.panel', panelStored !== null && panelStored.includes('"templates":false'))
+  check(
+    'B4-05：折叠状态写入 nexus.panel',
+    panelStored !== null && panelStored.includes('"templates":false'),
+  )
   await page.click('.nx-side-panel__section--templates .nx-side-panel__title-btn')
   await page.waitForTimeout(150)
   check(

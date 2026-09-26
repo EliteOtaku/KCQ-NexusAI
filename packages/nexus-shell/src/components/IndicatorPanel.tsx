@@ -2,11 +2,14 @@
 // 切换即 addIndicator/removeIndicator（真正接线，非本地状态）。
 // 外壳（分区标题/折叠）由 PanelSection 提供。
 
+import type {
+  IndicatorDefinition,
+  IndicatorInstance,
+} from '@363045841yyt/klinechart-core/controllers'
 import { useMemo } from 'react'
-import type { IndicatorDefinition, IndicatorInstance } from '@363045841yyt/klinechart-core/controllers'
+import { SHELL_LABELS } from '../shell/labels'
 import { useNexusShell } from '../shell/NexusShellContext'
 import { useSignal } from '../shell/reactivity'
-import { SHELL_LABELS } from '../shell/labels'
 
 /** 指标实例空数组兜底（稳定引用）。 */
 const EMPTY_INSTANCES: ReadonlyArray<IndicatorInstance> = []
@@ -49,7 +52,10 @@ export function IndicatorPanel() {
     <>
       {[...grouped.main, ...grouped.sub].map((definition) => (
         <label key={definition.id} className="nx-side-panel__row">
-          <span className="nx-side-panel__indicator-name" title={definition.description ?? definition.label}>
+          <span
+            className="nx-side-panel__indicator-name"
+            title={definition.description ?? definition.label}
+          >
             {definition.label}
           </span>
           <input

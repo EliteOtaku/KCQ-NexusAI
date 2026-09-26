@@ -1,12 +1,12 @@
 // 绘图属性浮条：选中图元即浮出（图表顶部居中），提供颜色/线宽/线型/填充/
 // 锁定/模板/删除控制；多选时按字段交集显示可控项、按值一致性显示混合态。
 
-import { useMemo, useState, type ChangeEvent } from 'react'
 import type { DrawingStyle } from '@363045841yyt/klinechart-core/plugin'
-import { useNexusShell } from '../shell/NexusShellContext'
+import { type ChangeEvent, useMemo, useState } from 'react'
 import { listTemplates, markTemplateUsed, saveTemplate } from '../shell/drawingTemplates'
-import { SHELL_LABELS } from '../shell/labels'
 import { ToolIcon } from '../shell/icons'
+import { SHELL_LABELS } from '../shell/labels'
+import { useNexusShell } from '../shell/NexusShellContext'
 
 /** 可控样式字段名。 */
 type FlybarStyleKey = keyof DrawingStyle
@@ -123,9 +123,7 @@ export function DrawingStyleFlybar() {
         <select
           className="nx-flybar__select"
           title={SHELL_LABELS.flybarStyleTitle}
-          value={
-            isMixed('strokeStyle') || first.strokeStyle === undefined ? '' : first.strokeStyle
-          }
+          value={isMixed('strokeStyle') || first.strokeStyle === undefined ? '' : first.strokeStyle}
           onChange={onStyleChange}
         >
           {(isMixed('strokeStyle') || first.strokeStyle === undefined) && (
@@ -171,7 +169,9 @@ export function DrawingStyleFlybar() {
       )}
 
       {selectedDrawings.length > 1 && (
-        <span className="nx-flybar__count">{SHELL_LABELS.flybarSelectedCount(selectedDrawings.length)}</span>
+        <span className="nx-flybar__count">
+          {SHELL_LABELS.flybarSelectedCount(selectedDrawings.length)}
+        </span>
       )}
 
       {sameKind && templates.length > 0 && (

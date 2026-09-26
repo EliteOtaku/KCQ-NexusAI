@@ -2,7 +2,7 @@
 // 行为对齐 Vue 版模板系统（useDrawingTemplates.ts），键空间按 fork 规约走 nexus.*。
 
 import type { DrawingStyle } from '@363045841yyt/klinechart-core/plugin'
-import { readJson, writeJson, STORAGE_KEYS } from './storage'
+import { readJson, STORAGE_KEYS, writeJson } from './storage'
 
 /** 模板清单条目。 */
 export interface DrawingTemplateRecord {

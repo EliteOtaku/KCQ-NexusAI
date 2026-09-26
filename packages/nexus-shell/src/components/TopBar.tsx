@@ -1,13 +1,13 @@
 // 顶栏：品牌 + 品种搜索器 + 分组周期下拉 + 主题切换。
 // 状态全部经壳上下文读写（批2 数据接线完成）。
 
+import type { ChangeEvent } from 'react'
 import { useState } from 'react'
+import { SHELL_LABELS } from '../shell/labels'
 import { useNexusShell } from '../shell/NexusShellContext'
 import { PERIOD_GROUPS } from '../shell/periods'
-import { SHELL_LABELS } from '../shell/labels'
 import { SettingsDialog } from './SettingsDialog'
 import { SymbolPicker } from './SymbolPicker'
-import type { ChangeEvent } from 'react'
 
 /** 壳顶栏组件。 */
 export function TopBar() {

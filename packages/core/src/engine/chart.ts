@@ -10,7 +10,6 @@
  * 不是绘制管线的一部分。绘制由 ChartRenderer 完成，Chart 仅负责代理调用并维护 runtimeProjection（批量投影）屏障。
  */
 
-import type { BarAggregation } from '../data/provider/types.js'
 import {
   type CustomDataSource,
   FIVE_DAY_TIME_SHARE_PERIOD,
@@ -23,6 +22,7 @@ import { resolveMarketDataCacheMaxBytes } from '../data/buffer/marketDataPolicy.
 import { AUTO_SOURCE_ID } from '../data/buffer/seriesRepository.js'
 import { lookupInstrumentsBySymbol } from '../data/provider/instrumentSearch.js'
 import { marketDataProviderRegistry } from '../data/provider/registry.js'
+import type { BarAggregation } from '../data/provider/types.js'
 import { createAlertController } from '../features/alerts/impl/createAlertController.js'
 import {
   createVolumeLookbacks,

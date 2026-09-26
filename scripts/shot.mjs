@@ -1,14 +1,14 @@
 #!/usr/bin/env node
+
 /**
  * shot.mjs — nexus-shell 截图工具（playwright-core + 系统 Chrome，无浏览器下载）。
  * 用法：node scripts/shot.mjs <url> <out.png> [--wait 4000]
  * 交互式场景截图请在 temp/ 下编写临时脚本复用本文件的 launchBrowser()。
  */
 
-import { chromium } from 'playwright-core'
-import { existsSync } from 'node:fs'
-import { mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
+import { chromium } from 'playwright-core'
 
 /** 系统 Chrome 候选路径（Windows 常规安装位置）。 */
 const CHROME_CANDIDATES = [

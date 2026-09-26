@@ -81,7 +81,17 @@ export function startStubMt5Server(port = 8090) {
           capabilities: {
             assetClasses: ['forex'],
             bars: {
-              periods: ['1min', '5min', '15min', '30min', '60min', '4h', 'daily', 'weekly', 'monthly'],
+              periods: [
+                '1min',
+                '5min',
+                '15min',
+                '30min',
+                '60min',
+                '4h',
+                'daily',
+                'weekly',
+                'monthly',
+              ],
               adjustments: ['none'],
             },
           },
@@ -141,7 +151,9 @@ export function startStubMt5Server(port = 8090) {
       const bars = buildBars()
       const last = bars[bars.length - 1]
       // 快照：尾部两根
-      res.write(`id: 1\ndata: ${JSON.stringify({ type: 'snapshot', symbol: 'XAUUSD', period: url.searchParams.get('period'), bars: bars.slice(-2) })}\n\n`)
+      res.write(
+        `id: 1\ndata: ${JSON.stringify({ type: 'snapshot', symbol: 'XAUUSD', period: url.searchParams.get('period'), bars: bars.slice(-2) })}\n\n`,
+      )
       // 1.2s 后推 forming 更新（close 改 2600.5，探针据此断言 updateBars 生效）
       const timer = setTimeout(() => {
         state.lastFormingSent = true
@@ -158,7 +170,10 @@ export function startStubMt5Server(port = 8090) {
       return
     }
 
-    send({ error: { code: 'INVALID_REQUEST', message: `no route: ${req.method} ${url.pathname}` } }, 404)
+    send(
+      { error: { code: 'INVALID_REQUEST', message: `no route: ${req.method} ${url.pathname}` } },
+      404,
+    )
   })
 
   return new Promise((resolve) => {

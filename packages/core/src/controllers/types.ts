@@ -10,9 +10,9 @@
 
 import type {
   AssetClass,
+  BarAggregation,
   InstrumentCapabilities,
   InstrumentDescriptor,
-  BarAggregation,
 } from '../data/provider/types.js'
 import type { InteractionSnapshot } from '../engine/chart.js'
 import type { PaneSpec } from '../engine/chartTypes.js'

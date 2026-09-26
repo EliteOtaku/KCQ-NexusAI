@@ -1,8 +1,8 @@
 // 快捷键表浮层（B4-03）：静态清单数据 + Esc/点击遮罩关闭；可见性由壳上下文驱动。
 
 import { useEffect } from 'react'
-import { useNexusShell } from '../shell/NexusShellContext'
 import { SHELL_LABELS } from '../shell/labels'
+import { useNexusShell } from '../shell/NexusShellContext'
 
 /** 快捷键清单（模块级静态数据）。 */
 const SHORTCUT_ROWS: ReadonlyArray<{ keys: string; action: string }> = [

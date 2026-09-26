@@ -1,8 +1,8 @@
 // 右栏折叠分区（B4-05 面板开关）：标题行点击折叠/展开，状态持久化于 nexus.panel。
 // 分区带稳定修饰类（--{key}），探针/样式不依赖 DOM 顺序。
 
-import { useEffect, useState, type ReactNode } from 'react'
-import { readJson, writeJson, STORAGE_KEYS } from '../shell/storage'
+import { type ReactNode, useEffect, useState } from 'react'
+import { readJson, STORAGE_KEYS, writeJson } from '../shell/storage'
 
 type PanelSections = Record<string, boolean>
 

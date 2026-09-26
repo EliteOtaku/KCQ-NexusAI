@@ -3,15 +3,10 @@
 // 磁吸三态循环 + 保持绘图模式 + 缩放。
 
 import { useEffect, useRef, useState } from 'react'
-import { useNexusShell } from '../shell/NexusShellContext'
-import {
-  SHELL_TOOL_CATALOG,
-  TOOL_GROUPS,
-  findTool,
-  type ShellToolDef,
-} from '../shell/drawingTools'
-import { SHELL_LABELS } from '../shell/labels'
+import { findTool, SHELL_TOOL_CATALOG, type ShellToolDef, TOOL_GROUPS } from '../shell/drawingTools'
 import { ToolIcon } from '../shell/icons'
+import { SHELL_LABELS } from '../shell/labels'
+import { useNexusShell } from '../shell/NexusShellContext'
 
 /** 左工具条组件。 */
 export function DrawingToolbar() {
@@ -117,7 +112,9 @@ export function DrawingToolbar() {
                       <button
                         type="button"
                         className="nx-flyout__star"
-                        title={starred ? SHELL_LABELS.unfavoriteToggle : SHELL_LABELS.favoriteToggle}
+                        title={
+                          starred ? SHELL_LABELS.unfavoriteToggle : SHELL_LABELS.favoriteToggle
+                        }
                         aria-label={
                           starred ? SHELL_LABELS.unfavoriteToggle : SHELL_LABELS.favoriteToggle
                         }

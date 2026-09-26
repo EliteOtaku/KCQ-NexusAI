@@ -3,9 +3,9 @@
 // 定位以选中高亮实现；滚动定位待引擎补 API（见 backlog）。
 // 外壳（分区标题/折叠）由 PanelSection 提供。
 
-import { useNexusShell } from '../shell/NexusShellContext'
 import { kindToolLabel } from '../shell/drawingTools'
 import { SHELL_LABELS } from '../shell/labels'
+import { useNexusShell } from '../shell/NexusShellContext'
 
 /** 对象树面板组件。 */
 export function ObjectTreePanel() {
@@ -38,7 +38,9 @@ export function ObjectTreePanel() {
               <button
                 type="button"
                 className="nx-object__action"
-                title={drawing.visible ? SHELL_LABELS.objectHideTitle : SHELL_LABELS.objectShowTitle}
+                title={
+                  drawing.visible ? SHELL_LABELS.objectHideTitle : SHELL_LABELS.objectShowTitle
+                }
                 onClick={(event) => {
                   event.stopPropagation()
                   ctrl?.updateDrawing({ ...drawing, visible: !drawing.visible })

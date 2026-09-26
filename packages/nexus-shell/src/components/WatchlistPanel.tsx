@@ -1,8 +1,8 @@
 // 自选列表（B3-01）：mock 品种目录 + 点选切品种 + 当前品种高亮。
 // 外壳（分区标题/折叠）由 PanelSection 提供。
 
-import { useNexusShell } from '../shell/NexusShellContext'
 import { MOCK_SYMBOLS } from '../shell/mockData'
+import { useNexusShell } from '../shell/NexusShellContext'
 
 /** 自选面板组件。 */
 export function WatchlistPanel() {

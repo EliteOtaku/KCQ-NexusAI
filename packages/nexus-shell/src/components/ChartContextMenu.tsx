@@ -2,9 +2,9 @@
 // 命中判定用引擎 hitTestAt（与点选同口径）；点击菜单外部或 Esc 关闭。
 
 import { useEffect, useRef } from 'react'
+import { SHELL_LABELS } from '../shell/labels'
 import { useNexusShell } from '../shell/NexusShellContext'
 import { ALL_PERIODS } from '../shell/periods'
-import { SHELL_LABELS } from '../shell/labels'
 
 /** 菜单会话状态：drawing 为 null 表示背景菜单。 */
 export interface ContextMenuState {
@@ -15,7 +15,13 @@ export interface ContextMenuState {
 }
 
 /** 右键菜单组件。 */
-export function ChartContextMenu({ state, onClose }: { state: ContextMenuState; onClose: () => void }) {
+export function ChartContextMenu({
+  state,
+  onClose,
+}: {
+  state: ContextMenuState
+  onClose: () => void
+}) {
   const shell = useNexusShell()
   const rootRef = useRef<HTMLDivElement>(null)
 
@@ -44,21 +50,14 @@ export function ChartContextMenu({ state, onClose }: { state: ContextMenuState; 
   const ctrl = shell.ctrl
 
   return (
-    <div
-      ref={rootRef}
-      className="nx-ctx-menu"
-      role="menu"
-      style={{ left: state.x, top: state.y }}
-    >
+    <div ref={rootRef} className="nx-ctx-menu" role="menu" style={{ left: state.x, top: state.y }}>
       {state.drawing !== null ? (
         <>
           <button
             type="button"
             className="nx-ctx-menu__item"
             role="menuitem"
-            onClick={() =>
-              run(() => shell.ctrl?.setSelectedDrawingIds([state.drawing!.id]))
-            }
+            onClick={() => run(() => shell.ctrl?.setSelectedDrawingIds([state.drawing!.id]))}
           >
             {SHELL_LABELS.ctxStyleTitle}
           </button>

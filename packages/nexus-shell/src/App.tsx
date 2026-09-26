@@ -10,8 +10,8 @@ import { ShortcutsOverlay } from './components/ShortcutsOverlay'
 import { TemplatePanel } from './components/TemplatePanel'
 import { TopBar } from './components/TopBar'
 import { WatchlistPanel } from './components/WatchlistPanel'
-import { NexusShellProvider, useNexusShell } from './shell/NexusShellContext'
 import { SHELL_LABELS } from './shell/labels'
+import { NexusShellProvider, useNexusShell } from './shell/NexusShellContext'
 
 /** 应用入口组件。 */
 export function App() {

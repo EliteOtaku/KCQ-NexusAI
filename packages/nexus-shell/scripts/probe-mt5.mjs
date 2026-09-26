@@ -46,16 +46,17 @@ async function main() {
     localStorage.removeItem('nexus.shell.recent-mt5-instruments')
   })
   await page.reload({ waitUntil: 'domcontentloaded' })
-  check('M-01：启动：dev 钩子就绪', await waitFor(page, () => nx(page, 'Boolean(window.__nx && window.__nx.ctrl)')))
+  check(
+    'M-01：启动：dev 钩子就绪',
+    await waitFor(page, () => nx(page, 'Boolean(window.__nx && window.__nx.ctrl)')),
+  )
 
   // ── M-02：数据源管理切到 MT5（打开管理对话框 → 列表含 MT5 → 设为当前） ──
   await page.click('button[aria-label="设置"]')
   check('M-02：设置对话框弹出', await page.locator('.nx-dialog').isVisible())
   await page.locator('.nx-settings__manage-btn').click()
   const managerVisible = await page.locator('.nx-source-manager').isVisible()
-  const mt5RowVisible = await page
-    .locator('.nx-source-item[data-source="mt5"]')
-    .isVisible()
+  const mt5RowVisible = await page.locator('.nx-source-item[data-source="mt5"]').isVisible()
   check(
     'M-02：数据源管理列出全部注册源（含 MT5）',
     managerVisible && mt5RowVisible,
@@ -93,16 +94,24 @@ async function main() {
   await page.locator('.nx-symbol-option').first().click()
 
   // ── M-04：fetcher 管线加载历史（setSymbols source=mt5 + bars 60 根） ──
-  const loaded = await waitFor(page, () => nx(page, `
+  const loaded = await waitFor(page, () =>
+    nx(
+      page,
+      `
     (() => {
       const spec = window.__nx.ctrl.symbols.peek()[0]
       const data = window.__nx.ctrl.getData()
       return spec && spec.source === 'mt5' && data.length >= 60
     })()
-  `))
+  `,
+    ),
+  )
   const specDetail = await nx(page, 'window.__nx.ctrl.symbols.peek()[0]')
   const barsCount = await nx(page, 'window.__nx.ctrl.getData().length')
-  const dataError = await nx(page, 'window.__nx.ctrl.dataError ? window.__nx.ctrl.dataError.peek() : null')
+  const dataError = await nx(
+    page,
+    'window.__nx.ctrl.dataError ? window.__nx.ctrl.dataError.peek() : null',
+  )
   check(
     'M-04：fetcher 管线加载历史',
     loaded,
@@ -110,12 +119,20 @@ async function main() {
   )
 
   // ── M-05：SSE forming 更新经 updateBars 反映到末根（close → 2600.5） ──
-  const formed = await waitFor(page, () => nx(page, `
+  const formed = await waitFor(
+    page,
+    () =>
+      nx(
+        page,
+        `
     (() => {
       const data = window.__nx.ctrl.getData()
       return data.length > 0 && data[data.length - 1].close === 2600.5
     })()
-  `), 8000)
+  `,
+      ),
+    8000,
+  )
   const lastClose = await nx(page, 'window.__nx.ctrl.getData().at(-1).close')
   check('M-05：SSE forming 更新写入末根', formed, `lastClose=${lastClose}`)
 
@@ -126,7 +143,11 @@ async function main() {
   await page.locator('.nx-dialog__actions .nx-btn--primary').click()
   const streamClosed = await waitFor(page, () => stub.state.activeStreams === 0, 5000)
   const backToMock = await nx(page, 'window.__nx.ctrl.symbols.peek()[0].source')
-  check('M-06：切回 Mock 并断流', streamClosed && backToMock !== 'mt5', `active=${stub.state.activeStreams} source=${backToMock}`)
+  check(
+    'M-06：切回 Mock 并断流',
+    streamClosed && backToMock !== 'mt5',
+    `active=${stub.state.activeStreams} source=${backToMock}`,
+  )
 
   // ── M-07：无页面错误（mock 回归不受影响） ──
   check(

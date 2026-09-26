@@ -2,16 +2,16 @@
 // mock 模式接本地品种目录（nexus.shell.recent-symbols）；
 // 网络源模式经 searchInstruments 限定当前源搜索（nexus.shell.recent-source-instruments 存品种描述）。
 
-import { useEffect, useMemo, useRef, useState } from 'react'
 import type { InstrumentDescriptor } from '@363045841yyt/klinechart-core/controllers'
 import {
   marketDataProviderRegistry,
   searchInstruments,
 } from '@363045841yyt/klinechart-core/controllers'
-import { useNexusShell } from '../shell/NexusShellContext'
-import { MOCK_SYMBOLS } from '../shell/mockData'
-import { readJson, writeJson, STORAGE_KEYS } from '../shell/storage'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { SHELL_LABELS } from '../shell/labels'
+import { MOCK_SYMBOLS } from '../shell/mockData'
+import { useNexusShell } from '../shell/NexusShellContext'
+import { readJson, STORAGE_KEYS, writeJson } from '../shell/storage'
 
 /** 最近使用上限。 */
 const RECENT_LIMIT = 8

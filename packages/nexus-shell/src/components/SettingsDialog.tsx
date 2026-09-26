@@ -2,12 +2,12 @@
 // 偏好经 NexusShellContext 读写并持久化于 nexus.shell.prefs；无引擎写入。
 // 数据源管理走 SourceManagerDialog 子对话框（与 Vue 版聚合源管理同构：状态/开关/地址/当前源）。
 
-import { useEffect, useState } from 'react'
 import { dataSourceRegistry } from '@363045841yyt/klinechart-core/controllers'
-import type { MagnetMode } from '../shell/pointerBridge'
-import { useNexusShell } from '../shell/NexusShellContext'
-import { SourceManagerDialog } from './SourceManagerDialog'
+import { useEffect, useState } from 'react'
 import { SHELL_LABELS } from '../shell/labels'
+import { useNexusShell } from '../shell/NexusShellContext'
+import type { MagnetMode } from '../shell/pointerBridge'
+import { SourceManagerDialog } from './SourceManagerDialog'
 
 /** 当前源在管理列表里的展示名；mock 有专属说明，其余取注册表 displayName。 */
 function currentSourceLabel(sourceId: string): string {
@@ -91,11 +91,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         </div>
 
         <label className="nx-settings__row nx-settings__row--check">
-          <input
-            type="checkbox"
-            checked={shell.stay}
-            onChange={() => shell.toggleStay()}
-          />
+          <input type="checkbox" checked={shell.stay} onChange={() => shell.toggleStay()} />
           <span>{SHELL_LABELS.settingsStayLabel}</span>
         </label>
 
