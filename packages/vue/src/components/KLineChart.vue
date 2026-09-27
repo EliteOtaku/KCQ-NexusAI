@@ -323,20 +323,18 @@
   import { type ChartSettings, resolveSettings } from '@363045841yyt/klinechart-core/config'
   import {
     type CanvasLegendOptions,
-    CURSOR_DRAWING_TOOL_ID,
-    type DrawingToolId,
-    type RendererBackendRuntime,
-  } from '@363045841yyt/klinechart-core/controllers'
-  import {
     type ChartController,
     type ChartMountOptions,
+    CURSOR_DRAWING_TOOL_ID,
     type CustomDataSource,
     createChartController,
     type DrawingLineLabelTarget,
     type DrawingStyle,
+    type DrawingToolId,
     type LegendTemplateContext,
     marketDataProviderRegistry,
     PANE_HEADER_INSET_PX,
+    type RendererBackendRuntime,
     type SymbolInfo,
     type SymbolSpec,
   } from '@363045841yyt/klinechart-core/controllers'
@@ -404,11 +402,11 @@
   import ExportProgressDialog from './ExportProgressDialog.vue'
   import IndicatorSelector from './IndicatorSelector.vue'
   import LeftToolbar from './LeftToolbar.vue'
-  import { RANGE_SELECT_UI_TOOL_ID } from './toolbarToolIds.js'
   import MarkerTooltip from './MarkerTooltip.vue'
   import PaneHeaderOverlay from './PaneHeaderOverlay.vue'
   import RangeSelectionExport from './RangeSelectionExport.vue'
   import TopToolbar, { type SymbolItem } from './TopToolbar.vue'
+  import { RANGE_SELECT_UI_TOOL_ID } from './toolbarToolIds.js'
   import WatchlistPanel from './WatchlistPanel.vue'
 
   // ── Props & Emits ──
