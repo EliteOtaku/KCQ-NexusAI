@@ -1,5 +1,10 @@
 <template>
-  <div ref="chartWrapperRef" class="chart-wrapper" :data-theme="chartTheme" :style="themeCssVars">
+  <div
+    ref="chartWrapperRef"
+    class="chart-wrapper"
+    :data-theme="chartTheme"
+    :style="[themeCssVars, { colorScheme: chartTheme }]"
+  >
     <div class="chart-workspace">
       <TopToolbar
         :symbol="currentSymbol"
@@ -39,22 +44,31 @@
           :renderer-runtime="rendererRuntime"
           :market-data-cache-stats="marketDataCacheStats"
           :drawing-tool-id="drawingToolId"
+          :magnet-mode="magnetMode"
+          :continuous-drawing="continuousDrawing"
           :can-undo-drawing="canUndoDrawing"
           :can-redo-drawing="canRedoDrawing"
           :has-drawings="drawings.length > 0"
+          :has-indicators="activeIndicators.length > 0"
+          :all-drawings-hidden="drawings.length > 0 && drawings.every((drawing) => !drawing.visible)"
           :global-drawing-locked="globalDrawingLock"
           :is-range-select-mode="isRangeSelectMode"
           :aggregation-sources="aggregationSources"
           :enabled-source-names="enabledSourceNameSet"
           :source-endpoints="sourceEndpoints"
           @select-tool="handleSelectTool"
+          @set-magnet-mode="setMagnetMode"
+          @set-continuous-drawing="setContinuousDrawing"
           @toggle-indicator="onToggleIndicator"
           @toggle-fullscreen="handleToggleFullscreen"
           @zoom-in="applyZoomToLevel(zoomLevel + 1)"
           @zoom-out="applyZoomToLevel(zoomLevel - 1)"
           @undo-drawing="controller?.undoDrawing()"
           @redo-drawing="controller?.redoDrawing()"
+          @clear-drawings="controller?.clearDrawings()"
+          @clear-indicators="clearAllIndicators"
           @set-global-drawing-lock="onSetGlobalDrawingLock"
+          @set-all-drawings-visible="onSetAllDrawingsVisible"
           @settings-change="handleSettingsChange"
           @clear-market-data-cache="controller?.clearMarketDataCache()"
           @toggle-aggregation-source="setAggregationSourceEnabled"
@@ -136,6 +150,8 @@
                     @save-template="onSaveDrawingTemplate"
                     @delete="onDeleteDrawing"
                     @toggle-lock="onToggleDrawingLock"
+                    @hide="onHideSelectedDrawings"
+                    @copy="onCopyDrawings"
                     @update-line-label-position="setLineLabelPosition"
                     @open-settings="openDrawingSettings"
                   />
@@ -220,6 +236,7 @@
               ref="tooltipContentRef"
               class="kline-tooltip"
               :class="{ 'is-draggable': isTooltipDraggable }"
+              style="display: none"
               @pointerdown="onTooltipPointerDown"
               @dblclick="onTooltipDblClick"
             ></div>
@@ -303,11 +320,12 @@
 </template>
 
 <script setup lang="ts">
-  import { formatTimeInTimeZone } from '@363045841yyt/klinechart-core'
   import { type ChartSettings, resolveSettings } from '@363045841yyt/klinechart-core/config'
-  import type {
-    CanvasLegendOptions,
-    RendererBackendRuntime,
+  import {
+    type CanvasLegendOptions,
+    CURSOR_DRAWING_TOOL_ID,
+    type DrawingToolId,
+    type RendererBackendRuntime,
   } from '@363045841yyt/klinechart-core/controllers'
   import {
     type ChartController,
@@ -316,17 +334,13 @@
     createChartController,
     type DrawingLineLabelTarget,
     type DrawingStyle,
-    type InteractionSnapshot,
     type LegendTemplateContext,
     marketDataProviderRegistry,
     PANE_HEADER_INSET_PX,
     type SymbolInfo,
     type SymbolSpec,
   } from '@363045841yyt/klinechart-core/controllers'
-  import type {
-    CustomMarkerEntity,
-    MarkerEntity,
-  } from '@363045841yyt/klinechart-core/engine/marker/registry'
+  import type { CustomMarkerEntity } from '@363045841yyt/klinechart-core/engine/marker/registry'
   import {
     type InstrumentDescriptor,
     searchInstruments,
@@ -375,6 +389,8 @@
   import { useDrawingManager } from '../composables/chart/useDrawingManager.js'
   import { useDrawingTemplates } from '../composables/chart/useDrawingTemplates'
   import { useIndicatorManager } from '../composables/chart/useIndicatorManager.js'
+  import { useInteractionBridge } from '../composables/chart/useInteractionBridge.js'
+  import { useKLineTooltip } from '../composables/chart/useKLineTooltip.js'
   import { useRangeSelection } from '../composables/chart/useRangeSelection.js'
   import { provideFullscreenTeleportTarget } from '../composables/useFullscreenTeleportTarget.js'
   import { symbolIdentityKey } from '../composables/useSymbolSearch.js'
@@ -388,6 +404,7 @@
   import ExportProgressDialog from './ExportProgressDialog.vue'
   import IndicatorSelector from './IndicatorSelector.vue'
   import LeftToolbar from './LeftToolbar.vue'
+  import { RANGE_SELECT_UI_TOOL_ID } from './toolbarToolIds.js'
   import MarkerTooltip from './MarkerTooltip.vue'
   import PaneHeaderOverlay from './PaneHeaderOverlay.vue'
   import RangeSelectionExport from './RangeSelectionExport.vue'
@@ -871,7 +888,8 @@
   } = chartState
 
   /** 镜像 kernel.drawingTool，供工具栏高亮 */
-  const drawingToolId = shallowRef('cursor')
+  // 标注为完整工具类型，避免被常量字面量收窄成 'cursor'。
+  const drawingToolId = shallowRef<DrawingToolId>(CURSOR_DRAWING_TOOL_ID)
   const canUndoDrawing = shallowRef(false)
   const canRedoDrawing = shallowRef(false)
 
@@ -909,6 +927,7 @@
     addSubPane,
     removeSubPane,
     clearAllSubPanes,
+    clearAllIndicators,
     switchSubIndicator,
     moveSubPane,
     handleIndicatorToggle,
@@ -969,6 +988,10 @@
 
   const {
     drawingController,
+    magnetMode,
+    setMagnetMode,
+    continuousDrawing,
+    setContinuousDrawing,
     selectedDrawings,
     selectedDrawingStyleKeys,
     drawings,
@@ -978,6 +1001,9 @@
     updateDrawingLabel,
     onDeleteDrawing,
     onToggleDrawingLock,
+    onHideSelectedDrawings,
+    onCopyDrawings,
+    onSetAllDrawingsVisible,
     globalDrawingLock,
     onSetGlobalDrawingLock,
     setupDrawing,
@@ -1155,227 +1181,9 @@
     /* Controller auto-renders on state changes */
   }
 
-  // ── Tooltip — 直接订阅 kernel，绕过 Vue 的 VNode ──
+  // ── Marker Tooltip — 默认 MarkerTooltip 的尺寸观测 ──
   const _measuredTooltips = new WeakSet<HTMLElement>()
-  let _tooltipRO: ResizeObserver | null = null
   let _markerTooltipRO: ResizeObserver | null = null
-  let _prevTooltipIdx: number | null = null
-  let _unsubTooltip: (() => void) | null = null
-  let _tooltipSlots: _TooltipSlots | null = null
-  let _tooltipVisibilityEl: HTMLDivElement | null = null
-  let _tooltipHidden = false
-
-  const NEUTRAL_COLOR = '#6b7280'
-  interface _KLineData {
-    timestamp: number
-    open: number
-    high: number
-    low: number
-    close: number
-    volume?: number
-    turnover?: number
-    amplitude?: number
-    changePercent?: number
-    changeAmount?: number
-    turnoverRate?: number
-    symbol?: string
-  }
-  interface _TooltipSlots {
-    container: HTMLDivElement
-    symbol: HTMLSpanElement | null
-    date: HTMLSpanElement
-    open: HTMLSpanElement
-    high: HTMLSpanElement
-    low: HTMLSpanElement
-    close: HTMLSpanElement
-    volume: HTMLSpanElement | null
-    turnover: HTMLSpanElement | null
-    amplitude: HTMLSpanElement | null
-    changePercent: HTMLSpanElement | null
-    changeAmount: HTMLSpanElement | null
-    turnoverRate: HTMLSpanElement | null
-  }
-  function _formatVolume(v: number): string {
-    if (v >= 1e8) return (v / 1e8).toFixed(2) + '亿'
-    if (v >= 1e4) return (v / 1e4).toFixed(2) + '万'
-    return v.toFixed(2)
-  }
-  function _formatSigned(val: number, unit: string): string {
-    return (val >= 0 ? '+' : '') + val.toFixed(2) + unit
-  }
-  function _calcDirection(
-    data: _KLineData,
-    allData: ReadonlyArray<_KLineData>,
-    idx: number | null,
-  ): number {
-    if (data.close >= data.open) return 1
-    const prev = typeof idx === 'number' && idx > 0 ? allData[idx - 1] : undefined
-    if (prev && data.close > prev.close) return 1
-    if (prev && data.close < prev.close) return -1
-    return 0
-  }
-
-  function _buildTooltipDOM(el: HTMLDivElement, kline: _KLineData): _TooltipSlots {
-    const title = document.createElement('div')
-    title.className = 'kline-tooltip__title'
-    let symbolSpan: HTMLSpanElement | null = null
-    if (kline.symbol) {
-      symbolSpan = document.createElement('span')
-      title.appendChild(symbolSpan)
-    }
-    const dateSpan = document.createElement('span')
-    title.appendChild(dateSpan)
-    el.appendChild(title)
-
-    const grid = document.createElement('div')
-    grid.className = 'kline-tooltip__grid'
-
-    function addRow(label: string): HTMLSpanElement {
-      const row = document.createElement('div')
-      row.className = 'row'
-      const lbl = document.createElement('span')
-      lbl.textContent = label
-      row.appendChild(lbl)
-      const val = document.createElement('span')
-      row.appendChild(val)
-      grid.appendChild(row)
-      return val
-    }
-
-    const openV = addRow('开')
-    const highV = addRow('高')
-    const lowV = addRow('低')
-    const closeV = addRow('收')
-    const volumeV = typeof kline.volume === 'number' ? addRow('成交量') : null
-    const turnoverV = typeof kline.turnover === 'number' ? addRow('成交额') : null
-    const amplitudeV = typeof kline.amplitude === 'number' ? addRow('振幅') : null
-    const changePercentV = typeof kline.changePercent === 'number' ? addRow('涨跌幅') : null
-    const changeAmountV = typeof kline.changeAmount === 'number' ? addRow('涨跌额') : null
-    const turnoverRateV = typeof kline.turnoverRate === 'number' ? addRow('换手率') : null
-
-    el.appendChild(grid)
-
-    return {
-      container: el,
-      symbol: symbolSpan,
-      date: dateSpan,
-      open: openV,
-      high: highV,
-      low: lowV,
-      close: closeV,
-      volume: volumeV,
-      turnover: turnoverV,
-      amplitude: amplitudeV,
-      changePercent: changePercentV,
-      changeAmount: changeAmountV,
-      turnoverRate: turnoverRateV,
-    }
-  }
-
-  function _updateTooltipDOM(
-    slots: _TooltipSlots,
-    kline: _KLineData,
-    idx: number,
-    allData: ReadonlyArray<_KLineData>,
-    upColor: string,
-    downColor: string,
-    timezone: string,
-    showTime: boolean,
-  ): void {
-    const openDir = _calcDirection(kline, allData, idx)
-    const closeDiff = kline.close - kline.open
-    const changePct = kline.changePercent ?? ((kline.close - kline.open) / kline.open) * 100
-    const openC = openDir > 0 ? upColor : openDir < 0 ? downColor : NEUTRAL_COLOR
-    const closeC = closeDiff > 0 ? upColor : closeDiff < 0 ? downColor : NEUTRAL_COLOR
-    const changeC = changePct > 0 ? upColor : changePct < 0 ? downColor : NEUTRAL_COLOR
-
-    slots.date.textContent = formatTimeInTimeZone(kline.timestamp, { timeZone: timezone, showTime })
-    if (slots.symbol) slots.symbol.textContent = kline.symbol ?? ''
-
-    slots.open.textContent = kline.open.toFixed(2)
-    slots.open.style.color = openC
-    slots.high.textContent = kline.high.toFixed(2)
-    slots.low.textContent = kline.low.toFixed(2)
-    slots.close.textContent = kline.close.toFixed(2)
-    slots.close.style.color = closeC
-    if (slots.volume && typeof kline.volume === 'number')
-      slots.volume.textContent = _formatVolume(kline.volume)
-    if (slots.turnover && typeof kline.turnover === 'number')
-      slots.turnover.textContent = _formatVolume(kline.turnover)
-    if (slots.amplitude && typeof kline.amplitude === 'number')
-      slots.amplitude.textContent = kline.amplitude + '%'
-    if (slots.changePercent && typeof kline.changePercent === 'number') {
-      slots.changePercent.textContent = _formatSigned(kline.changePercent, '%')
-      slots.changePercent.style.color = changeC
-    }
-    if (slots.changeAmount && typeof kline.changeAmount === 'number') {
-      slots.changeAmount.textContent = _formatSigned(kline.changeAmount, '')
-      slots.changeAmount.style.color = changeC
-    }
-    if (slots.turnoverRate && typeof kline.turnoverRate === 'number')
-      slots.turnoverRate.textContent = kline.turnoverRate.toFixed(2) + '%'
-  }
-
-  function _setupTooltipSub(): void {
-    const ctrl = controller.value
-    if (!ctrl) return
-    _unsubTooltip = ctrl.interactionState.subscribe(() => {
-      if (hasKLineTooltipSlot.value) return
-      const el = tooltipContentRef.value
-      if (!el) return
-      // 订阅整包 snapshot；内容更新仅依赖 hoveredIndex，索引未变时只动 display
-      const snapshot = ctrl.interactionState.peek()
-      const idx = snapshot.hoveredIndex
-      const data = ctrl.getData()
-      const kline =
-        typeof idx === 'number' && data && idx >= 0 && idx < data.length ? data[idx] : undefined
-      const hidden = !kline || !data || ctrl.chartMode.peek() === 'comparison' || isMobile
-      if (_tooltipVisibilityEl !== el) {
-        _tooltipVisibilityEl = el
-        _tooltipHidden = false
-      }
-      if (_tooltipHidden !== hidden) {
-        el.style.display = hidden ? 'none' : ''
-        _tooltipHidden = hidden
-      }
-      if (hidden) return
-      positionDefaultKLineTooltip()
-      if (idx !== _prevTooltipIdx) {
-        _prevTooltipIdx = idx
-        if (!_tooltipSlots || _tooltipSlots.container !== el) {
-          _tooltipSlots = null
-          el.textContent = ''
-          _tooltipSlots = _buildTooltipDOM(el, kline)
-        }
-        const colors = tooltipColors.value
-        _updateTooltipDOM(
-          _tooltipSlots,
-          kline,
-          idx!,
-          data,
-          colors.upColor,
-          colors.downColor,
-          props.timezone,
-          isIntraday.value,
-        )
-        if (!_tooltipRO) {
-          _tooltipRO = new ResizeObserver((entries) => {
-            for (const entry of entries) {
-              const el2 = entry.target as HTMLDivElement
-              if (!el2.isConnected) continue
-              const w = entry.borderBoxSize[0]?.inlineSize ?? entry.contentRect.width
-              const h = entry.borderBoxSize[0]?.blockSize ?? entry.contentRect.height
-              ctrl.setTooltipSize({
-                width: Math.max(180, Math.round(w)),
-                height: Math.max(80, Math.round(h)),
-              })
-            }
-          })
-        }
-        _tooltipRO.observe(el)
-      }
-    })
-  }
 
   function setMarkerTooltipEl(el: HTMLDivElement | null) {
     if (!el) {
@@ -1408,27 +1216,6 @@
   let mousePos = { x: 0, y: 0 }
   /** 绘图拖拽按下瞬间的光标；非空表示正处于图元拖拽会话，期间光标不随 pointermove 变化。 */
   let drawingDragCursor: string | null = null
-  let latestInteractionState: InteractionSnapshot = {
-    crosshairPos: null,
-    crosshairIndex: null,
-    crosshairPrice: null,
-    hoveredIndex: null,
-    activePaneId: null,
-    tooltipPos: { x: 0, y: 0 },
-    tooltipAnchorPlacement: 'right-bottom',
-    hoveredMarkerData: null,
-    hoveredCustomMarker: null,
-    isDragging: false,
-    isResizingPaneBoundary: false,
-    isHoveringPaneBoundary: false,
-    hoveredPaneBoundaryId: null,
-    isHoveringRightAxis: false,
-    drawingHoverTarget: 'none',
-  }
-  const externalInteractionState = shallowRef<InteractionSnapshot>(latestInteractionState)
-  const hoveredMarker = shallowRef<MarkerEntity | null>(null)
-  const hoveredCustomMarker = shallowRef<CustomMarkerEntity | null>(null)
-  const tooltipDragPos = ref<{ x: number; y: number } | null>(null)
   const markerTooltipInitialPosition = { x: 0, y: 0 }
   const externalMarkerTooltipStyle = shallowRef({
     left: '0px',
@@ -1439,7 +1226,6 @@
   })
   let markerTooltipEl: HTMLDivElement | null = null
   const markerTooltipAnchorRef = ref<HTMLDivElement | null>(null)
-  let _tooltipDragOffset = { x: 0, y: 0 }
 
   let _cachedContainerRect: DOMRect | null = null
   function invalidateContainerRectCache(): void {
@@ -1452,28 +1238,9 @@
     return _cachedContainerRect
   }
 
-  /** 返回 tooltip layer 相对 chart container 的固定偏移。 */
-  function getTooltipLayerOffset(): { x: number; y: number } {
-    const container = containerRef.value
-    const chartMain = chartMainRef.value
-    if (!container || !chartMain) return { x: 0, y: 0 }
-    return { x: container.offsetLeft, y: container.offsetTop }
-  }
-
-  /** 以直接 DOM 写入更新默认 K 线 tooltip 的位置。 */
-  function positionDefaultKLineTooltip(): void {
-    if (hasKLineTooltipSlot.value) return
-    const el = tooltipContentRef.value
-    if (!el) return
-    const position = tooltipDragPos.value ?? latestInteractionState.tooltipPos
-    const offset = getTooltipLayerOffset()
-    el.style.left = `${position.x + offset.x}px`
-    el.style.top = `${position.y + offset.y}px`
-  }
-
   /** 以直接 DOM 写入更新默认 marker tooltip 的位置。 */
   function positionDefaultMarkerTooltip(): void {
-    const offset = getTooltipLayerOffset()
+    const offset = getLayerOffset()
     const left = mousePos.x + offset.x + 12
     const top = mousePos.y + offset.y + 12
     if (hasMarkerTooltipSlot.value) {
@@ -1495,6 +1262,20 @@
       markerTooltipEl.style.top = `${top}px`
     }
   }
+
+  // 交互快照 → 舞台表现 / 外部 tooltip 快照 / marker hover 镜像；订阅随组件生命周期显式退订。
+  const {
+    externalState: externalInteractionState,
+    hoveredMarker,
+    hoveredCustomMarker,
+  } = useInteractionBridge({
+    controller,
+    stageRef: chartStageRef,
+    containerRef,
+    hasExternalSlot: hasKLineTooltipSlot,
+    getDragCursor: () => drawingDragCursor,
+    onMarkerHover: positionDefaultMarkerTooltip,
+  })
 
   /** 主图图例模板上下文（#legend slot 消费） */
   const legendTemplateContext = shallowRef<LegendTemplateContext | null>(null)
@@ -1559,6 +1340,30 @@
   const paneSeparatorLines = ref<Array<{ id: string; top: number }>>([])
   const markerTooltipSize = ref({ width: 220, height: 120 })
   const isMobile = window.matchMedia('(pointer: coarse)').matches
+
+  /** adaptive 模式下 tooltip 可拖拽（内置与 #kline-tooltip 共用） */
+  const isTooltipDraggable = computed(
+    () => (chartSettings.value?.tooltipPosition ?? 'adaptive') === 'adaptive',
+  )
+
+  // 默认 tooltip 直接订阅 kernel，绕过 Vue VNode；内容由 composable 直写 DOM 维护
+  const {
+    dragPos,
+    getLayerOffset,
+    onPointerDown: onTooltipPointerDown,
+    onDoubleClick: onTooltipDblClick,
+  } = useKLineTooltip({
+    controller,
+    contentRef: tooltipContentRef,
+    containerRef,
+    colors: tooltipColors,
+    hasExternalSlot: hasKLineTooltipSlot,
+    isMobile,
+    isIntraday: () => isIntraday.value,
+    timezone: () => props.timezone,
+    isDraggable: () => isTooltipDraggable.value,
+  })
+
   const externalHoveredKLine = computed(() => {
     const idx = externalInteractionState.value.hoveredIndex
     if (typeof idx !== 'number') return null
@@ -1573,8 +1378,8 @@
     () => chartMode.value !== 'comparison' && externalHoveredKLine.value !== null && !isMobile,
   )
   const externalKLineTooltipStyle = computed(() => {
-    const position = tooltipDragPos.value ?? externalInteractionState.value.tooltipPos
-    const offset = getTooltipLayerOffset()
+    const position = dragPos.value ?? externalInteractionState.value.tooltipPos
+    const offset = getLayerOffset()
     return {
       left: `${position.x + offset.x}px`,
       top: `${position.y + offset.y}px`,
@@ -1583,11 +1388,6 @@
       zIndex: 10,
     }
   })
-
-  /** adaptive 模式下 tooltip 可拖拽（内置与 #kline-tooltip 共用） */
-  const isTooltipDraggable = computed(
-    () => (chartSettings.value?.tooltipPosition ?? 'adaptive') === 'adaptive',
-  )
 
   const chartData = computed(() => {
     void data.value
@@ -1604,9 +1404,9 @@
   }
 
   function handleSelectTool(toolId: string) {
-    if (toolId === 'range-select') {
+    if (toolId === RANGE_SELECT_UI_TOOL_ID) {
       isRangeSelectMode.value = true
-      controller.value?.setDrawingToolId('cursor')
+      controller.value?.setDrawingToolId(CURSOR_DRAWING_TOOL_ID)
       controller.value?.setSelectedDrawingIds([])
       return
     }
@@ -1762,37 +1562,6 @@
 
   function onRightAxisLostPointerCapture(e: PointerEvent) {
     controller.value?.handlePointerEvent(e)
-  }
-
-  // ── Tooltip Drag ──
-  function onTooltipPointerDown(e: PointerEvent) {
-    if (!isTooltipDraggable.value) return
-    e.preventDefault()
-    e.stopPropagation()
-    _tooltipDragOffset = {
-      x: e.clientX - (tooltipDragPos.value ?? latestInteractionState.tooltipPos).x,
-      y: e.clientY - (tooltipDragPos.value ?? latestInteractionState.tooltipPos).y,
-    }
-    document.addEventListener('pointermove', onTooltipPointerMove)
-    document.addEventListener('pointerup', onTooltipPointerUp)
-  }
-
-  function onTooltipPointerMove(e: PointerEvent) {
-    tooltipDragPos.value = {
-      x: e.clientX - _tooltipDragOffset.x - getTooltipLayerOffset().x,
-      y: e.clientY - _tooltipDragOffset.y - getTooltipLayerOffset().y,
-    }
-    positionDefaultKLineTooltip()
-  }
-
-  function onTooltipPointerUp() {
-    document.removeEventListener('pointermove', onTooltipPointerMove)
-    document.removeEventListener('pointerup', onTooltipPointerUp)
-  }
-
-  function onTooltipDblClick() {
-    tooltipDragPos.value = null
-    positionDefaultKLineTooltip()
   }
 
   // ── Width / Zoom / Expose ──
@@ -2067,82 +1836,6 @@
     applyThemeFromSettings(resolved.theme as string)
   }
 
-  /**
-   * 光标优先级：图元拖拽会话冻结目标 > 实时绘图悬停 > 通用 hover。
-   * 拖拽中 kernel 的 isDragging 恒为 true（记 `grabbing`），无法区分「平移」与「拖图元」，
-   * 因此图元拖拽沿用按下时认定的 cursor；标尺/平移仍走 grabbing。
-   */
-  function pickCursor(
-    snap: InteractionSnapshot,
-    dragCursor: string | null,
-    fallbackCursor: string,
-  ): string {
-    if (dragCursor !== null && snap.drawingHoverTarget !== 'none') return dragCursor
-    return resolveStageCursor(snap, fallbackCursor)
-  }
-
-  /**
-   * 舞台光标：图表平移/框选 dragging；面板分隔与绘图中点手柄 ns-resize；
-   * 图元线身 move（可整体拖动）；圆形锚点显式 default，避免沿用十字线/指针。
-   */
-  function resolveStageCursor(state: InteractionSnapshot, fallbackCursor: string): string {
-    if (state.isResizingPaneBoundary || state.isHoveringPaneBoundary) return 'ns-resize'
-    if (state.drawingHoverTarget === 'vertical-handle') return 'ns-resize'
-    if (state.drawingHoverTarget === 'all') return 'move'
-    if (state.drawingHoverTarget === 'anchor') return 'default'
-    if (state.isDragging) return 'grabbing'
-    return fallbackCursor
-  }
-
-  function setupInteractionCallbacks(ctrl: ChartController): void {
-    ctrl.setTooltipAnchorPositioning(false)
-    ctrl.interactionState.subscribe(() => {
-      const next = ctrl.interactionState.peek()
-      latestInteractionState = next
-
-      const stage = chartStageRef.value
-      stage?.classList.toggle('is-dragging', next.isDragging)
-      const drawingDragging = drawingDragCursor !== null && next.drawingHoverTarget !== 'none'
-      stage?.classList.toggle('is-dragging-drawing', drawingDragging)
-      if (stage && drawingDragging) {
-        stage.dataset.drawingCursor = next.drawingHoverTarget
-      } else if (stage) {
-        delete stage.dataset.drawingCursor
-      }
-      stage?.classList.toggle('is-resizing-pane', next.isResizingPaneBoundary)
-      stage?.classList.toggle('is-hovering-pane-separator', next.isHoveringPaneBoundary)
-      stage?.classList.toggle('is-hovering-right-axis', next.isHoveringRightAxis)
-      stage?.classList.toggle('is-hovering-kline', next.hoveredIndex !== null)
-      stage?.querySelectorAll<HTMLElement>('.pane-separator-line').forEach((line) => {
-        line.classList.toggle('is-active', line.dataset.paneId === next.hoveredPaneBoundaryId)
-      })
-
-      const container = containerRef.value
-      if (container) {
-        // 下一帧兜底光标：本帧没有绘图会话时按通用 hover 推导。
-        const fallback = next.hoveredIndex !== null ? 'pointer' : 'crosshair'
-        container.style.cursor = pickCursor(next, drawingDragCursor, fallback)
-      }
-
-      // 自定义 K 线 tooltip 是调用方显式选择的 Vue slot；仅该分支保留高频响应式 props。
-      if (hasKLineTooltipSlot.value) externalInteractionState.value = next
-
-      if (hoveredMarker.value !== next.hoveredMarkerData) {
-        hoveredMarker.value = next.hoveredMarkerData
-      }
-      if (hoveredCustomMarker.value !== next.hoveredCustomMarker) {
-        hoveredCustomMarker.value = next.hoveredCustomMarker
-      }
-      if (next.hoveredMarkerData || next.hoveredCustomMarker) positionDefaultMarkerTooltip()
-    })
-
-    latestInteractionState = ctrl.interactionState.peek()
-    syncLegendSubscription(ctrl)
-
-    // #legend 存在时切换为 external，隐藏 Canvas 图例文字
-    applyLegendRenderMode(ctrl, hasLegendSlot.value)
-  }
-
   /** 将受控业务 props 按固定顺序同步到 ChartController。 */
   function applyControlledChartProps(ctrl: ChartController): void {
     if (props.indicators !== undefined) {
@@ -2206,15 +1899,19 @@
       console.error('[KLineChart] initChart failed:', err)
       return
     }
-    if (!containerRef.value || !chartMainRef.value) return // 组件已卸载
+    if (!containerRef.value || !chartMainRef.value) {
+      // 组件在 await 期间已卸载：此时 ctrl 尚未写入 controller.value，需主动释放。
+      ctrl.dispose()
+      return
+    }
     controller.value = ctrl
     emit('controllerReady', ctrl)
 
+    // controllerReady 监听可能同步卸载组件；DOM ref 被清空后继续接线会在已销毁实例上遗留订阅。
+    if (!containerRef.value || !chartMainRef.value) return
+
     // 3) 信号回调（必须在 registerSymbols 之前建立，否则订阅收不到初始通知）
     cleanupChartCallbacks = setupChartCallbacks(ctrl)
-
-    // 4) 直接订阅 kernel 的 tooltip 信号，绕过 VNode
-    _setupTooltipSub()
 
     // 指标必须在 data source 首次加载前创建，避免 scheduler 漏掉首帧计算。
     applyControlledChartProps(ctrl)
@@ -2225,8 +1922,10 @@
     // 5) 绘图交互控制器
     setupDrawing(ctrl)
 
-    // 6) 交互信号桥接
-    setupInteractionCallbacks(ctrl)
+    // 6) 交互初始化与图例接线（interactionState 订阅由 useInteractionBridge 管理）
+    ctrl.setTooltipAnchorPositioning(false)
+    syncLegendSubscription(ctrl)
+    applyLegendRenderMode(ctrl, hasLegendSlot.value)
   })
 
   // ── onUnmounted & Watchers ──
@@ -2234,13 +1933,11 @@
     if (typeof document !== 'undefined' && onFullscreenChange) {
       document.removeEventListener('fullscreenchange', onFullscreenChange)
     }
-    document.removeEventListener('pointermove', onTooltipPointerMove)
-    document.removeEventListener('pointerup', onTooltipPointerUp)
     onFullscreenChange = null
     cleanupChartCallbacks?.()
     cleanupChartCallbacks = null
-    _unsubTooltip?.()
-    _unsubTooltip = null
+    _markerTooltipRO?.disconnect()
+    _markerTooltipRO = null
     _unsubLegend?.()
     _unsubLegend = null
     applyLegendRenderMode(controller.value, false)
@@ -2276,14 +1973,6 @@
       if (ctrl) applyControlledChartProps(ctrl)
     },
     { deep: true },
-  )
-
-  // tooltipPosition 切换为非 adaptive 时复位拖拽位置
-  watch(
-    () => chartSettings.value?.tooltipPosition,
-    (val) => {
-      if (val !== 'adaptive') tooltipDragPos.value = null
-    },
   )
 
   // 受控设置：外部 settings 变化时重新分层解析（prop 显式 key > 存量 > 默认）

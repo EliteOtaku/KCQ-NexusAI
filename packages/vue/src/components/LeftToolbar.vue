@@ -54,6 +54,60 @@
     <span class="left-toolbar__divider"></span>
 
     <div class="left-toolbar__group">
+      <div class="tool-item">
+        <BaseTooltip :content="`磁吸：${magnetSelection.title}`" :disabled="openGroupId !== null">
+          <button
+            type="button"
+            class="left-toolbar__button"
+            :class="{ active: magnetMode !== MagnetMode.Off }"
+            :aria-label="`磁吸：${magnetSelection.title}`"
+            :aria-pressed="magnetMode !== MagnetMode.Off"
+            @click="toggleMagnet"
+            @pointerdown.stop
+            @pointermove.stop
+            @pointerup.stop
+          >
+            <component :is="magnetSelection.icon" class="tool-icon" aria-hidden="true" />
+          </button>
+        </BaseTooltip>
+        <BaseTooltip content="磁吸选项" placement="top" :disabled="openGroupId !== null">
+          <button
+            type="button"
+            class="tool-item__expand"
+            aria-label="磁吸选项"
+            :aria-expanded="openGroupId === magnetGroup.id"
+            @click="openGroupMenu(magnetGroup, $event)"
+            @pointerdown.stop
+            @pointermove.stop
+            @pointerup.stop
+          >
+            <IconTablerChevronRight class="tool-item__expand-icon" aria-hidden="true" />
+          </button>
+        </BaseTooltip>
+      </div>
+    </div>
+
+    <div class="left-toolbar__group">
+      <BaseTooltip :content="continuousDrawing ? '关闭连续绘图' : '开启连续绘图'">
+        <button
+          type="button"
+          class="left-toolbar__button"
+          :class="{ active: continuousDrawing }"
+          aria-label="连续绘图"
+          :aria-pressed="continuousDrawing"
+          @click="emit('setContinuousDrawing', !continuousDrawing)"
+          @pointerdown.stop
+          @pointermove.stop
+          @pointerup.stop
+        >
+          <IconTablerPencil class="tool-icon" aria-hidden="true" />
+        </button>
+      </BaseTooltip>
+    </div>
+
+    <span class="left-toolbar__divider"></span>
+
+    <div class="left-toolbar__group">
       <BaseTooltip content="撤回">
         <button
           type="button"
@@ -98,6 +152,57 @@
           <IconTablerLockOpen v-else class="tool-icon" aria-hidden="true" />
         </button>
       </BaseTooltip>
+      <BaseTooltip :content="allDrawingsHidden ? '显示所有图元' : '隐藏所有图元'">
+        <button
+          type="button"
+          class="left-toolbar__button"
+          :class="{ active: allDrawingsHidden }"
+          :aria-label="allDrawingsHidden ? '显示所有图元' : '隐藏所有图元'"
+          :aria-pressed="allDrawingsHidden"
+          :disabled="!hasDrawings"
+          @click="emit('setAllDrawingsVisible', allDrawingsHidden)"
+          @pointerdown.stop
+          @pointermove.stop
+          @pointerup.stop
+        >
+          <IconTablerEyeOff v-if="allDrawingsHidden" class="tool-icon" aria-hidden="true" />
+          <IconTablerEye v-else class="tool-icon" aria-hidden="true" />
+        </button>
+      </BaseTooltip>
+    </div>
+
+    <div class="left-toolbar__group">
+      <div class="tool-item">
+        <BaseTooltip :content="selectedDeleteTool.title" :disabled="openGroupId !== null">
+          <button
+            type="button"
+            class="left-toolbar__button"
+            :aria-label="selectedDeleteTool.title"
+            :disabled="selectedDeleteTool.id === 'drawings' ? !hasDrawings : !hasIndicators"
+            @click="runDelete(selectedDeleteTool.id)"
+            @pointerdown.stop
+            @pointermove.stop
+            @pointerup.stop
+          >
+            <component :is="selectedDeleteTool.icon" class="tool-icon" aria-hidden="true" />
+          </button>
+        </BaseTooltip>
+        <BaseTooltip content="删除选项" placement="top" :disabled="openGroupId !== null">
+          <button
+            type="button"
+            class="tool-item__expand"
+            aria-label="删除选项"
+            :aria-expanded="openGroupId === deleteGroup.id"
+            :disabled="!hasDrawings && !hasIndicators"
+            @click="openGroupMenu(deleteGroup, $event)"
+            @pointerdown.stop
+            @pointermove.stop
+            @pointerup.stop
+          >
+            <IconTablerChevronRight class="tool-item__expand-icon" aria-hidden="true" />
+          </button>
+        </BaseTooltip>
+      </div>
     </div>
 
     <template v-if="alertController">
@@ -212,8 +317,10 @@
         <button
           type="button"
           class="left-toolbar__button"
-          :class="{ active: highlightToolId === child.id }"
+          :class="{ active: openGroup.id === magnetGroup.id ? magnetMode === child.id : highlightToolId === child.id }"
           :aria-label="child.title"
+          :aria-pressed="openGroup.id === magnetGroup.id ? magnetMode === child.id : undefined"
+          :disabled="openGroup.id === deleteGroup.id && (child.id === 'drawings' ? !hasDrawings : !hasIndicators)"
           @click="selectChild(openGroup, child)"
         >
           <component :is="child.icon" class="tool-icon" aria-hidden="true" />
@@ -251,7 +358,14 @@
     chartSettingsPersistence,
     resolveSettings,
   } from '@363045841yyt/klinechart-core/config'
-  import type { RendererBackendRuntime } from '@363045841yyt/klinechart-core/controllers'
+  import {
+    type ActiveMagnetMode,
+    BOX_SELECT_DRAWING_TOOL_ID,
+    CURSOR_DRAWING_TOOL_ID,
+    DrawingTool,
+    MagnetMode,
+    type RendererBackendRuntime,
+  } from '@363045841yyt/klinechart-core/controllers'
   import { computed, onMounted, ref, watch } from 'vue'
   import IconTablerAlignJustified from '~icons/tabler/align-justified'
   import IconTablerAngle from '~icons/tabler/angle'
@@ -265,19 +379,26 @@
   import IconTablerChartLine from '~icons/tabler/chart-line'
   import IconTablerChevronRight from '~icons/tabler/chevron-right'
   import IconTablerEqual from '~icons/tabler/equal'
+  import IconTablerEye from '~icons/tabler/eye'
+  import IconTablerEyeOff from '~icons/tabler/eye-off'
   import IconTablerInfoCircle from '~icons/tabler/info-circle'
   import IconTablerLock from '~icons/tabler/lock'
   import IconTablerLockOpen from '~icons/tabler/lock-open'
+  import IconTablerMagnet from '~icons/tabler/magnet'
+  import IconTablerMagnetFilled from '~icons/tabler/magnet-filled'
+  import IconTablerMagnetOff from '~icons/tabler/magnet-off'
+  import IconTablerMarquee2 from '~icons/tabler/marquee-2'
   import IconTablerMathFunction from '~icons/tabler/math-function'
   import IconTablerMaximize from '~icons/tabler/maximize'
   import IconTablerMinimize from '~icons/tabler/minimize'
   import IconTablerMinus from '~icons/tabler/minus'
   import IconTablerMinusVertical from '~icons/tabler/minus-vertical'
+  import IconTablerPencil from '~icons/tabler/pencil'
   import IconTablerPlus from '~icons/tabler/plus'
   import IconTablerPointer from '~icons/tabler/pointer'
-  import IconTablerSelect from '~icons/tabler/select'
   import IconTablerSettings from '~icons/tabler/settings'
   import IconTablerShape from '~icons/tabler/shape'
+  import IconTablerTrash from '~icons/tabler/trash'
   import IconTablerX from '~icons/tabler/x'
   import IconTablerZoomIn from '~icons/tabler/zoom-in'
   import IconTablerZoomOut from '~icons/tabler/zoom-out'
@@ -289,6 +410,7 @@
   import AlertDialog from './alert/AlertDialog.vue'
   import ChartSettingsDialog from './ChartSettingsDialog.vue'
   import BaseTooltip from './common/BaseTooltip.vue'
+  import { RANGE_SELECT_UI_TOOL_ID } from './toolbarToolIds.js'
 
   export interface ToolDef {
     id: string
@@ -298,20 +420,20 @@
   }
 
   const primaryTools: ToolDef[] = [
-    { id: 'cursor', title: '光标', icon: IconTablerPointer },
-    { id: 'box-select', title: '框选', icon: IconTablerSelect },
+    { id: CURSOR_DRAWING_TOOL_ID, title: '光标', icon: IconTablerPointer },
+    { id: BOX_SELECT_DRAWING_TOOL_ID, title: '框选', icon: IconTablerMarquee2 },
     {
       id: 'lines',
       title: '线条',
       icon: IconTablerChartLine,
       children: [
-        { id: 'trend-line', title: '线段', icon: IconTablerChartLine },
-        { id: 'ray', title: '射线', icon: IconTablerArrowUpRight },
-        { id: 'h-line', title: '水平线', icon: IconTablerMinus },
-        { id: 'h-ray', title: '水平射线', icon: IconTablerArrowRight },
-        { id: 'v-line', title: '垂直线', icon: IconTablerMinusVertical },
-        { id: 'crosshair-line', title: '十字线', icon: IconTablerPlus },
-        { id: 'info-line', title: '信息线', icon: IconTablerInfoCircle },
+        { id: DrawingTool.TrendLine, title: '线段', icon: IconTablerChartLine },
+        { id: DrawingTool.Ray, title: '射线', icon: IconTablerArrowUpRight },
+        { id: DrawingTool.HorizontalLine, title: '水平线', icon: IconTablerMinus },
+        { id: DrawingTool.HorizontalRay, title: '水平射线', icon: IconTablerArrowRight },
+        { id: DrawingTool.VerticalLine, title: '垂直线', icon: IconTablerMinusVertical },
+        { id: DrawingTool.CrosshairLine, title: '十字线', icon: IconTablerPlus },
+        { id: DrawingTool.InfoLine, title: '信息线', icon: IconTablerInfoCircle },
       ],
     },
     {
@@ -319,10 +441,10 @@
       title: '通道',
       icon: IconTablerEqual,
       children: [
-        { id: 'parallel-channel', title: '平行通道', icon: IconTablerEqual },
-        { id: 'regression-channel', title: '回归趋势', icon: IconTablerChartDots3 },
-        { id: 'flat-line', title: '平滑顶底', icon: IconTablerAngle },
-        { id: 'disjoint-channel', title: '不相交通道', icon: IconTablerX },
+        { id: DrawingTool.ParallelChannel, title: '平行通道', icon: IconTablerEqual },
+        { id: DrawingTool.RegressionChannel, title: '回归趋势', icon: IconTablerChartDots3 },
+        { id: DrawingTool.FlatLine, title: '平滑顶底', icon: IconTablerAngle },
+        { id: DrawingTool.DisjointChannel, title: '不相交通道', icon: IconTablerX },
       ],
     },
     {
@@ -330,22 +452,46 @@
       title: '标注',
       icon: IconTablerShape,
       children: [
-        { id: 'fib-retracement', title: '斐波那契回撤', icon: IconTablerAlignJustified },
-        { id: 'rectangle', title: '矩形', icon: IconTablerShape },
-        { id: 'arrow', title: '箭头', icon: IconTablerArrowUpRight },
+        { id: DrawingTool.FibRetracement, title: '斐波那契回撤', icon: IconTablerAlignJustified },
+        { id: DrawingTool.Rectangle, title: '矩形', icon: IconTablerShape },
+        { id: DrawingTool.Arrow, title: '箭头', icon: IconTablerArrowUpRight },
       ],
     },
-    { id: 'range-select', title: '区间选择', icon: IconTablerArrowsHorizontal },
+    { id: RANGE_SELECT_UI_TOOL_ID, title: '区间选择', icon: IconTablerArrowsHorizontal },
   ]
+  const deleteGroup: ToolDef = {
+    id: 'delete',
+    title: '删除',
+    icon: IconTablerTrash,
+    children: [
+      { id: 'drawings', title: '删除所有绘图', icon: IconTablerTrash },
+      { id: 'indicators', title: '移除所有指标', icon: IconTablerMathFunction },
+    ],
+  }
+  const magnetGroup: ToolDef = {
+    id: 'magnet',
+    title: '磁吸',
+    icon: IconTablerMagnet,
+    children: [
+      { id: MagnetMode.Strong, title: '强磁铁', icon: IconTablerMagnetFilled },
+      { id: MagnetMode.Weak, title: '弱磁铁', icon: IconTablerMagnet },
+      { id: MagnetMode.Off, title: '关闭磁吸', icon: IconTablerMagnetOff },
+    ],
+  }
   const emit = defineEmits<{
     (e: 'selectTool', toolId: string): void
+    (e: 'setMagnetMode', mode: MagnetMode): void
+    (e: 'setContinuousDrawing', enabled: boolean): void
     (e: 'toggleFullscreen'): void
     (e: 'toggleIndicator'): void
     (e: 'zoomIn'): void
     (e: 'zoomOut'): void
     (e: 'undoDrawing'): void
     (e: 'redoDrawing'): void
+    (e: 'clearDrawings'): void
+    (e: 'clearIndicators'): void
     (e: 'setGlobalDrawingLock', locked: boolean): void
+    (e: 'setAllDrawingsVisible', visible: boolean): void
     (e: 'settingsChange', settings: ChartSettings): void
     (e: 'clearMarketDataCache'): void
     (e: 'toggleAggregationSource', name: string, enabled: boolean): void
@@ -361,10 +507,14 @@
       marketDataCacheStats?: MarketDataCacheStats
       /** kernel drawingTool 镜像；高亮以它为准 */
       drawingToolId?: string
+      magnetMode?: MagnetMode
+      continuousDrawing?: boolean
       canUndoDrawing?: boolean
       canRedoDrawing?: boolean
       /** 是否存在已确认图元；无图元且未锁定时禁用全部锁定按钮 */
       hasDrawings?: boolean
+      hasIndicators?: boolean
+      allDrawingsHidden?: boolean
       /** 全局绘图锁定状态：为 true 时全部图元不可移动 */
       globalDrawingLocked?: boolean
       /** range-select 本地模式 */
@@ -379,15 +529,41 @@
       aggregationSources: () => [],
       enabledSourceNames: () => new Set<string>(),
       sourceEndpoints: () => ({}),
+      magnetMode: MagnetMode.Off,
     },
   )
 
   const { unreadCount } = useAlerts(() => props.alertController ?? null)
 
-  const selectedToolId = ref('cursor')
+  const selectedToolId = ref<string>(CURSOR_DRAWING_TOOL_ID)
   const groupSelections = ref<Record<string, string>>({})
+  const selectedDeleteTool = computed(
+    () =>
+      deleteGroup.children!.find((child) => child.id === groupSelections.value[deleteGroup.id]) ??
+      deleteGroup.children![0]!,
+  )
+  /** 主按钮下次开启磁吸时恢复的档位（off 不计入）。 */
+  const lastActiveMagnetMode = ref<ActiveMagnetMode>(MagnetMode.Strong)
   const openGroupId = ref<string | null>(null)
-  const openGroup = computed(() => primaryTools.find((tool) => tool.id === openGroupId.value))
+  const openGroup = computed(() =>
+    openGroupId.value === deleteGroup.id
+      ? deleteGroup
+      : openGroupId.value === magnetGroup.id
+        ? magnetGroup
+        : primaryTools.find((tool) => tool.id === openGroupId.value),
+  )
+  const magnetSelection = computed(
+    () =>
+      magnetGroup.children!.find((child) => child.id === props.magnetMode) ??
+      magnetGroup.children![2]!,
+  )
+  watch(
+    () => props.magnetMode,
+    (mode) => {
+      if (mode !== MagnetMode.Off) lastActiveMagnetMode.value = mode
+    },
+    { immediate: true },
+  )
   const triggerRef = ref<HTMLElement | null>(null)
   const menuRef = ref<HTMLElement | null>(null)
   const teleportTarget = useFullscreenTeleportTarget()
@@ -397,7 +573,7 @@
 
   /** 高亮 id：range 模式优先，否则 kernel tool，否则本地 click 缓存 */
   const highlightToolId = computed(() => {
-    if (props.isRangeSelectMode) return 'range-select'
+    if (props.isRangeSelectMode) return RANGE_SELECT_UI_TOOL_ID
     return props.drawingToolId ?? selectedToolId.value
   })
 
@@ -468,9 +644,37 @@
   }
 
   function selectChild(group: ToolDef, child: ToolDef) {
+    if (group.id === deleteGroup.id) {
+      groupSelections.value[group.id] = child.id
+      runDelete(child.id)
+      openGroupId.value = null
+      return
+    }
+    if (group.id === magnetGroup.id) {
+      // 磁吸子项的 id 就是 MagnetMode 的三个取值。
+      setMagnetMode(child.id as MagnetMode)
+      openGroupId.value = null
+      return
+    }
     selectedToolId.value = child.id
     groupSelections.value[group.id] = child.id
     emit('selectTool', child.id)
+    openGroupId.value = null
+  }
+
+  function runDelete(id: string) {
+    if (id === 'drawings' && props.hasDrawings) emit('clearDrawings')
+    if (id === 'indicators' && props.hasIndicators) emit('clearIndicators')
+  }
+
+  /** 切换磁吸开关：关闭时再次点击恢复上次使用的吸附档位。 */
+  function setMagnetMode(mode: MagnetMode): void {
+    if (mode !== MagnetMode.Off) lastActiveMagnetMode.value = mode
+    emit('setMagnetMode', mode)
+  }
+
+  function toggleMagnet() {
+    setMagnetMode(props.magnetMode === MagnetMode.Off ? lastActiveMagnetMode.value : MagnetMode.Off)
     openGroupId.value = null
   }
 
@@ -681,7 +885,7 @@
   /* --- 下拉菜单（与工具栏同配色、同按钮样式，高度对齐工具栏宽度） --- */
   .tool-dropdown {
     --menu-padding-y: 5px;
-    --menu-left: clamp(8px, calc(var(--menu-anchor-left) + 16px), calc(100vw - var(--tool-button-size) - 16px));
+    --menu-left: clamp(8px, calc(var(--menu-anchor-left) + 4px), calc(100vw - var(--tool-button-size) - 16px));
     --menu-half-height: calc(var(--tool-button-size) / 2 + var(--menu-padding-y) + 1px);
     position: fixed;
     left: var(--menu-left);

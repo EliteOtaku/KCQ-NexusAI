@@ -12,11 +12,14 @@ import {
   type DrawingObject,
   type DrawingStyle,
   type DrawingToolId,
+  type MagnetMode,
 } from '@363045841yyt/klinechart-core/controllers'
 import { computed, onUnmounted, type Ref, shallowRef } from 'vue'
 
 export function useDrawingManager(ctrl: Ref<ChartController | null>) {
   const drawingController = shallowRef<DrawingInteractionController | null>(null)
+  const magnetMode = shallowRef<MagnetMode>('off')
+  const continuousDrawing = shallowRef(false)
   /** 镜像 kernel.selectedDrawingIds（shallowRef 避免 deep proxy 破坏 Object.is）。 */
   const selectedDrawingIds = shallowRef<ReadonlyArray<string>>([])
   const drawings = shallowRef<ReadonlyArray<DrawingObject>>([])
@@ -40,6 +43,16 @@ export function useDrawingManager(ctrl: Ref<ChartController | null>) {
   function handleSelectTool(toolId: string) {
     // Chart 单写路径：kernel + session side effects
     ctrl.value?.setDrawingToolId(toolId as DrawingToolId)
+  }
+
+  function setMagnetMode(mode: MagnetMode) {
+    magnetMode.value = mode
+    drawingController.value?.setMagnetMode(mode)
+  }
+
+  function setContinuousDrawing(enabled: boolean) {
+    continuousDrawing.value = enabled
+    drawingController.value?.setContinuousDrawing(enabled)
   }
 
   function onUpdateDrawingStyle(style: Partial<DrawingStyle>) {
@@ -76,11 +89,32 @@ export function useDrawingManager(ctrl: Ref<ChartController | null>) {
     ctrl.value?.removeBatch(ids)
   }
 
+  /** 复制当前选择，位置与选中状态由 Core 原子处理。 */
+  function onCopyDrawings() {
+    ctrl.value?.copyDrawings(selectedDrawingIds.value)
+  }
+
   /** 批量写入选中图元的锁定状态。 */
   function onToggleDrawingLock(locked: boolean) {
     const ids = selectedDrawingIds.value
     if (ids.length === 0) return
     ctrl.value?.updateBatch(ids, { locked })
+  }
+
+  /** 隐藏选中图元；Core 同步移除其选中状态。 */
+  function onHideSelectedDrawings() {
+    const ids = selectedDrawingIds.value.filter((id) =>
+      drawings.value.some((drawing) => drawing.id === id && drawing.visible),
+    )
+    if (ids.length > 0) ctrl.value?.updateBatch(ids, { visible: false })
+  }
+
+  /** 一次事务设置整张图表的图元可见性。 */
+  function onSetAllDrawingsVisible(visible: boolean) {
+    const ids = drawings.value
+      .filter((drawing) => drawing.visible !== visible)
+      .map((drawing) => drawing.id)
+    if (ids.length > 0) ctrl.value?.updateBatch(ids, { visible })
   }
 
   /** 切换全局绘图锁定；只冻结移动，不改写各图元自身 locked。 */
@@ -90,6 +124,8 @@ export function useDrawingManager(ctrl: Ref<ChartController | null>) {
 
   function setupDrawing(chartCtrl: ChartController): void {
     drawingController.value = new DrawingInteractionController(chartCtrl)
+    drawingController.value.setMagnetMode(magnetMode.value)
+    drawingController.value.setContinuousDrawing(continuousDrawing.value)
     chartCtrl.registerDrawingSession(drawingController.value)
 
     // UI 只镜像 kernel 已确认列表；预览/拖拽不进 Vue ref
@@ -132,6 +168,10 @@ export function useDrawingManager(ctrl: Ref<ChartController | null>) {
 
   return {
     drawingController,
+    magnetMode,
+    setMagnetMode,
+    continuousDrawing,
+    setContinuousDrawing,
     selectedDrawingIds: readonlySelectedDrawingIds,
     selectedDrawings,
     selectedDrawingStyleKeys,
@@ -142,7 +182,10 @@ export function useDrawingManager(ctrl: Ref<ChartController | null>) {
     applyTemplateToSelected,
     updateDrawingLabel,
     onDeleteDrawing,
+    onCopyDrawings,
     onToggleDrawingLock,
+    onHideSelectedDrawings,
+    onSetAllDrawingsVisible,
     onSetGlobalDrawingLock,
     setupDrawing,
   }

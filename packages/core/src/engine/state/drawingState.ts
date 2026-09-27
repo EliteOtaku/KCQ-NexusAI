@@ -33,7 +33,8 @@ function hasSameIds(left: ReadonlyArray<string>, right: ReadonlyArray<string>): 
 
 export function createDrawingState() {
   const { signals, readonly } = createSubState({
-    drawingTool: CURSOR_DRAWING_TOOL_ID,
+    // 常量保持字面量类型，此处显式标注让信号类型仍是完整的 DrawingToolId。
+    drawingTool: CURSOR_DRAWING_TOOL_ID as DrawingToolId,
     drawings: Object.freeze([]) as ReadonlyArray<DrawingObject>,
     selectedDrawingIds: Object.freeze([]) as ReadonlyArray<string>,
     globalDrawingLock: false,
@@ -79,14 +80,19 @@ export function createDrawingState() {
         })
       },
 
-      /** 新增图元并在同一次通知内将其设为唯一选中，创建与选中不可分割。 */
-      addDrawingAndSelect(drawing: DrawingObject): void {
-        const next = snapshotDrawings([...signals.drawings.peek(), drawing])
-        const selected = snapshotSelectedDrawingIds([drawing.id], next)
+      /** 原子新增一组图元并选中整组，创建与选中不可分割。 */
+      addDrawingsAndSelect(drawings: ReadonlyArray<DrawingObject>): ReadonlyArray<DrawingObject> {
+        if (drawings.length === 0) return Object.freeze([])
+        const next = snapshotDrawings([...signals.drawings.peek(), ...drawings])
+        const selected = snapshotSelectedDrawingIds(
+          drawings.map((drawing) => drawing.id),
+          next,
+        )
         batch(() => {
           signals.drawings.set(next)
           signals.selectedDrawingIds.set(selected)
         })
+        return Object.freeze(next.slice(-drawings.length))
       },
 
       /** 以完整模型快照替换指定图元，并返回更新后的不可变快照。 */
@@ -128,7 +134,16 @@ export function createDrawingState() {
           }
         })
         const snapshot = snapshotDrawings(next)
-        signals.drawings.set(snapshot)
+        const selected =
+          patch.visible === false
+            ? signals.selectedDrawingIds.peek().filter((id) => !idSet.has(id))
+            : signals.selectedDrawingIds.peek()
+        batch(() => {
+          signals.drawings.set(snapshot)
+          if (!hasSameIds(signals.selectedDrawingIds.peek(), selected)) {
+            signals.selectedDrawingIds.set(Object.freeze(selected))
+          }
+        })
         const snapshotsById = new Map(snapshot.map((drawing) => [drawing.id, drawing]))
         return Object.freeze(targets.map((drawing) => snapshotsById.get(drawing.id)!))
       },

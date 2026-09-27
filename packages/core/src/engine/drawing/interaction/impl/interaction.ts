@@ -9,6 +9,7 @@ import type {
   ResolveDrawingPointerOptions,
   ResolvedInteractionAnchor,
 } from '../../geometry/types.js'
+import { MagnetMode } from '../../magnet/types.js'
 import { isDrawingMovementLocked } from '../../model/impl/drawingAccess.js'
 import {
   clearDrawingSelection,
@@ -21,8 +22,8 @@ import type {
   DrawingToolId,
   HitResult,
   LineLabelTarget,
-  MagnetMode,
 } from '../types.js'
+import { BOX_SELECT_DRAWING_TOOL_ID, CURSOR_DRAWING_TOOL_ID } from '../types.js'
 import { AnchorCollector } from './AnchorCollector.js'
 import { DragHandler } from './DragHandler.js'
 import { HitTester } from './HitTester.js'
@@ -58,7 +59,9 @@ export class DrawingInteractionController {
   private pendingPaneId: string | null = null
   private pointerSession: DrawingPointerSession = { kind: 'idle' }
   /** 磁吸档位（会话级交互配置，不进 StateKernel；见 docs/design 引擎绘图硬化文档）。 */
-  private magnetMode: MagnetMode = 'off'
+  private magnetMode: MagnetMode = MagnetMode.Off
+  /** 完成图元后是否继续使用当前绘图工具。 */
+  private continuousDrawing = false
 
   constructor(adapter: DrawingChartAdapter) {
     this.adapter = adapter
@@ -122,6 +125,10 @@ export class DrawingInteractionController {
     return this.magnetMode
   }
 
+  setContinuousDrawing(enabled: boolean): void {
+    this.continuousDrawing = enabled
+  }
+
   // ============ 图元 CRUD ============
 
   getDrawings(): DrawingObject[] {
@@ -169,7 +176,8 @@ export class DrawingInteractionController {
 
   /** 查找指针命中的文本热点（线段中点/填充中心）；只在光标模式且非拖拽时可编辑，锁定图元同样可编辑文本。 */
   getLineLabelTarget(e: PointerEvent, container: HTMLElement): DrawingLineLabelTarget | null {
-    if (this.getActiveTool() !== 'cursor' || this.dragHandler.isDragging()) return null
+    if (this.getActiveTool() !== CURSOR_DRAWING_TOOL_ID || this.dragHandler.isDragging())
+      return null
     const pointer = resolveDrawingPointer(e, container, this.adapter)
     if (!pointer) return null
     return this.hitTester.findLabelTarget(
@@ -191,8 +199,8 @@ export class DrawingInteractionController {
     if (this.pointerSession.kind === 'marquee') return this.handleSelectionMarqueeMove(e, container)
 
     const activeTool = this.getActiveTool()
-    if (activeTool === 'box-select') return false
-    if (activeTool !== 'cursor') {
+    if (activeTool === BOX_SELECT_DRAWING_TOOL_ID) return false
+    if (activeTool !== CURSOR_DRAWING_TOOL_ID) {
       const pointer = resolveDrawingPointer(
         e,
         container,
@@ -229,11 +237,11 @@ export class DrawingInteractionController {
    */
   onPointerDown(e: PointerEvent, container: HTMLElement): boolean {
     const activeTool = this.getActiveTool()
-    if (activeTool === 'cursor') {
+    if (activeTool === CURSOR_DRAWING_TOOL_ID) {
       return this.handleCursorDown(e, container)
     }
 
-    if (activeTool === 'box-select') {
+    if (activeTool === BOX_SELECT_DRAWING_TOOL_ID) {
       return this.handleBoxSelectDown(e, container)
     }
 
@@ -248,7 +256,7 @@ export class DrawingInteractionController {
     const anchorCount = getAnchorCountForTool(activeTool)
 
     if (anchorCount === 1) {
-      this.createSingleAnchorDrawing(pointer, activeTool)
+      this.completeDrawing(activeTool, pointer.paneId, [pointer])
       return true
     }
 
@@ -256,8 +264,8 @@ export class DrawingInteractionController {
       if (this.pendingPaneId === null) this.pendingPaneId = pointer.paneId
       const result = this.anchorCollector.addAnchor(pointer, activeTool)
       if (result) {
-        this.createMultiAnchorDrawing(result, activeTool, pointer.paneId)
         this.pendingPaneId = null
+        this.completeDrawing(activeTool, pointer.paneId, result)
       }
       return true
     }
@@ -296,9 +304,11 @@ export class DrawingInteractionController {
   private resolveMagnetOptions(e: PointerEvent): ResolveDrawingPointerOptions | undefined {
     if (e.shiftKey) return undefined
     if (e.ctrlKey || e.metaKey) {
-      return this.magnetMode === 'off' ? { magnet: { mode: 'strong' } } : undefined
+      return this.magnetMode === MagnetMode.Off
+        ? { magnet: { mode: MagnetMode.Strong } }
+        : undefined
     }
-    return this.magnetMode === 'off' ? undefined : { magnet: { mode: this.magnetMode } }
+    return this.magnetMode === MagnetMode.Off ? undefined : { magnet: { mode: this.magnetMode } }
   }
 
   /**
@@ -373,7 +383,7 @@ export class DrawingInteractionController {
    */
   getHoveredTarget(pointer: PointerCoordinates, container: HTMLElement): DrawingHoverTarget {
     const tool = this.getActiveTool()
-    if (tool !== 'cursor' && tool !== 'box-select') return 'none'
+    if (tool !== CURSOR_DRAWING_TOOL_ID && tool !== BOX_SELECT_DRAWING_TOOL_ID) return 'none'
     if (this.dragHandler.isDragging()) return 'none'
     const resolved = resolveDrawingPointer(pointer, container, this.adapter)
     if (!resolved) return 'none'
@@ -527,29 +537,15 @@ export class DrawingInteractionController {
     )
   }
 
-  private createSingleAnchorDrawing(anchor: DrawingPointerAnchor, activeTool: DrawingToolId): void {
-    // 先复位工具：切回 cursor 会清空选中，必须在创建前完成，创建会原子选中新图元。
-    this.adapter.setDrawingToolId('cursor')
-    this.adapter.createDrawing({
-      kind: getDrawingKind(activeTool),
-      paneId: anchor.paneId,
-      anchors: [
-        {
-          timestamp: anchor.time,
-          futureOffset: anchor.futureOffset,
-          price: anchor.price,
-        },
-      ],
-    })
-  }
-
-  private createMultiAnchorDrawing(
-    anchors: ResolvedInteractionAnchor[],
+  /** 一笔绘图的统一收尾：移除临时预览，再提交图元并决定是否保留工具。 */
+  private completeDrawing(
     activeTool: DrawingToolId,
     paneId: string,
+    anchors: ReadonlyArray<ResolvedInteractionAnchor>,
   ): void {
-    // 先复位工具：切回 cursor 会清空选中，必须在创建前完成，创建会原子选中新图元。
-    this.adapter.setDrawingToolId('cursor')
+    this.sessionOverlay.removePreview()
+    // 工具切换会清空选中，必须在创建（原子选中新图元）之前完成。
+    if (!this.continuousDrawing) this.adapter.setDrawingToolId(CURSOR_DRAWING_TOOL_ID)
     this.adapter.createDrawing({
       kind: getDrawingKind(activeTool),
       paneId,

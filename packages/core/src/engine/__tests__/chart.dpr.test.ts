@@ -41,6 +41,32 @@ function pointerEvent(
 }
 
 describe('Chart DPR pipeline', () => {
+  it('keeps the crosshair visible while drawing preview consumes mouse moves', async () => {
+    const dom = createChartDom(1000, 600)
+    const chart = new Chart(dom, defaultOptions)
+    chart.resize()
+    chart.setData(
+      Array.from({ length: 100 }, (_, timestamp) => ({
+        timestamp,
+        open: 10,
+        high: 11,
+        low: 9,
+        close: 10,
+      })),
+    )
+    chart.drawing.setTool('trend-line')
+    chart.draw()
+
+    const handled = chart.handlePointerEvent(
+      pointerEvent('pointermove', dom.container, { pointerType: 'mouse' }),
+      { onPointerMove: () => true },
+    )
+    chart.draw()
+    expect(handled).toBe(true)
+    expect(chart.interaction.crosshairPos).not.toBeNull()
+    await chart.destroy()
+  })
+
   it('checks history only after the last pinch pointer is lifted, not on leave or render', async () => {
     const dom = createChartDom(1000, 600)
     dom.container.setPointerCapture = () => {}
