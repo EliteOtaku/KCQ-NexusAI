@@ -1,8 +1,8 @@
 /**
  * 未来区时间轴测试：collectFutureTimeBoundaries 纯函数语义与 timeAxis 渲染接线。
  *
- * 语义锚点：数据止于 2026-01-30（周五），FOREX 日历外推跳周末；
- * 未来刻度按外推时间的年月 key 变化检测，color 降级为 text.tertiary。
+ * 语义锚点：测试夹具提供连续的未来时间戳；有日历显示年月边界，
+ * 无日历按相对索引步长显示 T+X，未来刻度使用 text.tertiary。
  */
 import { describe, expect, it } from 'vitest'
 
@@ -10,7 +10,11 @@ import { createMockRenderContext } from '@/engine/__tests__/helpers/renderTestKi
 import { AXIS_LABEL_KIND, type AxisTickLabel } from '@/foundation/plugin/index'
 import { resolveThemeColors } from '@/foundation/tokens/index'
 import { createDisplayTimeFormatter } from '@/foundation/utils/dateFormat'
-import { collectFutureTimeBoundaries, createTimeAxisRendererPlugin } from '../timeAxis'
+import {
+  collectFutureTimeBoundaries,
+  createTimeAxisRendererPlugin,
+  resolveFutureTickStep,
+} from '../timeAxis'
 import { createDailyBars, createDailyFutureTimestamp } from './helpers/futureAxisTestKit'
 
 const DATA_LENGTH = 100
@@ -22,7 +26,7 @@ const getTimestamp = createDailyFutureTimestamp(DATA_LENGTH)
 const indexesOf = (boundaries: Array<{ index: number }>): number[] =>
   boundaries.map((boundary) => boundary.index)
 
-/** FOREX 日历下第 steps 个未来槽位的日期 key（UTC 年月日）。 */
+/** 测试日历中第 steps 个未来槽位的日期 key（UTC 年月日）。 */
 function futureKey(steps: number): string {
   return formatter.formatDate(getTimestamp(DATA_LENGTH + steps) ?? Number.NaN)
 }
@@ -43,15 +47,9 @@ describe('collectFutureTimeBoundaries 纯函数', () => {
       expect(idx).toBeGreaterThanOrEqual(DATA_LENGTH)
       expect(idx).toBeLessThan(RANGE_END)
     }
-    // 语义锚点：末根 2026-01-30（周五）→ FOREX 24/5 跳过周六周日，首个未来槽位为
-    // 2026-02-02（周一，跨月成界）；此后同月槽位不再记
-    expect(indexesOf(boundaries)).toContain(DATA_LENGTH)
-    expect(indexesOf(boundaries)).not.toContain(DATA_LENGTH + 1)
-    expect(futureKey(0)).toBe('2026-02-02')
-    // 下一个月界：2026-03-02（idx 120，2 月交易日步进后跨月）
-    expect(indexesOf(boundaries)).toContain(DATA_LENGTH + 20)
-    expect(indexesOf(boundaries)).not.toContain(DATA_LENGTH + 21)
-    expect(futureKey(20)).toBe('2026-03-02')
+    // 夹具提供连续槽位时间戳，月界由返回的时间戳决定。
+    expect(indexesOf(boundaries)).toEqual([101, 129])
+    expect(futureKey(1)).toBe('2026-02-01')
   })
 
   it('无未来槽位（rangeEnd <= dataLength）返回空数组', () => {
@@ -113,8 +111,7 @@ describe('collectFutureTimeBoundaries 纯函数', () => {
   })
 
   it('纯未来视口（rangeStart > dataLength）锚点取扫描起点前一槽，不误判首槽月界', () => {
-    // rangeStart=130 对应 2026-03-16（周一）：修复前锚点固定末根历史 bar（2026-01-30），
-    // 首槽跨 key 被误判为月界；修复后每槽与自身前一槽比 key，仅真实月界成界
+    // 每个槽位与前一槽比较日期 key，而不是与最后一根历史 K 线比较。
     const boundaries = collectFutureTimeBoundaries({
       dataLength: DATA_LENGTH,
       rangeStart: 130,
@@ -124,11 +121,8 @@ describe('collectFutureTimeBoundaries 纯函数', () => {
       dateKeyOf: (ts) => formatter.formatDate(ts),
     })
 
-    // 真实 FOREX 日历月界：2026-04-01（idx 142）、2026-05-01（idx 164）、2026-06-01（idx 185）；
-    // idx 130（2026-03-16，3 月中旬）不是月界，必须被排除
-    expect(indexesOf(boundaries)).toEqual([142, 164, 185])
+    expect(indexesOf(boundaries)).toEqual([160])
     expect(indexesOf(boundaries)).not.toContain(130)
-    // 返回值携带外推时间戳：2026-04-01（周三）
     expect(boundaries[0]?.timestamp).toBe(Date.UTC(2026, 3, 1))
   })
 })
@@ -170,22 +164,68 @@ describe('collectTimeAxisTicks 未来区接线', () => {
     expect(historical.find((label) => label.text === '2026')?.bold).toBe(true)
   })
 
-  it('无 getTimestampAtLogicalIndex 时（分时路径）不产生未来刻度', () => {
+  it('无交易日历时按整数步长显示 T+X，纯未来视口也有刻度', () => {
     const data = createDailyBars(DATA_LENGTH)
     const context = createMockRenderContext({
       data,
       period: 'daily',
       range: { start: 60, end: RANGE_END },
       kLineCenters: Array.from({ length: RANGE_END - 60 }, (_, i) => 6 * (60 + i) + 3),
+      paneWidth: 1400,
       displayTimeFormatter: formatter,
     })
     createTimeAxisRendererPlugin({ height: 24 }).draw(context)
 
-    // xTicks 表面只注册 TICK 变体，kind 收窄后读取 color
+    // 一槽 8px，最小间距 56px → 取 10 槽步长，刻度只落在 T+10 的倍数。
     const labels = context.axisLabels
       .forSurface('xTicks')
       .labels.filter((label): label is AxisTickLabel => label.kind === AXIS_LABEL_KIND.TICK)
     const colors = resolveThemeColors('light')
-    expect(labels.filter((label) => label.color === colors.text.tertiary)).toEqual([])
+    expect(
+      labels.filter((label) => label.color === colors.text.tertiary).map((label) => label.text),
+    ).toEqual(['T+1', 'T+20', 'T+30', 'T+40', 'T+50', 'T+60'])
+
+    const futureOnly = createMockRenderContext({
+      data,
+      period: 'daily',
+      range: { start: 120, end: 160 },
+      kLineCenters: Array.from({ length: 40 }, (_, i) => 8 * (120 + i) + 4),
+      scrollLeft: 900,
+    })
+    createTimeAxisRendererPlugin({ height: 24 }).draw(futureOnly)
+    expect(futureOnly.axisLabels.forSurface('xTicks').labels.map((label) => label.text)).toEqual([
+      'T+30',
+      'T+40',
+      'T+50',
+      'T+60',
+    ])
+  })
+
+  it('日历仅覆盖部分槽位时，已知日期继续展示，未覆盖的槽显示 T+X', () => {
+    const data = createDailyBars(DATA_LENGTH)
+    const context = createMockRenderContext({
+      data,
+      period: 'daily',
+      range: { start: 90, end: 140 },
+      kLineCenters: Array.from({ length: 50 }, (_, i) => 8 * (90 + i) + 4),
+      paneWidth: 1200,
+      getTimestampAtLogicalIndex: (index) => (index < 110 ? getTimestamp(index) : null),
+      displayTimeFormatter: formatter,
+    })
+    createTimeAxisRendererPlugin({ height: 24 }).draw(context)
+    const future = context.axisLabels
+      .forSurface('xTicks')
+      .labels.filter((label): label is AxisTickLabel => label.kind === AXIS_LABEL_KIND.TICK)
+      .filter((label) => label.color === resolveThemeColors('light').text.tertiary)
+      .map((label) => label.text)
+    expect(future).toContain('2月')
+    expect(future).toContain('T+20')
+    expect(future).not.toContain('T+10')
+  })
+
+  it('缩放时占位步长采用 1/2/5 倍数，且标签间距不少于 56px', () => {
+    expect(resolveFutureTickStep(8, 56)).toBe(10)
+    expect(resolveFutureTickStep(3, 56)).toBe(20)
+    expect(resolveFutureTickStep(1, 56)).toBe(100)
   })
 })
