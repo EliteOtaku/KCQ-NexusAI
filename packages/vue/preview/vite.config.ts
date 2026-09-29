@@ -85,6 +85,10 @@ export default defineConfig({
         target: 'http://127.0.0.1:8888',
         changeOrigin: true,
       },
+      '/api/option-levels': {
+        target: 'http://127.0.0.1:8888',
+        changeOrigin: true,
+      },
       '/api/options_gamma': {
         target: 'http://127.0.0.1:8888',
         changeOrigin: true,
