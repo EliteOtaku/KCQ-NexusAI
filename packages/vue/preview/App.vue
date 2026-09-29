@@ -84,6 +84,7 @@
     createHeatmapController,
   } from '@363045841yyt/klinechart-core/controllers'
   import { formatTimeInTimeZone } from '@363045841yyt/klinechart-core'
+  import type { RendererPlugin } from '@363045841yyt/klinechart-core'
   import { resolveSettings } from '@363045841yyt/klinechart-core/config'
 
   /** 硬编码演示数据：主品种 CUSTOM.DEMO（15 根日 K） */
@@ -569,6 +570,57 @@
     agentBridge.bindChartAgent(controller.agent)
     currentTheme.value = controller.theme.peek()
     bindDocumentTitle(controller)
+    void loadExternalRenderers(controller)
+  }
+
+  // ── 外部渲染器插件加载点 ──
+  // 宿主声明外部渲染器插件模块 URL 列表（站点内路径或 http/https）：
+  //   1) localStorage['kcq_external_renderers'] = JSON 数组
+  //   2) URL 查询参数 ?externalRenderers=url1,url2
+  // 模块契约：default / renderers / renderer 命名导出 RendererPlugin 或其数组。
+  // 动态 import 加载；单模块失败仅告警，不影响工作台与其它插件（互相隔离）。
+  // Demo：?externalRenderers=/external-demo-renderer.js（preview/public 原样服务）。
+  async function loadExternalRenderers(controller: ChartController) {
+    const sources: string[] = []
+    try {
+      const raw = localStorage.getItem('kcq_external_renderers')
+      if (raw) {
+        const parsed: unknown = JSON.parse(raw)
+        if (Array.isArray(parsed)) {
+          sources.push(...parsed.filter((s): s is string => typeof s === 'string' && s.length > 0))
+        }
+      }
+    } catch {
+      // 声明无效时忽略，仅用查询参数
+    }
+    const fromQuery = new URLSearchParams(window.location.search).get('externalRenderers')
+    if (fromQuery) {
+      for (const item of fromQuery.split(',')) {
+        const trimmed = item.trim()
+        if (trimmed) sources.push(trimmed)
+      }
+    }
+    for (const url of sources) {
+      try {
+        // 归一为绝对 URL：dev 管线只放行外部协议的动态 import（相对路径会被
+        // 重写 ?import 进模块图，public/ 资产不在图内而 404）
+        const href = /^https?:\/\//i.test(url) ? url : new URL(url, window.location.href).href
+        const mod: Record<string, unknown> = await import(/* @vite-ignore */ href)
+        const exported = mod.default ?? mod.renderers ?? mod.renderer
+        const list = Array.isArray(exported) ? exported : exported ? [exported] : []
+        for (const item of list) {
+          const plugin = item as RendererPlugin | undefined
+          if (plugin && typeof plugin.name === 'string' && typeof plugin.draw === 'function') {
+            controller.useRenderer(plugin)
+            console.info(`[preview] external renderer registered: ${plugin.name} (${url})`)
+          } else {
+            console.warn(`[preview] external renderer module has no valid RendererPlugin export: ${url}`)
+          }
+        }
+      } catch (error) {
+        console.warn(`[preview] external renderer load failed: ${url}`, error)
+      }
+    }
   }
 
   provideFullscreenTeleportTarget(embedContainerRef)
