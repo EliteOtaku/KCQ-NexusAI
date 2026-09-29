@@ -413,6 +413,12 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
     ctrl.setDefaultBarAggregation(
       dataSource === 'mt5' ? EUROPE_TRADITIONAL_BAR_AGGREGATION : ORIGINAL_BAR_AGGREGATION,
     )
+    // 品种/周期切换后视口对齐最新数据：数据根数随周期变化，保持 scrollLeft 会让
+    // 视口漂进未来区（#261 右缘空白放开后不再钳制），TV 同款行为即切周期看最新。
+    // rAF 双帧等待数据注入后的视口布局生效，microtask 时域尚未完成滚动重算。
+    const scrollToLatest = () => {
+      requestAnimationFrame(() => requestAnimationFrame(() => ctrl.scrollToRight()))
+    }
     if (dataSource !== 'mock' && sourceInstrument) {
       ctrl.setSymbols([
         {
@@ -425,9 +431,11 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
           source: dataSource,
         },
       ])
+      queueMicrotask(scrollToLatest)
       return
     }
     ctrl.applyCustomData(buildMockBundle(symbol, period))
+    queueMicrotask(scrollToLatest)
   }, [ctrl, dataSource, sourceInstrument, period, symbol])
 
   /** 切换当前数据源：网络源先经注册表 probe 可达性，不可达保持现状并返回 false。 */
