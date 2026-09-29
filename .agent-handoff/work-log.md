@@ -413,3 +413,23 @@
   增量 pnpm install 恢复；shot.mjs 依赖根级解析，遇 ERR_MODULE_NOT_FOUND 先查链接
 - 用户本地未提交改动：packages/vue/preview/vite.config.ts（期权 8888 + market-data
   8090 proxy）——保留工作区不提交
+
+## 2026-09-29 续（#270 CI 失败复核与修正）
+
+- 用户邮件提示 CI 失败 → 复核：失败在 PR #270 首版（8c23ce35），type-check:tests
+  TS2322——测试里 { price, futureOffset } 不满足 DrawingAnchorCommandInput 联合
+  （水平图元变体 futureOffset?: never，类型层本就禁止水平命令携带未来偏移）
+- 根因修正：文档层拒绝是正确的契约防御（回退首版对 resolveAnchor 的放宽），
+  错在 completeDrawing 无差别传 { timestamp, futureOffset, price }——horizontal
+  时仅传 price。坑：工具 id 是 'h-line'、kind 才是 'horizontal-line'，首版比较
+  对象写错被 TS2367 拦下；第二坑：修正 commit 误落在 nexus/main（checkout -b
+  被 vite.config 本地改动 Aborting 未察觉），push 被拒才暴露——-B 重建分支
+  force push 修正
+- 验证：placement 测试补未来槽落点创建水平线用例（命令锚仅含 price）；core
+  250 文件/2674 测试全绿、type-check 三段、attw 全过；PR #270 CI 全绿
+  （36595368729）
+- ⚠️ workflow 触发被上游收窄为 push: branches: [main]（本轮 merge 带入）——
+  fork 主线 nexus/main 推送不再触发 CI，本地验证链是唯一门禁；若要恢复 fork
+  主线覆盖可改 fork workflow 的 push branches（待用户拍板）
+- 用户本地 vite proxy 改动已在 c1a18fd1 提交推送（上一轮"提交并推送"完成项）；
+  stash 操作混乱一度弄丢工作区副本，远端已有无损失
