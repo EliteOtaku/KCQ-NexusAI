@@ -628,8 +628,9 @@
             console.warn(`[preview] external renderer module has no valid RendererPlugin export: ${url}`)
           }
         }
-        // Agent 工具契约：模块命名导出 chartTools（RegisteredChartTool[]）
-        const chartToolsExport = mod.chartTools
+        // Agent 工具契约（两形态）：①工厂返回值带 chartTools 属性；②模块命名导出 chartTools
+        const chartToolsExport = (Array.isArray(exported) && (exported as { chartTools?: unknown }).chartTools)
+          ?? mod.chartTools
         if (Array.isArray(chartToolsExport) && chartToolsExport.length) {
           externalChartTools.value = [...externalChartTools.value, ...(chartToolsExport as RegisteredChartTool[])]
           console.info(`[preview] external agent tools registered: ${chartToolsExport.map((t) => (t as { config?: { name?: string } }).config?.name).join(', ')} (${url})`)
