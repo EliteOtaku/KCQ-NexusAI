@@ -22,7 +22,7 @@ import { allIndicators } from '../../engine/renderers/Indicator/indicatorCatalog
   defaultPaneId: 'main',
   mainPane: { rendererName: 'sample_decorator_renderer' },
 })
-class SampleDecoratorIndicator {
+export class SampleDecoratorIndicator {
   static rendererFactory = () => ({}) as never
 }
 
