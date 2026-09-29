@@ -386,3 +386,30 @@
   subprocess 沙箱 5s 超时，Python 3.12 在但脚本起不来）——上游 CI 绿态证明非回归，本机环境限制
 - ⚠️ biome lint noConsole 报上游自带脚本——上游 CI 无 lint 门禁（library-ci 仅 type-check/
   tests/attw REQUIRED），非阻塞
+
+## 2026-09-29（第四轮同步 + 未来区水平线双 bug 修复 + #249 验证）
+
+- 上游冲高：我们 PR 全收（#250 4h 档位/#263 数据源导出/#259 未来时间轴初版）；
+  #264 被关闭替代（开发组在既有模板设施上做了 #269）；#249 价格线+倒计时已被
+  开发组实现（#253/#251，issue 评论确认）；#266（渲染器插件注册）仍 OPEN 但
+  上游新分支 retire-renderer-plugin-contract 正在把 Scene 绘制契约统一为 Layer
+  （旧 RendererPlugin 适配退役）——#266 等 refactor 落地后按新契约重写，暂不催
+- 同步 bd1d7682（12 提交）：5 冲突全取 theirs（模板三件套被上游 #269 替代实现、
+  WC 入口被 SSOT 重构收敛、core-source-aliases 注释措辞）。FF 回 nexus/main
+  （2fb015be → +壳修复 b4a3975e）
+- ⚠️ attw 门禁新教训：react/angular 不在 build:packages 链（core→agent-runtime→vue），
+  验证链需单独 `pnpm --filter ...-react build` + `-angular build`，否则 dist 缺失全线
+  Resolution failed（假故障）
+- **探针暴露未来区双 bug**（b234 B4-04 崩，复现条件=换品种+连续两次周期切换）：
+  ①壳层：切数据后 scrollLeft 不变 → 视口漂进未来区（#261 放开右缘滚动后不再钳制），
+  极端时全视口未来网格 → 壳修复：数据接线 effect 尾部 rAF 双帧 scrollToRight
+  （microtask 太早，视口布局未重算）
+  ②上游：DrawingDocument.resolveAnchor 对 horizontal 锚抛"cannot use a future offset"，
+  而 completeDrawing 先回置工具再 createDrawing → 未来区点击创建水平线无声失败、
+  工具静默弹回。horizontal 锚仅价格语义 → 忽略 futureOffset 即可，PR #270
+  （core 测试 249 文件/2670 全绿）
+- #249 真机验证 ✓：5175 右轴价格标签（涨跌着色）+ 周期倒计时 + 当前价横虚线全部在位
+- ⚠️ playwright-core 软链曾丢（根 package.json 有声明但 node_modules 无链接）——
+  增量 pnpm install 恢复；shot.mjs 依赖根级解析，遇 ERR_MODULE_NOT_FOUND 先查链接
+- 用户本地未提交改动：packages/vue/preview/vite.config.ts（期权 8888 + market-data
+  8090 proxy）——保留工作区不提交
