@@ -1,123 +1,123 @@
-/**
- * Drawing template state for the selected-drawing toolbar (TV-style apply/Save As).
- * Storage is pluggable: hosts inject a `DrawingTemplateStore` (e.g. backed by a
- * server route); when absent, a localStorage default keeps the feature usable.
- * Tool identity is the drawing `kind`; adapters may namespace it for persistence.
- */
+// 绘图模板的唯一响应式状态源：同一仓库、同一图元类型共享同一份状态。
 
-import type { DrawingStyle } from '@363045841yyt/klinechart-core/plugin'
-import { type Ref, ref } from 'vue'
+import type {
+  DrawingKind,
+  DrawingTemplate,
+  DrawingTemplateStore,
+} from '@363045841yyt/klinechart-core/engine/drawing'
+import { createDrawingTemplateStore } from '@363045841yyt/klinechart-core/engine/drawing'
+import type { Ref } from 'vue'
+import { computed, ref } from 'vue'
 
-export interface DrawingTemplateRecord {
-  name: string
-  tool: string
+const defaultStore = createDrawingTemplateStore()
+const LOAD_FAILED = '加载模板失败'
+const SAVE_FAILED = '模板保存失败'
+const REMOVE_FAILED = '模板删除失败'
+
+type TemplateState = {
+  readonly templates: Ref<DrawingTemplate[]>
+  readonly busy: Ref<boolean>
+  readonly error: Ref<string>
+  readonly savedName: Ref<string | null>
 }
 
-export interface DrawingTemplateStore {
-  list(): Promise<ReadonlyArray<DrawingTemplateRecord>>
-  load(tool: string, name: string): Promise<Partial<DrawingStyle> | null>
-  save(tool: string, name: string, style: Partial<DrawingStyle>): Promise<void>
-  remove(tool: string, name: string): Promise<void>
-}
+const states = new WeakMap<DrawingTemplateStore, Map<DrawingKind, TemplateState>>()
 
-const STORAGE_KEY = 'klinechart.drawing-templates'
-
-/** 默认存储：localStorage，按 kind 分组。 */
-function createLocalStorageStore(): DrawingTemplateStore {
-  const readAll = (): Record<string, Record<string, Partial<DrawingStyle>>> => {
-    try {
-      return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}')
-    } catch {
-      return {}
+function getState(store: DrawingTemplateStore, kind: DrawingKind): TemplateState {
+  let byKind = states.get(store)
+  if (!byKind) {
+    byKind = new Map()
+    states.set(store, byKind)
+  }
+  let state = byKind.get(kind)
+  if (!state) {
+    state = {
+      templates: ref([]),
+      busy: ref(false),
+      error: ref(''),
+      savedName: ref(null),
     }
+    byKind.set(kind, state)
   }
-  const writeAll = (all: Record<string, Record<string, Partial<DrawingStyle>>>) => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(all))
-    } catch {
-      /* quota exceeded */
-    }
-  }
-  return {
-    async list() {
-      const all = readAll()
-      const items: DrawingTemplateRecord[] = []
-      for (const [tool, templates] of Object.entries(all)) {
-        for (const name of Object.keys(templates)) items.push({ name, tool })
-      }
-      return items.sort(
-        (left, right) => left.tool.localeCompare(right.tool) || left.name.localeCompare(right.name),
-      )
-    },
-    async load(tool, name) {
-      return readAll()[tool]?.[name] ?? null
-    },
-    async save(tool, name, style) {
-      const all = readAll()
-      const group = all[tool] ?? {}
-      group[name] = style
-      all[tool] = group
-      writeAll(all)
-    },
-    async remove(tool, name) {
-      const all = readAll()
-      if (all[tool]) {
-        delete all[tool][name]
-        writeAll(all)
-      }
-    },
-  }
+  return state
 }
 
-export function useDrawingTemplates(store: Ref<DrawingTemplateStore | undefined>) {
-  const templates = ref<ReadonlyArray<DrawingTemplateRecord>>([])
+export function useDrawingTemplates(
+  kind: Readonly<Ref<DrawingKind | undefined>>,
+  store: DrawingTemplateStore = defaultStore,
+) {
+  const current = () => {
+    const value = kind.value
+    return value ? { kind: value, state: getState(store, value) } : null
+  }
+  const state = computed(() => current()?.state)
+  const templates = computed(() => state.value?.templates.value ?? [])
+  const busy = computed(() => state.value?.busy.value ?? false)
+  const error = computed(() => state.value?.error.value ?? '')
+  const savedName = computed(() => state.value?.savedName.value ?? null)
+  const names = computed(() => templates.value.map((template) => template.name))
 
   async function reload(): Promise<void> {
-    const active = store.value ?? fallbackStore()
+    const active = current()
+    if (!active) return
+    const { state: target } = active
+    target.error.value = ''
+    target.savedName.value = null
     try {
-      templates.value = await active.list()
+      target.templates.value = await store.list(active.kind)
     } catch {
-      templates.value = []
+      target.error.value = LOAD_FAILED
     }
   }
 
-  // 懒初始化默认存储（模块外不可变引用，避免每次渲染重建）
-  let localFallback: DrawingTemplateStore | null = null
-  function fallbackStore(): DrawingTemplateStore {
-    localFallback ??= createLocalStorageStore()
-    return localFallback
-  }
-
-  async function apply(tool: string, name: string): Promise<Partial<DrawingStyle> | null> {
-    const active = store.value ?? fallbackStore()
+  async function mutate(
+    run: (kind: DrawingKind) => Promise<DrawingTemplate[]>,
+    failure: string,
+  ): Promise<DrawingTemplate[] | null> {
+    const active = current()
+    if (!active || active.state.busy.value) return null
+    const target = active.state
+    target.busy.value = true
+    target.error.value = ''
     try {
-      return await active.load(tool, name)
+      const next = await run(active.kind)
+      target.templates.value = next
+      return next
     } catch {
+      target.error.value = failure
       return null
+    } finally {
+      target.busy.value = false
     }
   }
 
-  async function save(tool: string, name: string, style: Partial<DrawingStyle>): Promise<boolean> {
-    const active = store.value ?? fallbackStore()
-    try {
-      await active.save(tool, name, style)
-      await reload()
-      return true
-    } catch {
-      return false
-    }
+  async function save(template: DrawingTemplate | null, feedback = false): Promise<boolean> {
+    if (!template) return false
+    const active = current()
+    if (!active) return false
+    const next = await mutate((target) => store.upsert(target, template), SAVE_FAILED)
+    if (!next) return false
+    const saved = next.some((item) => item.name === template.name)
+    if (saved && feedback) active.state.savedName.value = template.name
+    return saved
   }
 
-  async function remove(tool: string, name: string): Promise<boolean> {
-    const active = store.value ?? fallbackStore()
-    try {
-      await active.remove(tool, name)
-      await reload()
-      return true
-    } catch {
-      return false
-    }
+  async function remove(name: string): Promise<boolean> {
+    return (await mutate((target) => store.remove(target, name), REMOVE_FAILED)) !== null
   }
 
-  return { templates, reload, apply, save, remove }
+  return {
+    templates,
+    names,
+    busy,
+    error,
+    savedName,
+    clearError() {
+      const active = current()
+      if (active) active.state.error.value = ''
+    },
+    reload,
+    save,
+    remove,
+  }
 }

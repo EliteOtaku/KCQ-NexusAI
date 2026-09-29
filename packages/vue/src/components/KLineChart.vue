@@ -143,11 +143,17 @@
                     v-if="selectedDrawings.length > 0 || isEditingLineLabel"
                     :drawings="selectedDrawings"
                     :editable-style-keys="selectedDrawingStyleKeys"
-                    :templates="drawingTemplateNames"
                     :line-label-position="isEditingLineLabel ? lineLabelPosition : undefined"
+                    :template-names="canvasTemplateNames"
+                    :template-error="canvasTemplateError"
+                    :template-saved="canvasTemplateSavedName"
+                    :can-use-templates="canUseCanvasTemplates"
+                    @open-templates="reloadCanvasTemplates"
+                    @save-template="openCanvasTemplateSave"
+                    @apply-template="applyCanvasTemplate"
+                    @delete-template="deleteCanvasTemplate"
+                    @save-existing-template="saveCanvasTemplateExisting"
                     @update-style="onUpdateDrawingStyle"
-                    @apply-template="onApplyDrawingTemplate"
-                    @save-template="onSaveDrawingTemplate"
                     @delete="onDeleteDrawing"
                     @toggle-lock="onToggleDrawingLock"
                     @hide="onHideSelectedDrawings"
@@ -282,15 +288,6 @@
       @remove="removeWatchlistItem"
     />
     <ExportProgressDialog :progress="exportingProgress" @close="exportingProgress = null" />
-    <DrawingTemplateSaveDialog
-      :show="showTemplateSaveDialog"
-      title="保存为模板"
-      placeholder="模板名称"
-      :busy="templateSaveBusy"
-      :error-message="templateSaveError"
-      @close="showTemplateSaveDialog = false"
-      @confirm="onConfirmSaveTemplate"
-    />
     <BatchStockDialog
       :show="showBatchStockDialog"
       @close="showBatchStockDialog = false"
@@ -304,6 +301,13 @@
       @update-style="onUpdateEditingDrawingStyle"
       @update-text="onUpdateEditingDrawingText"
       @close="showDrawingSettingsDialog = false"
+    />
+    <DrawingTemplateSaveDialog
+      :show="showCanvasTemplateSave"
+      :busy="canvasTemplateBusy"
+      :error="canvasTemplateError"
+      @close="showCanvasTemplateSave = false"
+      @save="saveCanvasTemplate"
     />
     <IndicatorSelector
       ref="indicatorSelectorRef"
@@ -381,11 +385,11 @@
     setEndpoint: setAggregationSourceEndpoint,
   } = useAggregationSources(aggregationSources)
 
+  import { useCanvasDrawingTemplates } from '../composables/chart/useCanvasDrawingTemplates.js'
   import { useChartState } from '../composables/chart/useChartState.js'
   import { useChartTheme } from '../composables/chart/useChartTheme.js'
   import { useControllerSignal } from '../composables/chart/useControllerSignal.js'
   import { useDrawingManager } from '../composables/chart/useDrawingManager.js'
-  import { useDrawingTemplates } from '../composables/chart/useDrawingTemplates'
   import { useIndicatorManager } from '../composables/chart/useIndicatorManager.js'
   import { useInteractionBridge } from '../composables/chart/useInteractionBridge.js'
   import { useKLineTooltip } from '../composables/chart/useKLineTooltip.js'
@@ -398,7 +402,7 @@
   import CanvasToolbarStack from './common/CanvasToolbarStack.vue'
   import DrawingSettingsDialog from './DrawingSettingsDialog.vue'
   import DrawingStyleToolbar from './DrawingStyleToolbar.vue'
-  import DrawingTemplateSaveDialog from './DrawingTemplateSaveDialog.vue'
+  import DrawingTemplateSaveDialog from './drawing-settings/DrawingTemplateSaveDialog.vue'
   import ExportProgressDialog from './ExportProgressDialog.vue'
   import IndicatorSelector from './IndicatorSelector.vue'
   import LeftToolbar from './LeftToolbar.vue'
@@ -461,29 +465,6 @@
 
       /** 用户自定义数据源（传入后 bypass fetcher，使用此数据） */
       customData?: CustomDataSource
-
-      /** MCP / AI runtime bridge 配置。传入后自动连接 MCP WebSocket server */
-      mcp?: {
-        wsUrl?: string
-        onToolCall?: (call: {
-          name: string
-          input: Record<string, unknown>
-        }) =>
-          | Promise<{ success: boolean; error?: string; data?: unknown }>
-          | { success: boolean; error?: string; data?: unknown }
-        autoReconnect?: boolean
-      }
-
-      /**
-       * 绘图模板存储适配器（TV 式模板：选中浮条内套用/保存）。
-       * tool=绘图 kind；未传时内置 localStorage 实现。
-       */
-      drawingTemplateStore?: {
-        list(): Promise<ReadonlyArray<{ name: string; tool: string }>>
-        load(tool: string, name: string): Promise<Partial<DrawingStyle> | null>
-        save(tool: string, name: string, style: Partial<DrawingStyle>): Promise<void>
-        remove(tool: string, name: string): Promise<void>
-      }
     }>(),
     {
       yPaddingPx: 20,
@@ -995,7 +976,6 @@
     drawings,
     handleSelectTool: handleDrawingToolSelect,
     onUpdateDrawingStyle,
-    applyTemplateToSelected,
     updateDrawingLabel,
     onDeleteDrawing,
     onToggleDrawingLock,
@@ -1006,52 +986,25 @@
     onSetGlobalDrawingLock,
     setupDrawing,
   } = useDrawingManager(controller)
-
-  // ── 绘图模板（TV 式：选中浮条内套用/保存，按当前 kind 过滤）──
   const {
-    templates: drawingTemplates,
-    reload: reloadDrawingTemplates,
-    apply: loadDrawingTemplate,
-    save: saveDrawingTemplateToStore,
-  } = useDrawingTemplates(computed(() => props.drawingTemplateStore))
-  void reloadDrawingTemplates()
-  const currentDrawingKind = computed(() => selectedDrawings.value[0]?.kind ?? null)
-  const drawingTemplateNames = computed(() =>
-    currentDrawingKind.value
-      ? drawingTemplates.value
-          .filter((item) => item.tool === currentDrawingKind.value)
-          .map((item) => item.name)
-      : [],
+    names: canvasTemplateNames,
+    canUse: canUseCanvasTemplates,
+    showSave: showCanvasTemplateSave,
+    busy: canvasTemplateBusy,
+    error: canvasTemplateError,
+    savedName: canvasTemplateSavedName,
+    reload: reloadCanvasTemplates,
+    apply: applyCanvasTemplate,
+    remove: deleteCanvasTemplate,
+    openSave: openCanvasTemplateSave,
+    save: saveCanvasTemplate,
+    saveExisting: saveCanvasTemplateExisting,
+  } = useCanvasDrawingTemplates(
+    selectedDrawings,
+    selectedDrawingStyleKeys,
+    onUpdateDrawingStyle,
+    updateDrawingLabel,
   )
-  const showTemplateSaveDialog = ref(false)
-  const templateSaveError = ref('')
-  const templateSaveBusy = ref(false)
-
-  function onApplyDrawingTemplate(name: string) {
-    const kind = currentDrawingKind.value
-    if (!kind) return
-    void loadDrawingTemplate(kind, name).then((style) => {
-      if (style) applyTemplateToSelected(style)
-    })
-  }
-
-  function onSaveDrawingTemplate() {
-    templateSaveError.value = ''
-    showTemplateSaveDialog.value = true
-  }
-
-  function onConfirmSaveTemplate(name: string) {
-    const kind = currentDrawingKind.value
-    const style = selectedDrawings.value[0]?.style
-    if (!kind || !style) return
-    templateSaveBusy.value = true
-    void saveDrawingTemplateToStore(kind, name, style).then((ok) => {
-      templateSaveBusy.value = false
-      if (ok) showTemplateSaveDialog.value = false
-      else templateSaveError.value = '保存失败，请重试'
-    })
-  }
-
   const editingDrawing = computed(() =>
     drawings.value.find((drawing) => drawing.id === editingDrawingId.value),
   )
