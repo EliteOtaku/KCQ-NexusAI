@@ -163,3 +163,17 @@ Best practice: @packages/core/src/engine/state/viewportState.ts @packages/core/s
 
 ## 包管理
 - 使用pnpm,不许使用npm
+
+## Agent skills
+
+### Issue tracker
+
+Issue 与需求单在仓库 GitHub Issues（gh CLI 读写；PRs 不作为 triage 请求面）。See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+五个标准 triage 角色，标签字符串与角色同名。See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+单上下文：根 `CONTEXT.md` + `docs/adr/`。See `docs/agents/domain.md`.
