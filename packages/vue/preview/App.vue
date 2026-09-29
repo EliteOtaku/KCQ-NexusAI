@@ -84,7 +84,7 @@
     createHeatmapController,
   } from '@363045841yyt/klinechart-core/controllers'
   import { formatTimeInTimeZone } from '@363045841yyt/klinechart-core'
-  import type { RendererPlugin } from '@363045841yyt/klinechart-core'
+  import type { RegisteredChartTool, RendererPlugin } from '@363045841yyt/klinechart-core'
   import { resolveSettings } from '@363045841yyt/klinechart-core/config'
 
   /** 硬编码演示数据：主品种 CUSTOM.DEMO（15 根日 K） */
@@ -524,8 +524,12 @@
   }
 
   const chartRef = ref<InstanceType<typeof KlineChart> | null>(null)
+  // 外部插件声明的 Agent 工具（loader 契约：模块可带 chartTools 工厂导出）；
+  // bridge 先构造、插件后加载，经 getter 包装引用即可
+  const externalChartTools: Ref<RegisteredChartTool[]> = ref([])
   const agentBridge = new BrowserAgentBridge({
     getChartAgent: () => chartRef.value?.getController?.()?.agent,
+    extraChartTools: () => externalChartTools.value,
   })
   const webPanelWidthStorage = createAgentPanelWidthStorage()
   const showModal = ref(false)
@@ -623,6 +627,12 @@
           } else {
             console.warn(`[preview] external renderer module has no valid RendererPlugin export: ${url}`)
           }
+        }
+        // Agent 工具契约：模块命名导出 chartTools（RegisteredChartTool[]）
+        const chartToolsExport = mod.chartTools
+        if (Array.isArray(chartToolsExport) && chartToolsExport.length) {
+          externalChartTools.value = [...externalChartTools.value, ...(chartToolsExport as RegisteredChartTool[])]
+          console.info(`[preview] external agent tools registered: ${chartToolsExport.map((t) => (t as { config?: { name?: string } }).config?.name).join(', ')} (${url})`)
         }
       } catch (error) {
         console.warn(`[preview] external renderer load failed: ${url}`, error)
