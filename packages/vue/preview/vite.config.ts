@@ -80,6 +80,20 @@ export default defineConfig({
         target: 'http://127.0.0.1:8080',
         changeOrigin: true,
       },
+      // 本地开发：cloudtrade 后端（期权插件试点数据源；127.0.0.1:8888 同机 FastAPI）
+      '/api/option_levels': {
+        target: 'http://127.0.0.1:8888',
+        changeOrigin: true,
+      },
+      '/api/options_gamma': {
+        target: 'http://127.0.0.1:8888',
+        changeOrigin: true,
+      },
+      // 本地开发：KCQ market-data 聚合服务（MT5 XAUUSD 等品种 K 线；127.0.0.1:8090）
+      '/api/v1': {
+        target: 'http://127.0.0.1:8090',
+        changeOrigin: true,
+      },
     },
   },
   plugins: [
