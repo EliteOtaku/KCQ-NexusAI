@@ -26,8 +26,6 @@ export type {
   ProtocolMarketTicksEvent,
   ProtocolSourceCapabilities,
   ProtocolSourceProbe,
-  ProtocolTradingCalendar,
-  ProtocolTradingCalendarRequest,
   ProtocolSourceRejectionCode,
   ProtocolTimeShareDay,
   ProtocolTimeShareItem,
@@ -36,5 +34,7 @@ export type {
   ProtocolTimeShareRangeSeries,
   ProtocolTimeShareRequest,
   ProtocolTimeShareSeries,
+  ProtocolTradingCalendar,
+  ProtocolTradingCalendarRequest,
 } from './types.js'
 export { SOURCE_REJECTION_CODES, V1_PROTOCOL_NAME, V1_PROTOCOL_VERSION } from './types.js'
