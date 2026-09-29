@@ -22,8 +22,6 @@ export type {
   ProtocolKLineItem,
   ProtocolSourceCapabilities,
   ProtocolSourceProbe,
-  ProtocolTradingCalendar,
-  ProtocolTradingCalendarRequest,
   ProtocolSourceRejectionCode,
   ProtocolTimeShareDay,
   ProtocolTimeShareItem,
@@ -32,6 +30,8 @@ export type {
   ProtocolTimeShareRangeSeries,
   ProtocolTimeShareRequest,
   ProtocolTimeShareSeries,
+  ProtocolTradingCalendar,
+  ProtocolTradingCalendarRequest,
 } from './protocol/index.js'
 export {
   createHttpMarketDataTransport,
@@ -64,9 +64,6 @@ export type {
   BarDataSource,
   BarQuery,
   BarSeries,
-  TradingCalendar,
-  TradingCalendarQuery,
-  TradingCalendarDataSource,
   DataSourceDescriptor,
   DepthDataSource,
   InstrumentCapabilities,
@@ -90,6 +87,9 @@ export type {
   TimeShareRangeDataSource,
   TimeShareRangeQuery,
   TimeShareSeries,
+  TradingCalendar,
+  TradingCalendarDataSource,
+  TradingCalendarQuery,
   TradingDate,
   VolumeUnit,
 } from './types.js'

@@ -20,12 +20,12 @@ import type {
   ProtocolInstrumentSearchRequest,
   ProtocolInstrumentSearchResult,
   ProtocolSourceProbe,
-  ProtocolTradingCalendar,
-  ProtocolTradingCalendarRequest,
   ProtocolTimeShareRangeRequest,
   ProtocolTimeShareRangeSeries,
   ProtocolTimeShareRequest,
   ProtocolTimeShareSeries,
+  ProtocolTradingCalendar,
+  ProtocolTradingCalendarRequest,
 } from './types.js'
 import { SOURCE_REJECTION_CODES } from './types.js'
 

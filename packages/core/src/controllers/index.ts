@@ -160,6 +160,10 @@ export {
   SINGLE_ANCHOR_TOOLS,
   TRIPLE_ANCHOR_TOOLS,
 } from '../engine/drawing/index.js'
+export {
+  type IndicatorDefinitionConfig,
+  registerIndicatorDefinition,
+} from '../engine/indicators/indicatorDefinitionRegistry.js'
 export type {
   IndicatorType,
   IndicatorTypeRegistry,
