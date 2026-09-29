@@ -433,3 +433,7 @@
   主线覆盖可改 fork workflow 的 push branches（待用户拍板）
 - 用户本地 vite proxy 改动已在 c1a18fd1 提交推送（上一轮"提交并推送"完成项）；
   stash 操作混乱一度弄丢工作区副本，远端已有无损失
+
+- 用户拍板（2026-09-30）：nexus/main 无 CI 覆盖维持现状，尽量按上游做法统一口径
+  ——本地验证链（install/build 全五包/core+vue 测试/type-check 三段/attw/三探针）
+  是 nexus/main 推送前的唯一门禁，每次推送前必须完整跑
