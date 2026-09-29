@@ -268,6 +268,10 @@ export async function createChartController(opts: ChartMountOptions): Promise<Ch
     ...dataMethods.methods,
     ...chartMethods,
     ...drawingMethods,
+    // 渲染器插件注册：宿主业务 overlay 图层入口（委托核心 Chart 实例，按 name 幂等）
+    useRenderer: (plugin, config) => chart.useRenderer(plugin, config),
+    removeRenderer: (name) => chart.removeRenderer(name),
+    getRenderer: (name) => chart.getRenderer(name),
     dispose,
   }
 }

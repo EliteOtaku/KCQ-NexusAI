@@ -33,6 +33,7 @@ import type { CreatePaneInput, PanePatch } from '../engine/paneManager.js'
 import type { ChartAgentController } from '../features/agent/types.js'
 import type { AlertController } from '../features/alerts/types.js'
 import type { ChartSettings } from '../foundation/config/chartSettings.js'
+import type { RendererPlugin, RendererPluginWithHost } from '../foundation/plugin/types.js'
 import type { ReadonlySignal } from '../foundation/reactivity/index.js'
 import type { ChartDataView } from '../foundation/types/chartView.js'
 
@@ -518,6 +519,17 @@ export interface ChartController extends DrawingChartAdapter {
   zoomToLevel(level: number, anchorX?: number): void
   zoomIn(anchorX?: number): void
   zoomOut(anchorX?: number): void
+
+  // ---- Renderer plugins ----
+  /** 注册 canvas 自绘渲染器插件（幂等，按 plugin.name）；宿主业务 overlay 图层入口。 */
+  useRenderer(
+    plugin: RendererPlugin | RendererPluginWithHost,
+    config?: Record<string, unknown>,
+  ): void
+  /** 按名称移除渲染器插件。 */
+  removeRenderer(name: string): void
+  /** 获取已注册渲染器插件实例。 */
+  getRenderer<T extends RendererPlugin = RendererPlugin>(name: string): T | undefined
 
   // ---- Interaction ----
   handlePointerEvent(e: PointerEvent, drawingController?: DrawingControllerCallbacks): boolean
