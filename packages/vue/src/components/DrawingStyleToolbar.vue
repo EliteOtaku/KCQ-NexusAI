@@ -177,8 +177,8 @@
   import IconTablerSettings from '~icons/tabler/settings'
   import BaseTooltip from './common/BaseTooltip.vue'
   import CanvasToolbar from './common/CanvasToolbar.vue'
-  import Dropdown from './Dropdown.vue'
   import DrawingTemplateMenu from './DrawingTemplateMenu.vue'
+  import Dropdown from './Dropdown.vue'
 
   const widthOptions = [
     { label: '1px', value: '1' },
@@ -226,7 +226,6 @@
     (e: 'deleteTemplate', name: string): void
     (e: 'saveExistingTemplate', name: string): void
   }>()
-
 
   function onKeyDown(e: KeyboardEvent) {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return

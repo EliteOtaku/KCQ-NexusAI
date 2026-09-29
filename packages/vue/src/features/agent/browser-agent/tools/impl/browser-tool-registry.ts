@@ -42,21 +42,10 @@ export class BrowserToolRegistry {
   }
 
   private registerTools(): void {
-    // 内置 Core 工具 + 宿主声明的外部工具源（惰性求值一次；外部宿主/插件经
-    // core registerChartTool 或自持 RegisteredChartTool 登记均可）
-    const chartTools = [
+    this.registerChartTools([
       ...getRegisteredChartTools(),
       ...(this.dependencies.extraChartTools?.() ?? []),
-    ]
-    for (const chartTool of chartTools) {
-      this.catalog.register({
-        ...chartTool.config,
-        create: ({ agent, readOnly }) => {
-          if (!agent || (readOnly && chartTool.config.safety !== 'read-only')) return undefined
-          return this.createRegisteredTool(chartTool, agent)
-        },
-      })
-    }
+    ])
     this.catalog.register({
       ...WEB_SEARCH_TOOL_METADATA,
       create: () => this.createWebSearchTool(),
@@ -65,6 +54,26 @@ export class BrowserToolRegistry {
       ...ASK_USER_TOOL_METADATA,
       create: () => createAskUserTool({ request: this.dependencies.requestQuestion }),
     })
+  }
+
+  /**
+   * 后补注册外部图表工具：extraChartTools 的工具源在 registry 构造时可能尚未
+   * 就绪（外部插件晚于 bridge 加载），宿主收集到工具后调用本方法补入目录。
+   * 同名工具跳过（内置/先到者优先），不抛错。
+   */
+  registerChartTools(tools: ReadonlyArray<RegisteredChartTool>): void {
+    for (const chartTool of tools) {
+      // check 未命中（undefined）= 目录中不存在，可补注册
+      if (this.catalog.check(chartTool.config.name, { agent: null, readOnly: false }) !== undefined)
+        continue
+      this.catalog.register({
+        ...chartTool.config,
+        create: ({ agent, readOnly }) => {
+          if (!agent || (readOnly && chartTool.config.safety !== 'read-only')) return undefined
+          return this.createRegisteredTool(chartTool, agent)
+        },
+      })
+    }
   }
 
   private createWebSearchTool(): RuntimeToolDefinition {

@@ -67,7 +67,9 @@
           {
             id: 'save',
             label: '保存',
-            items: [{ id: 'save', label: '保存为模板', disabled: props.disabled || !props.canSave }],
+            items: [
+              { id: 'save', label: '保存为模板', disabled: props.disabled || !props.canSave },
+            ],
           },
         ]
       : []),

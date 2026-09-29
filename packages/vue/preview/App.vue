@@ -632,8 +632,11 @@
         const chartToolsExport = (Array.isArray(exported) && (exported as { chartTools?: unknown }).chartTools)
           ?? mod.chartTools
         if (Array.isArray(chartToolsExport) && chartToolsExport.length) {
-          externalChartTools.value = [...externalChartTools.value, ...(chartToolsExport as RegisteredChartTool[])]
-          console.info(`[preview] external agent tools registered: ${chartToolsExport.map((t) => (t as { config?: { name?: string } }).config?.name).join(', ')} (${url})`)
+          const incoming = chartToolsExport as RegisteredChartTool[]
+          externalChartTools.value = [...externalChartTools.value, ...incoming]
+          // 构造时快照已错过插件加载：后补注册立即进目录（本会话即可被调用）
+          agentBridge.registerExternalChartTools(incoming)
+          console.info(`[preview] external agent tools registered: ${incoming.map((t) => t.config?.name).join(', ')} (${url})`)
         }
       } catch (error) {
         console.warn(`[preview] external renderer load failed: ${url}`, error)
