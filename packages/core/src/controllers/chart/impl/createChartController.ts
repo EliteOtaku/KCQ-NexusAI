@@ -272,6 +272,7 @@ export async function createChartController(opts: ChartMountOptions): Promise<Ch
     useRenderer: (plugin, config) => chart.useRenderer(plugin, config),
     removeRenderer: (name) => chart.removeRenderer(name),
     getRenderer: (name) => chart.getRenderer(name),
+    scheduleDraw: (level) => chart.scheduleDraw(level),
     dispose,
   }
 }

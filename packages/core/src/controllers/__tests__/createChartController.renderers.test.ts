@@ -95,4 +95,13 @@ describe('createChartController renderer plugin registration', () => {
     expect(ctrl.getRenderer('removable')).toBeUndefined()
     cleanup()
   })
+
+  it('scheduleDraw requests a redraw without throwing', async () => {
+    const { ctrl, cleanup } = await mountController()
+
+    expect(() => ctrl.scheduleDraw()).not.toThrow()
+    ctrl.useRenderer(createStubPlugin('scheduled'))
+    expect(() => ctrl.scheduleDraw()).not.toThrow()
+    cleanup()
+  })
 })

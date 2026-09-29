@@ -530,6 +530,8 @@ export interface ChartController extends DrawingChartAdapter {
   removeRenderer(name: string): void
   /** 获取已注册渲染器插件实例。 */
   getRenderer<T extends RendererPlugin = RendererPlugin>(name: string): T | undefined
+  /** 请求重绘（插件数据异步到达后触发；缺省 UpdateLevel.All）。 */
+  scheduleDraw(level?: import('../engine/layout/pane.js').UpdateLevel): void
 
   // ---- Interaction ----
   handlePointerEvent(e: PointerEvent, drawingController?: DrawingControllerCallbacks): boolean
