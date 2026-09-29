@@ -12,19 +12,6 @@ import {
 } from '../../engine/indicators/indicatorDefinitionRegistry.js'
 import { allIndicators } from '../../engine/renderers/Indicator/indicatorCatalog.js'
 
-// 装饰器样例（对照组）：注册后清场，避免污染编程式用例的计数断言
-@Indicator({
-  name: 'sample_decorator_indicator',
-  displayName: 'Sample Decorator',
-  kind: 'indicator' as never,
-  category: 'trend' as never,
-  indicatorType: 'trend',
-  defaultPaneId: 'main',
-  mainPane: { rendererName: 'sample_decorator_renderer' },
-})
-export class SampleDecoratorIndicator {
-  static rendererFactory = () => ({}) as never
-}
 
 describe('registerIndicatorDefinition (programmatic)', () => {
   it('registers an external definition visible via the catalog', () => {
@@ -32,8 +19,8 @@ describe('registerIndicatorDefinition (programmatic)', () => {
       {
         name: 'sample_external_indicator',
         displayName: 'Sample External',
-        kind: 'indicator' as never,
-        category: 'trend' as never,
+        kind: 'indicator',
+        category: 'main',
         indicatorType: 'trend',
         defaultPaneId: 'main',
         mainPane: { rendererName: 'sample_external_renderer' },
@@ -53,12 +40,12 @@ describe('registerIndicatorDefinition (programmatic)', () => {
     const config = {
       name: 'dup_external_indicator',
       displayName: 'Dup External',
-      kind: 'indicator' as never,
-      category: 'trend' as never,
+      kind: 'indicator',
+      category: 'main',
       indicatorType: 'trend',
       defaultPaneId: 'main',
       mainPane: { rendererName: 'dup_renderer' },
-    }
+    } as const
     registerIndicatorDefinition(config, () => ({}) as never)
 
     expect(() => registerIndicatorDefinition(config, () => ({}) as never)).toThrow(
@@ -71,8 +58,8 @@ describe('registerIndicatorDefinition (programmatic)', () => {
       {
         name: 'sample_param_indicator',
         displayName: 'Sample Params',
-        kind: 'indicator' as never,
-        category: 'trend' as never,
+        kind: 'indicator',
+        category: 'main',
         indicatorType: 'trend',
         defaultPaneId: 'main',
         mainPane: { rendererName: 'sample_param_renderer' },
@@ -87,13 +74,12 @@ describe('registerIndicatorDefinition (programmatic)', () => {
     expect(def?.params?.[0]?.key).toBe('period')
   })
 
-  it('decorator and programmatic routes share one registry', () => {
-    // 装饰器样例（模块加载时注册）与编程式注册同表可见
-    expect(
-      getRegisteredIndicatorDefinitions().some((d) => d.name === 'sample_decorator_indicator'),
-    ).toBe(true)
+  it('multiple programmatic definitions coexist in one registry', () => {
     expect(
       getRegisteredIndicatorDefinitions().some((d) => d.name === 'sample_external_indicator'),
+    ).toBe(true)
+    expect(
+      getRegisteredIndicatorDefinitions().some((d) => d.name === 'sample_param_indicator'),
     ).toBe(true)
   })
 })

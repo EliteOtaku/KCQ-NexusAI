@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { Static, TSchema } from 'typebox'
+import { Type, type Static } from 'typebox'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   createCanvasGetContextMock,
@@ -23,11 +23,7 @@ function createBars(length = 30): KLineData[] {
   }))
 }
 
-const hostInputSchema = {
-  type: 'object',
-  properties: { value: { type: 'number' } },
-  required: ['value'],
-} as TSchema
+const hostInputSchema = Type.Object({ value: Type.Number() })
 
 /** @Tool 宿主样例：模拟外部宿主经装饰器暴露领域方法。 */
 class SampleToolHost {
