@@ -28,6 +28,7 @@ import {
   calcHMAData,
   calcHVData,
   calcIchimokuData,
+  calcSpikeIchimokuData,
   calcKAMAData,
   calcKeltnerData,
   calcKSTData,
@@ -113,6 +114,8 @@ export const CALCULATOR_MAP: Record<string, (data: KLineData[], config: any) => 
   calcSuperTrendData: (data, c) => calcSuperTrendData(data, c.atrPeriod, c.multiplier),
   calcKeltnerData: (data, c) => calcKeltnerData(data, c.emaPeriod, c.atrPeriod, c.multiplier),
   calcDonchianData: (data, c) => calcDonchianData(data, c.period),
+  calcSpikeIchimokuData: (data, c) =>
+    calcSpikeIchimokuData(data, c.tenkan, c.kijun, c.senkouB, c.mode),
   calcIchimokuData: (data, c) =>
     calcIchimokuData(data, c.tenkanPeriod, c.kijunPeriod, c.spanBPeriod, c.displacement),
   calcROCData: (data, c) => calcROCData(data, c.period),

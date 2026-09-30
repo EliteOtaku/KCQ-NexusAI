@@ -86,6 +86,8 @@
   import { formatTimeInTimeZone } from '@363045841yyt/klinechart-core'
   import type { RegisteredChartTool, RendererPlugin } from '@363045841yyt/klinechart-core'
   import { resolveSettings } from '@363045841yyt/klinechart-core/config'
+  // 临时 spike（#273 验证用，验收后移除）：编程式外部指标注册——一目·原生Spike
+  import './spikeIchimokuNative'
 
   /** 硬编码演示数据：主品种 CUSTOM.DEMO（15 根日 K） */
   const DEMO_MAIN_DATA: KLineData[] = [

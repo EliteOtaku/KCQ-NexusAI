@@ -81,3 +81,4 @@ export {
   calcVolumeProfileData,
   calcVWAPData,
 } from './volume.js'
+export { calcSpikeIchimokuData } from './spikeIchimoku.js'
