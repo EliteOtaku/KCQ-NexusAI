@@ -611,11 +611,20 @@
         const href = /^https?:\/\//i.test(url) ? url : new URL(url, window.location.href).href
         const mod: Record<string, unknown> = await import(/* @vite-ignore */ href)
         let exported = mod.default ?? mod.renderers ?? mod.renderer
-        // 工厂形态：default 为 (host: { controller }) => RendererPlugin | RendererPlugin[]，
-        // 供插件读取品种（controller.symbols）/订阅信号等宿主能力
+        // 工厂形态：default 为 (host: { controller, agent }) => RendererPlugin | RendererPlugin[]
+        // （或 Layer 形态），供插件读取品种（controller.symbols）/订阅信号等宿主能力。
+        // agent = 事件→Agent 通知的最小窄面（下游 app 壳自有代码，同 #266 99a2a23a
+        // 形态；startRun 触发一轮模型运行——readOnly 语义由调用方经入参控制，
+        // listSessions 供插件解析目标会话；刻意不暴露整个 bridge，会话/Provider
+        // 管理面不外放）。
         if (typeof exported === 'function') {
-          exported = (exported as (host: { controller: ChartController }) => unknown)({
+          exported = (exported as (host: Record<string, unknown>) => unknown)({
             controller,
+            agent: {
+              startRun: (input: { sessionId: string; prompt: string; readOnly: boolean }) =>
+                agentBridge.startRun(input),
+              listSessions: () => agentBridge.listSessions(),
+            },
           })
         }
         const list = Array.isArray(exported) ? exported : exported ? [exported] : []
