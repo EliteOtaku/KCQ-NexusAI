@@ -70,9 +70,15 @@
 </template>
 
 <script setup lang="ts">
-  import { ref, computed, provide, inject, type Ref, type InjectionKey } from 'vue'
+  import { ref, computed, provide, inject, onUnmounted, type Ref, type InjectionKey } from 'vue'
   import DebugControls from './DebugControls.vue'
   import { useChartDocumentTitle } from './useChartDocumentTitle'
+  // 【临时 spike，验证 #283】官方第三方渲染层注册冒烟（XAUUSD + 缺省一目配置），勿当生产代码
+  import {
+    loadSpikeHtfSlots,
+    loadSpikeMainData,
+    mountSpikeIchimokuLayer,
+  } from './spike/spikeIchimokuLayer'
   import { AgentWorkbenchShell, createAgentPanelWidthStorage, KlineChart } from '../src/index'
   import { BrowserAgentBridge } from '../src/features/agent/browser-agent/bridge/impl/browser-agent-bridge'
   import {
@@ -560,6 +566,13 @@
   /** 主品种 → 浏览器 Tab 标题同步器，控制器就绪时绑定。 */
   const { bind: bindDocumentTitle } = useChartDocumentTitle()
 
+  // 【临时 spike，验证 #283】卸载钩子（页面生命周期内通常不触发，防御性清理）
+  let spikeDispose: (() => void) | null = null
+  onUnmounted(() => {
+    spikeDispose?.()
+    spikeDispose = null
+  })
+
   function onThemeChange(theme: 'light' | 'dark') {
     currentTheme.value = theme
   }
@@ -569,6 +582,51 @@
     agentBridge.bindChartAgent(controller.agent)
     currentTheme.value = controller.theme.peek()
     bindDocumentTitle(controller)
+
+    // 【临时 spike，验证 #283】第三方渲染层注册冒烟：Layer 挂官方面（useRenderer），
+    // 数据拉一次（connector XAUUSD）→ customData 进主图，HTF 槽到齐后 requestRender()。
+    if (import.meta.env.DEV) {
+      spikeDispose = mountSpikeIchimokuLayer(controller)
+      loadSpikeMainData()
+        .then((bars) => {
+          customData.value = {
+            symbol: 'XAUUSD',
+            market: 'MT5',
+            period: 'daily',
+            exchange: 'MT5',
+            source: 'MT5',
+            description: 'XAUUSD（spike283 · connector 127.0.0.1:8090）',
+            data: bars,
+          }
+          // 【临时 spike】上游 applyCustomData 不重置视口（初始 zoomLevel=1 且 scrollLeft
+          // 停在内容左缘之外），数据就绪后显式缩放 + 右对齐到最新根；生产接入应走
+          // 品种切换通道（resetToFetcher），此处仅 spike 校正
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => {
+              controller.zoomToLevel(12)
+              controller.scrollToRight()
+              controller.requestRender()
+              if (window.__spike283) {
+                window.__spike283.requestRenderCalls++
+                window.__spike283.viewportReset = true
+              }
+            }),
+          )
+        })
+        .catch((err: unknown) => {
+          window.__spike283?.errors.push(`main:${String(err)}`)
+        })
+      loadSpikeHtfSlots()
+        .then((ready) => {
+          if (ready > 0) {
+            controller.requestRender() // 外部 Layer 私有数据（HTF store）变化 → 官方重绘面
+            if (window.__spike283) window.__spike283.requestRenderCalls++
+          }
+        })
+        .catch((err: unknown) => {
+          window.__spike283?.errors.push(`htf:${String(err)}`)
+        })
+    }
   }
 
   provideFullscreenTeleportTarget(embedContainerRef)
