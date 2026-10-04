@@ -10,7 +10,7 @@ import { JSDOM } from 'jsdom'
 import { vi } from 'vitest'
 
 import type { KLineData, SymbolSpec } from '@/controllers/types'
-import { marketDataProviderRegistry } from '@/data/provider/registry'
+import { marketDataProviderRegistry } from '@/data/provider/impl/registry'
 import type {
   BarAggregation,
   BarSeries,
@@ -18,9 +18,9 @@ import type {
   OlderDataStatus,
   TimeShareRange,
 } from '@/data/provider/types'
-import type { ChartDom } from '@/engine/chartTypes'
+import type { ChartDom } from '@/engine/chart/index'
+import { createComparisonState } from '@/engine/chartModel'
 import { ChartDataManager, type DataDependencies } from '@/engine/data/chartDataManager'
-import { createComparisonState } from '@/engine/state/comparisonState'
 import {
   createDataManagerState,
   type DataManagerStateModule,
@@ -126,7 +126,6 @@ export function createMockDataDependencies(
     resetInteraction,
     updateIndicatorData: () => {},
     isPointerDown: () => false,
-    onTimeShareDataReady: () => {},
     setSymbols,
   }
 }
@@ -184,6 +183,7 @@ export interface TestChartDataManagerHarness {
   dataState: DataStateModule
   dataManagerState: DataManagerStateModule
   scrollTo: (value: number) => void
+  getScrollLeft: () => number
 }
 
 /**
@@ -207,6 +207,7 @@ export function createTestChartDataManager(
     dataState,
     dataManagerState,
     scrollTo: (value) => deps.viewport.actions.scrollTo(value),
+    getScrollLeft: () => deps.viewport.readonly.scrollLeft.peek(),
   }
 }
 

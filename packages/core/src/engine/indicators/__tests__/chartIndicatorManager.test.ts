@@ -3,13 +3,14 @@
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { RendererPlugin, RendererPluginWithHost } from '@/foundation/plugin'
 import { createPluginHost } from '@/foundation/plugin'
 import { createSignal } from '@/foundation/reactivity/signal'
-import type { PaneSpec } from '../../chartTypes'
+import { createRendererLayerStore } from '../../__tests__/helpers/rendererLayerStoreTestKit'
+import type { PaneSpec } from '../../pane/types'
 import { createIndicatorState } from '../../state/indicatorState'
 import { ChartIndicatorManager, type IndicatorDependencies } from '../chartIndicatorManager'
 import { loadBuiltinIndicators } from '../registerBuiltins'
+import type { VolumeRenderState } from '../stateComposer'
 import { createTestData } from './helpers/instanceTestKit'
 
 beforeAll(async () => {
@@ -18,13 +19,10 @@ beforeAll(async () => {
 
 /** 构造满足 IndicatorDependencies 的最小依赖，并暴露可断言的 renderer 记录。 */
 function createMockDeps() {
-  const renderers = new Map<string, RendererPluginWithHost>()
+  const rendererLayers = createRendererLayerStore()
   const paneRatios$ = createSignal<Readonly<Record<string, number>>>({})
   const paneSpecs$ = createSignal<ReadonlyArray<PaneSpec>>([])
   const indicator = createIndicatorState()
-  const useRenderer = vi.fn((plugin: RendererPlugin | RendererPluginWithHost) => {
-    renderers.set(plugin.name, plugin)
-  })
   const subPaneOps: IndicatorDependencies['subPaneOps'] = {
     create: (entry) => indicator.actions.upsertSub(entry),
     remove: (paneId) => indicator.actions.removeSub(paneId),
@@ -47,12 +45,10 @@ function createMockDeps() {
       kGap: 2,
     }),
     getPluginHost: () => createPluginHost(),
-    getRenderer: () => undefined,
-    useRenderer,
-    removeRenderer: (name: string) => {
-      renderers.delete(name)
-    },
-    updateRendererConfig: vi.fn((_name: string, _config: Record<string, unknown>) => {}),
+    getRenderer: rendererLayers.getRenderer,
+    useRenderer: rendererLayers.useRenderer,
+    removeRenderer: rendererLayers.removeRenderer,
+    getVisibleMainIndicatorIds: () => [] as ReadonlyArray<string>,
     paneRatios$,
     paneSpecs$,
     projectPaneLayout: vi.fn(),
@@ -61,14 +57,13 @@ function createMockDeps() {
     getCrosshairPrice: () => null,
     getActivePaneId: () => null,
     scheduleDraw: vi.fn(),
-    getRenderContext: () => null,
-    getLayer: () => null,
+    getLayer: rendererLayers.getLayer,
     indicator,
     subPaneOps,
     runRendererTransaction: (run: () => void) => run(),
   } satisfies IndicatorDependencies
 
-  return { deps, renderers, useRenderer, indicator }
+  return { deps, useRenderer: rendererLayers.useRenderer, indicator }
 }
 
 describe('ChartIndicatorManager', () => {
@@ -89,12 +84,12 @@ describe('ChartIndicatorManager', () => {
   })
 
   describe('main indicator params', () => {
-    it('更新主图参数时以合并后的完整参数配置渲染器', () => {
+    it('更新主图参数时以合并后的完整参数写回状态并重建 Layer', () => {
       manager.enableMainIndicator('MA')
 
       manager.updateMainIndicatorParams('MA', { ma5: false })
 
-      expect(deps.updateRendererConfig).toHaveBeenCalledWith('ma', {
+      expect(manager.getMainIndicatorParams('MA')).toEqual({
         ma5: false,
         ma10: true,
         ma20: true,
@@ -138,6 +133,31 @@ describe('ChartIndicatorManager', () => {
   })
 
   describe('主图实例增删', () => {
+    it('移动 Legend 保留实例及参数，并在没有计算变更时请求重绘', () => {
+      manager.enableMainIndicator('MA', { ma5: false })
+      manager.enableMainIndicator('BOLL')
+      const before = harness.indicator.readonly.instances.peek()
+      vi.clearAllMocks()
+
+      expect(manager.moveMainIndicator('BOLL', 'up')).toBe(true)
+      expect(harness.indicator.readonly.instances.peek()).toEqual([before[1], before[0]])
+      expect(deps.scheduleDraw).toHaveBeenCalledTimes(1)
+      expect(manager.moveMainIndicator('BOLL', 'up')).toBe(false)
+      expect(manager.moveMainIndicator('missing', 'down')).toBe(false)
+    })
+
+    it('替换主图 Legend 保留位置及其余实例，拒绝副图定义和重复指标', () => {
+      manager.enableMainIndicator('MA', { ma5: false })
+      manager.enableMainIndicator('BOLL')
+      const first = harness.indicator.readonly.instances.peek()[0]
+      expect(manager.replaceMainIndicator('BOLL', 'MA')).toBe(false)
+      expect(manager.replaceMainIndicator('BOLL', 'RSI')).toBe(false)
+      expect(manager.replaceMainIndicator('BOLL', 'EXPMA')).toBe(true)
+      expect(manager.getActiveMainIndicators()).toEqual(['MA', 'EXPMA'])
+      expect(harness.indicator.readonly.instances.peek()[0]).toEqual(first)
+      expect(manager.getMainIndicatorParams('EXPMA')).not.toBeNull()
+    })
+
     it('重复启用只注册一次 renderer 资源', () => {
       expect(manager.enableMainIndicator('MA')).toBe(true)
       expect(manager.enableMainIndicator('MA')).toBe(true)
@@ -178,7 +198,71 @@ describe('ChartIndicatorManager', () => {
     })
   })
 
+  describe('隐藏指标', () => {
+    it('隐藏主图指标卸载绘制 Layer，但保留实例、参数与显示能力', () => {
+      manager.enableMainIndicator('MA', { ma5: false })
+      vi.clearAllMocks()
+
+      expect(manager.setMainHidden('MA', true)).toBe(true)
+      expect(deps.removeRenderer).toHaveBeenCalledTimes(1)
+      expect(manager.isMainIndicatorActive('MA')).toBe(true)
+      expect(harness.indicator.readonly.instances.peek()[0]).toEqual(
+        expect.objectContaining({ instanceId: 'main:MA', hidden: true }),
+      )
+
+      vi.clearAllMocks()
+      expect(manager.setMainHidden('MA', false)).toBe(true)
+      expect(harness.useRenderer).toHaveBeenCalled()
+      expect(harness.indicator.readonly.instances.peek()[0]).not.toHaveProperty('hidden')
+      expect(manager.getMainIndicatorParams('MA')?.ma5).toBe(false)
+    })
+
+    it('隐藏副图指标只保留 pane 与实例，不删除副图', () => {
+      const instanceId = manager.addIndicator('VOL', 'sub')
+      expect(instanceId).not.toBeNull()
+      const paneId = manager.getSubPaneEntries()[0]!.paneId
+
+      expect(manager.setSubHidden(paneId, true)).toBe(true)
+      expect(harness.indicator.readonly.instances.peek()).toEqual([
+        expect.objectContaining({ instanceId, paneId, hidden: true }),
+      ])
+      expect(manager.getSubPaneEntries()).toHaveLength(1)
+    })
+
+    it('未启用的指标隐藏返回 false', () => {
+      expect(manager.setMainHidden('MA', true)).toBe(false)
+      expect(manager.setSubHidden('missing', true)).toBe(false)
+    })
+  })
+
   describe('实例结果投影', () => {
+    it.each([false, true])('VOL 使用分时帧行情，已有 K 线计算结果：%s', async (hasResults) => {
+      const instanceId = manager.addIndicator('VOL', 'sub')!
+      const otherId = manager.addIndicator('OBV', 'sub')!
+      if (hasResults) {
+        manager.enableMainIndicator('MA')
+        const calculationData = createTestData(80)
+        manager.updateIndicatorData(calculationData, { start: 0, end: 80 })
+        await vi.waitFor(() => {
+          expect(manager.createRenderStateReader().get('main:MA')).toBeDefined()
+        })
+      }
+      const data = [
+        { timestamp: 1, price: 10, average: 10, volume: 100 },
+        { timestamp: 2, price: 11, average: 10.5, volume: 200 },
+      ]
+      const reader = manager.createRenderStateReader({ data, range: { start: 0, end: 2 } })
+      expect(reader.get<VolumeRenderState>(instanceId)).toEqual({
+        timestamp: expect.any(Number),
+        valueMin: 90,
+        valueMax: 210,
+      })
+      expect(reader.get<VolumeRenderState>(otherId)).not.toEqual(reader.get(instanceId))
+      expect(
+        manager.createRenderStateReader({ data: [], range: { start: 0, end: 0 } }).get(instanceId),
+      ).toBeUndefined()
+    })
+
     it('按 instanceId 提供计算结果并计算主图价格范围', async () => {
       manager.enableMainIndicator('MA')
       const data = createTestData(80)

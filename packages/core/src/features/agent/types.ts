@@ -1,7 +1,7 @@
 /** Agent 功能模块的对外契约：查询输入输出、facade 接口与依赖接口；实现位于 impl/。 */
 import type { IndicatorInstance, SymbolSpec } from '../../controllers/types.js'
-import type { MarketDataCache } from '../../data/buffer/marketDataCache.js'
-import type { MarketDataProviderRegistry } from '../../data/provider/registry.js'
+import type { MarketDataCache } from '../../data/buffer/impl/marketDataCache.js'
+import type { MarketDataProviderRegistry } from '../../data/provider/impl/registry.js'
 import type {
   AssetClass,
   BarAggregation,
@@ -21,7 +21,7 @@ import type {
   DrawingObject,
 } from '../../engine/drawing/index.js'
 import type { IndicatorMetadata } from '../../engine/indicators/indicatorMetadata.js'
-import type { PaneManager } from '../../engine/paneManager.js'
+import type { PaneManager } from '../../engine/pane/index.js'
 import type { DataStateModule } from '../../engine/state/dataState.js'
 import type { ChartToolExecutionContext } from '../../foundation/agent/chartToolRegistry.js'
 import type { ReadonlySignal } from '../../foundation/reactivity/signal.js'

@@ -13,17 +13,17 @@ type MockLineStrip = {
   color: string
 }
 
-type MockFilledBand = {
-  upperPoints: Array<{ x: number; y: number }>
-  lowerPoints: Array<{ x: number; y: number }>
-}
-
 const mocks = vi.hoisted(() => ({
   mockDrawRectBuffer: vi.fn(
-    (_rectData: Float32Array, _rectCount: number, _color: string, _scrollLeft: number) => true,
+    (
+      _rectData: Float32Array,
+      _rectCount: number,
+      _color: string,
+      _scrollLeft: number,
+      _physicalPixels?: boolean,
+    ) => true,
   ),
   mockDrawLineStrips: vi.fn((_lines: MockLineStrip[], _scrollLeft: number) => true),
-  mockDrawFilledBand: vi.fn((_band: MockFilledBand, _color: string, _scrollLeft: number) => true),
   mockSetRegion: vi.fn(),
   mockResize: vi.fn(),
   mockDestroyCandle: vi.fn(),
@@ -48,7 +48,6 @@ vi.mock('@/engine/renderers/webgl/candleSurface', () => {
       resize = mr.mockResize
       clear = () => {}
       drawLineStrips = mr.mockDrawLineStrips
-      drawFilledBand = mr.mockDrawFilledBand
       destroy = mr.mockDestroyLine
     },
   }
@@ -181,6 +180,26 @@ describe('createWebGLRenderer', () => {
   })
 
   describe('drawInstances', () => {
+    it('passes physical screen rectangles without applying DPR or scroll again', () => {
+      const { renderer } = makeRenderer()
+      renderer.beginFrame({ x: 0, y: 0, width: 800, height: 600, dpr: 1.25 })
+      const instances = renderer.createBuffer('instance', 16)
+      const rects = new Float32Array([15, 20, 11, 30])
+      renderer.writeBuffer(instances, rects)
+      expect(
+        renderer.drawInstances({
+          pipeline: renderer.createPipeline({ type: 'candle' }),
+          vertices: renderer.createBuffer('vertex', 48),
+          instances,
+          instanceCount: 1,
+          vertexCount: 6,
+          physicalPixels: true,
+          uniforms: { color: '#ff0000', scrollLeft: 79.5 },
+        }),
+      ).toBe(true)
+      expect(mocks.mockDrawRectBuffer).toHaveBeenCalledWith(rects, 1, '#ff0000', 0, true)
+    })
+
     it('delegates to candle surface drawRectBuffer', () => {
       const { renderer } = makeRenderer()
       const region: SurfaceRegion = { x: 0, y: 0, width: 800, height: 600, dpr: 2 }
@@ -402,18 +421,19 @@ describe('createWebGLRenderer', () => {
       ])
     })
 
-    it('preserves diagonal vertices and quantizes width at high DPR', () => {
+    it.each([1, 2])('preserves diagonal point references and width at DPR %s', (dpr) => {
       const { renderer } = makeRenderer()
-      renderer.beginFrame({ x: 0, y: 0, width: 800, height: 600, dpr: 2 })
+      renderer.beginFrame({ x: 0, y: 0, width: 800, height: 600, dpr })
       const pipeline = renderer.createPipeline({ type: 'line' })
+      const points = [
+        { x: 0.2, y: 5.1 },
+        { x: 10.7, y: 8.4 },
+      ]
       renderer.drawLines({
         pipeline,
         strips: [
           {
-            points: [
-              { x: 0.2, y: 5.1 },
-              { x: 10.7, y: 8.4 },
-            ],
+            points,
             color: '#0f0',
             width: 1,
           },
@@ -422,35 +442,7 @@ describe('createWebGLRenderer', () => {
       })
       const lines = mocks.mockDrawLineStrips.mock.calls[0]![0]
       expect(lines[0]!.width).toBe(1)
-      expect(lines[0]!.points).toEqual([
-        { x: 0.2, y: 5.1 },
-        { x: 10.7, y: 8.4 },
-      ])
-    })
-
-    it('delegates to line surface drawFilledBand for fill pipeline', () => {
-      const { renderer } = makeRenderer()
-      renderer.beginFrame({ x: 0, y: 0, width: 800, height: 600, dpr: 2 })
-
-      const pipeline = renderer.createPipeline({ type: 'fill' })
-      const vertexBuf = renderer.createBuffer('vertex', 256)
-      // [upper0_x, upper0_y, lower0_x, lower0_y, upper1_x, upper1_y, ...]
-      const verts = new Float32Array([0, 100, 0, 50, 100, 100, 100, 50, 200, 100, 200, 50])
-      renderer.writeBuffer(vertexBuf, verts)
-
-      renderer.drawLines({
-        pipeline,
-        vertices: vertexBuf,
-        vertexCount: 6,
-        uniforms: { color: '#0000ff', scrollLeft: 5 },
-      })
-
-      expect(mocks.mockDrawFilledBand).toHaveBeenCalledTimes(1)
-      const args = mocks.mockDrawFilledBand.mock.calls[0]!
-      expect(args[0].upperPoints).toHaveLength(3)
-      expect(args[0].lowerPoints).toHaveLength(3)
-      expect(args[1]).toBe('#0000ff')
-      expect(args[2]).toBe(5)
+      expect(lines[0]!.points).toBe(points)
     })
   })
 

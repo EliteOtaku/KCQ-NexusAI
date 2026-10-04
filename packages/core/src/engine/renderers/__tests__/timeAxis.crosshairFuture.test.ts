@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest'
 
 import { createKLineData, createMockRenderContext } from '@/engine/__tests__/helpers/renderTestKit'
 
-import { createTimeAxisRendererPlugin, resolveCrosshairTimestamp } from '../timeAxis'
+import { createTimeAxisLayer, resolveCrosshairTimestamp } from '../timeAxis'
 
 /** 构造带外推回调与自定义数据量的 RenderContext；extrapolated 为任意越界索引的返回值。 */
 function buildContext(options: {
@@ -63,16 +63,30 @@ describe('resolveCrosshairTimestamp 十字线时间解析', () => {
 })
 
 describe('timeAxis draw 越界十字签接线', () => {
+  it('整屏过去区域绘制负槽位刻度和十字线标签', () => {
+    const context = createMockRenderContext({
+      data: createKLineData(5),
+      scrollLeft: -1000,
+      range: { start: 0, end: 0 },
+    })
+    createTimeAxisLayer({
+      height: 24,
+      getCrosshair: () => ({ x: 42, index: -10 }),
+    }).paint({ ...context, paneId: 'xAxis', clear: false })
+    expect(context.axisLabels.forSurface('xCrosshair').labels[0]?.text).toBe('T-10')
+    const ticks = context.axisLabels.forSurface('xTicks').labels
+    expect(ticks.length).toBeGreaterThan(0)
+    expect(ticks.every((tick) => tick.text.startsWith('T-'))).toBe(true)
+  })
+
   it('越界十字线索引在 xCrosshair 表面注册外推时间标签', () => {
     const data = createKLineData(5)
     const last = data[data.length - 1]!.timestamp
     const { context } = buildContext({ extrapolated: last + 60_000 })
-    const plugin = createTimeAxisRendererPlugin({
+    createTimeAxisLayer({
       height: 24,
       getCrosshair: () => ({ x: context.paneWidth, index: data.length }),
-    })
-
-    plugin.draw(context)
+    }).paint({ ...context, paneId: 'xAxis', clear: false })
 
     const labels = context.axisLabels.forSurface('xCrosshair').labels
     expect(labels).toHaveLength(1)
@@ -85,10 +99,10 @@ describe('timeAxis draw 越界十字签接线', () => {
     { label: '历史区显示真实日期', indexOffset: -1, expected: 'real' as const },
   ])('十字线索引 $label', ({ indexOffset, expected }) => {
     const { context, data } = buildContext({ extrapolated: null })
-    createTimeAxisRendererPlugin({
+    createTimeAxisLayer({
       height: 24,
       getCrosshair: () => ({ x: 42, index: data.length + indexOffset }),
-    }).draw(context)
+    }).paint({ ...context, paneId: 'xAxis', clear: false })
 
     const text = context.axisLabels.forSurface('xCrosshair').labels[0]?.text
     expect(text).toBe(

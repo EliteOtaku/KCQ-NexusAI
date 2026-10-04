@@ -69,7 +69,7 @@ chart.dispose()
 
 ## State Kernel
 
-The engine is built around `ChartStateKernel`, the single source of truth for chart business state. It composes independent state modules for options, zoom, data, viewport, pane layout, settings, system theme, chart mode, drawing, interaction, comparisons, indicators, markers, and renderer runtime.
+The engine is built around `ChartStateKernel`, the single source of truth for chart business state. It composes independent state modules for options, zoom, data, viewport, pane layout, settings, system theme, chart model (data view), drawing, interaction, comparisons, indicators, markers, and renderer runtime. The data view (kline / timeshare / fiveDayTimeShare) has a single source of truth in the `engine/chartModel/` module.
 
 ```text
 Controller method / DOM input
@@ -221,7 +221,7 @@ Chart
 - `RendererHost` owns backend lifecycle, resize, switching, and degradation. The renderer reports whether a GPU batch was rendered; layers perform a complete Canvas2D fallback when it was not.
 - Coordinates exposed to chart logic are logical pixels. Canvas buffers and GPU viewports use the kernel's effective DPR and physical pixels.
 
-For the runtime contract, extension rules, backend behavior, and diagnostics, see [the rendering pipeline](../../docs/rendering-pipeline.md).
+For the runtime contract, extension rules, backend behavior, and diagnostics, see [the rendering pipeline](../../docs/rendering/rendering-pipeline.md).
 
 ## Additional Public APIs
 
@@ -257,5 +257,5 @@ The default synchronous host attempts WebGL and falls back to Canvas2D. WebGPU i
 
 ## 📄 License
 
-[MIT](LICENSE)
+[Apache-2.0](LICENSE)
 

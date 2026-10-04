@@ -1,19 +1,37 @@
 // @vitest-environment jsdom
+// 验证 Pane 画布尺寸、轴宽与 DPR 映射。
 import { describe, expect, it } from 'vitest'
+import { Pane, PaneRenderer } from '@/core/pane/index'
 
-import { Pane } from '@/core/layout/pane'
-import { PaneRenderer } from '@/core/paneRenderer'
-
+/** 构造含左右轴的真实 DOM 画布。 */
 function createDom() {
   return {
     mainCanvas: document.createElement('canvas'),
+    drawingCanvas: document.createElement('canvas'),
     overlayCanvas: document.createElement('canvas'),
     yAxisCanvas: document.createElement('canvas'),
     yAxisOverlayCanvas: document.createElement('canvas'),
+    leftYAxisCanvas: document.createElement('canvas'),
+    leftYAxisOverlayCanvas: document.createElement('canvas'),
   }
 }
 
 describe('PaneRenderer resize DPR mapping', () => {
+  it('keeps the left axis visible when axis width is supplied only by price labels', () => {
+    const dom = createDom()
+    const renderer = new PaneRenderer(dom, new Pane('main'), {
+      rightAxisWidth: 0,
+      leftAxisWidth: 0,
+      priceLabelWidth: 60,
+      yPaddingPx: 0,
+    })
+    renderer.resize(500, 240, 2)
+    expect(dom.leftYAxisCanvas.width).toBe(120)
+    expect(dom.leftYAxisCanvas.style.width).toBe('60px')
+    expect(dom.leftYAxisOverlayCanvas.width).toBe(120)
+    expect(dom.leftYAxisCanvas.height).toBe(480)
+  })
+
   it('maps logical plot size to physical canvas size and keeps CSS size logical', () => {
     const dom = createDom()
     const pane = new Pane('main')
@@ -33,6 +51,10 @@ describe('PaneRenderer resize DPR mapping', () => {
     // overlayCanvas should match mainCanvas
     expect(dom.overlayCanvas.width).toBe(dom.mainCanvas.width)
     expect(dom.overlayCanvas.height).toBe(dom.mainCanvas.height)
+    expect(dom.drawingCanvas.width).toBe(dom.mainCanvas.width)
+    expect(dom.drawingCanvas.height).toBe(dom.mainCanvas.height)
+    expect(dom.drawingCanvas.style.width).toBe('500px')
+    expect(dom.drawingCanvas.style.height).toBe('240px')
     // yAxis overlay matches yAxis base
     expect(dom.yAxisOverlayCanvas.width).toBe(dom.yAxisCanvas.width)
     expect(dom.yAxisOverlayCanvas.height).toBe(dom.yAxisCanvas.height)

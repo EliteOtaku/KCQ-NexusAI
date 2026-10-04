@@ -26,6 +26,9 @@
         :source-endpoints="sourceEndpoints"
         :watchlist-keys="watchlistKeys"
         :show-back-button="kLineLevel === 'timeshare'"
+        :screenshot-capturing="isCapturing"
+        :screenshot-message="screenshotMessage"
+        @screenshot="captureScreenshot"
         @add-overlay-symbol="onAddOverlaySymbol"
         @remove-overlay-symbol="onRemoveOverlaySymbol"
         @k-line-level-change="onKLineLevelChange"
@@ -75,6 +78,13 @@
           @update-source-endpoint="setAggregationSourceEndpoint"
         />
         <div ref="chartMainRef" class="chart-main">
+          <div
+            ref="leftAxisLayerRef"
+            v-show="chartMode === 'timeshare'"
+            class="left-axis-host"
+            :style="{ width: props.rightAxisWidth + props.priceLabelWidth + 'px' }"
+            aria-label="价格轴"
+          ></div>
           <div class="pane-separator-layer" aria-hidden="true">
             <div
               v-for="line in paneSeparatorLines"
@@ -86,17 +96,14 @@
           </div>
           <div ref="tooltipLayerRef" class="tooltip-layer"></div>
           <div
-            v-if="computedLeftAxisWidth > 0"
-            ref="leftAxisLayerRef"
-            class="left-axis-host"
-            :style="leftAxisHostStyle"
-          ></div>
-          <div
             ref="containerRef"
             tabindex="0"
             @keydown="onDrawingHistoryKeydown"
             class="chart-container"
-            :style="chartContainerStyle"
+            :class="{
+              'chart-container--axis-left': chartMode !== 'timeshare' && priceAxisPosition === 'left',
+              'chart-container--dual-axis': chartMode === 'timeshare',
+            }"
             @pointerdown="onPointerDown"
             @pointermove="onPointerMove"
             @pointerup="onPointerUp"
@@ -117,14 +124,6 @@
                 >
                   <slot name="legend" v-bind="legendTemplateContext" />
                 </div>
-
-                <PaneHeaderOverlay
-                  :panes="paneHeaderItems"
-                  @close="removeSubPane"
-                  @replace="openPaneIndicatorReplacement"
-                  @move-up="movePaneUp"
-                  @move-down="movePaneDown"
-                />
 
                 <CanvasToolbarStack>
                   <RangeSelectionExport
@@ -269,6 +268,7 @@
           <div
             ref="rightAxisLayerRef"
             class="right-axis-host"
+            :class="{ 'price-axis-host--left': chartMode !== 'timeshare' && priceAxisPosition === 'left' }"
             :style="{ width: axisHostWidth + 'px' }"
             @pointerdown="onRightAxisPointerDown"
             @pointermove="onRightAxisPointerMove"
@@ -277,7 +277,28 @@
             @pointercancel="onRightAxisPointerCancel"
             @lostpointercapture="onRightAxisLostPointerCapture"
             @contextmenu.prevent
-          ></div>
+          >
+            <div
+              v-for="pane in paneAxisItems"
+              :key="pane.id"
+              class="pane-axis-controls-host"
+              :style="{ top: pane.top + 'px', height: pane.height + 'px' }"
+            >
+              <PriceAxisSettingsMenu
+                :controller="controller"
+                :pane-id="pane.id"
+                :height="0"
+                :show-settings="false"
+                @settings-change="handleSettingsChange"
+              />
+            </div>
+            <PriceAxisSettingsMenu
+              :controller="controller"
+              :height="props.bottomAxisHeight"
+              :show-shortcuts="false"
+              @settings-change="handleSettingsChange"
+            />
+          </div>
         </div>
       </div>
     </div>
@@ -314,10 +335,11 @@
       :active-indicators="activeIndicators"
       :indicator-params="indicatorParams"
       :replace-pane-id="replacementPaneId"
+      :replace-role="replacementRole"
       @toggle="handleIndicatorToggle"
       @update-params="handleUpdateParams"
       @reorder-sub-indicators="handleReorderSubIndicators"
-      @replace="replacePaneIndicator"
+      @replace="replaceLegend"
       @close="replacementPaneId = null"
     />
   </div>
@@ -326,7 +348,6 @@
 <script setup lang="ts">
   import { type ChartSettings, resolveSettings } from '@363045841yyt/klinechart-core/config'
   import {
-    type CanvasLegendOptions,
     type ChartController,
     type ChartMountOptions,
     CURSOR_DRAWING_TOOL_ID,
@@ -335,9 +356,9 @@
     type DrawingLineLabelTarget,
     type DrawingStyle,
     type DrawingToolId,
+    type LegendOptions,
     type LegendTemplateContext,
     marketDataProviderRegistry,
-    PANE_HEADER_INSET_PX,
     type RendererBackendRuntime,
     type SymbolInfo,
     type SymbolSpec,
@@ -386,13 +407,20 @@
   } = useAggregationSources(aggregationSources)
 
   import { useCanvasDrawingTemplates } from '../composables/chart/useCanvasDrawingTemplates.js'
+  import { useChartScreenshot } from '../composables/chart/useChartScreenshot.js'
   import { useChartState } from '../composables/chart/useChartState.js'
   import { useChartTheme } from '../composables/chart/useChartTheme.js'
-  import { useControllerSignal } from '../composables/chart/useControllerSignal.js'
+  import { useComparisonSymbols } from '../composables/chart/useComparisonSymbols.js'
+  import {
+    useControllerSignal,
+    useControllerSignalValue,
+  } from '../composables/chart/useControllerSignal.js'
   import { useDrawingManager } from '../composables/chart/useDrawingManager.js'
   import { useIndicatorManager } from '../composables/chart/useIndicatorManager.js'
   import { useInteractionBridge } from '../composables/chart/useInteractionBridge.js'
   import { useKLineTooltip } from '../composables/chart/useKLineTooltip.js'
+  import { useLegendActions } from '../composables/chart/useLegendActions.js'
+  import { usePaneAxisItems } from '../composables/chart/usePaneAxisItems.js'
   import { useRangeSelection } from '../composables/chart/useRangeSelection.js'
   import { provideFullscreenTeleportTarget } from '../composables/useFullscreenTeleportTarget.js'
   import { symbolIdentityKey } from '../composables/useSymbolSearch.js'
@@ -407,7 +435,7 @@
   import IndicatorSelector from './IndicatorSelector.vue'
   import LeftToolbar from './LeftToolbar.vue'
   import MarkerTooltip from './MarkerTooltip.vue'
-  import PaneHeaderOverlay from './PaneHeaderOverlay.vue'
+  import PriceAxisSettingsMenu from './PriceAxisSettingsMenu.vue'
   import RangeSelectionExport from './RangeSelectionExport.vue'
   import TopToolbar, { type SymbolItem } from './TopToolbar.vue'
   import { RANGE_SELECT_UI_TOOL_ID } from './toolbarToolIds.js'
@@ -461,7 +489,7 @@
       settings?: Partial<ChartSettings>
 
       /** Canvas 主图图例配置；默认由 Core 绘制，不进入 Vue 更新路径。 */
-      legend?: CanvasLegendOptions
+      legend?: LegendOptions
 
       /** 用户自定义数据源（传入后 bypass fetcher，使用此数据） */
       customData?: CustomDataSource
@@ -520,7 +548,7 @@
 
   /**
    * legend 插槽作用域。
-   * 存在 #legend 时完全替换主图左上角 Canvas 图例；字段与 core LegendTemplateContext 一致。
+   * 存在 #legend 时替换主图默认 DOM 图例；字段与 core LegendTemplateContext 一致。
    */
   export type LegendSlotProps = LegendTemplateContext
 
@@ -613,14 +641,6 @@
     try {
       applyInstrumentCapabilities(item)
       ctrl.registerSymbols([toLegacySymbolInfo(item)])
-      // 对比视图没有主品种：切换主品种时，把对比集合中原来由 UI 推入的主品种条目替换为新品种。
-      const oldKey = currentSymbolItem.value ? symbolIdentityKey(currentSymbolItem.value) : null
-      const specs = ctrl.comparisonSpecs.peek()
-      if (oldKey && specs.some((spec) => symbolIdentityKey(spec) === oldKey)) {
-        ctrl.setComparisonSpecs(
-          specs.map((spec) => (symbolIdentityKey(spec) === oldKey ? toSymbolSpec(item) : spec)),
-        )
-      }
       ctrl.setSymbols([toSymbolSpec(item)])
     } catch (error) {
       symbolStatus.value = 'error'
@@ -650,26 +670,6 @@
     ) {
       kLineAdjust.value = adjustments[0]!
     }
-  }
-
-  function onAddOverlaySymbol(item: SymbolItem) {
-    const ctrl = controller.value
-    if (!ctrl) return
-    try {
-      const primary = currentSymbolItem.value ? toSymbolSpec(currentSymbolItem.value) : null
-      // 比较视图不设主品种；首个对比时由 UI 把当前 kline 主品种作为普通序列推入，保证主折线可见。
-      if (primary && ctrl.comparisonSpecs.peek().length === 0) {
-        ctrl.addComparisonSymbol(primary)
-      }
-      ctrl.addComparisonSymbol(toSymbolSpec(item), primary)
-    } catch (error) {
-      symbolStatus.value = 'error'
-      symbolErrorMessage.value = formatUnsupportedSymbolMessage(item, error)
-    }
-  }
-
-  function onRemoveOverlaySymbol(identity: string) {
-    controller.value?.removeComparisonSymbol(identity)
   }
 
   function toSymbolSpec(item: SymbolItem): SymbolSpec {
@@ -760,13 +760,20 @@
   // ── DOM Template Refs ──
   const containerRef = ref<HTMLDivElement | null>(null)
   const canvasLayerRef = ref<HTMLDivElement | null>(null)
+  const rightAxisLayerRef = ref<HTMLDivElement | null>(null)
+  const leftAxisLayerRef = ref<HTMLDivElement | null>(null)
   const chartMainRef = ref<HTMLDivElement | null>(null)
+  const { isCapturing, screenshotMessage, captureScreenshot } = useChartScreenshot(
+    chartMainRef,
+    currentSymbol,
+    computed(() => currentSymbolItem.value?.name ?? ''),
+    () => controller.value,
+  )
   const chartStageRef = ref<HTMLDivElement | null>(null)
   const chartWrapperRef = ref<HTMLDivElement | null>(null)
   const tooltipLayerRef = ref<HTMLDivElement | null>(null)
   const tooltipContentRef = ref<HTMLDivElement | null>(null)
   const indicatorSelectorRef = ref<InstanceType<typeof IndicatorSelector> | null>(null)
-  const leftAxisLayerRef = ref<HTMLDivElement | null>(null)
   provideFullscreenTeleportTarget(chartWrapperRef)
 
   // ── Fullscreen (controlled / uncontrolled) ──
@@ -801,6 +808,15 @@
 
   // ── Controller & Composable Wiring ──
   const controller = shallowRef<ChartController | null>(null)
+  const { add: onAddOverlaySymbol, remove: onRemoveOverlaySymbol } = useComparisonSymbols({
+    getController: () => controller.value,
+    getPrimary: () => (currentSymbolItem.value ? toSymbolSpec(currentSymbolItem.value) : null),
+    toSpec: toSymbolSpec,
+    onError: (item, error) => {
+      symbolStatus.value = 'error'
+      symbolErrorMessage.value = formatUnsupportedSymbolMessage(item, error)
+    },
+  })
   const chartMode = useControllerSignal(
     controller,
     (ctrl) => ctrl.chartMode,
@@ -849,10 +865,10 @@
   }
 
   const showBatchStockDialog = ref(false)
+
   const showDrawingSettingsDialog = ref(false)
   const editingDrawingId = ref<string | null>(null)
   const batchSymbols = ref<string[]>([])
-  const replacementPaneId = ref<string | null>(null)
 
   const chartState = useChartState(controller)
   const {
@@ -914,56 +930,23 @@
     handleReorderSubIndicators,
   } = useIndicatorManager(controller, paneRatios)
 
-  // 仅在画布几何变化时刷新 Pane Header；横向滚动改变 visible range 不应触发 Vue 渲染。
-  const paneHeaderLayoutEpoch = ref(0)
+  // 画布几何（尺寸 / DPR）变化时刷新轴快捷入口布局；横向滚动改变 visible range 不触发。
+  const paneAxisLayoutEpoch = ref(0)
 
-  /** 读取 Core 的真实 Pane 几何，确保 Header 与最小高度、取整后的布局一致。 */
-  const paneHeaderItems = computed(() => {
-    // Pane 重排或画布尺寸变化后，Canvas 会同步更新 DOM 尺寸与位置。
-    void paneLayout.value
-    void paneHeaderLayoutEpoch.value
-    const canvasLayer = canvasLayerRef.value
-    if (!canvasLayer) return []
+  /** 使用各 Pane 实际轴画布的位置，把独立入口放在对应轴底部。 */
+  const paneAxisItems = usePaneAxisItems(rightAxisLayerRef, paneLayout, paneAxisLayoutEpoch)
 
-    return subPanes.value.flatMap((pane, index) => {
-      const canvas = Array.from(
-        canvasLayer.querySelectorAll<HTMLCanvasElement>('canvas.main-canvas.sub'),
-      ).find((element) => element.id === `${pane.id}-main`)
-      if (!canvas) return []
-      return [
-        {
-          id: pane.id,
-          top: canvas.offsetTop + PANE_HEADER_INSET_PX,
-          anchorLeft: canvas.offsetLeft + canvas.offsetWidth - PANE_HEADER_INSET_PX,
-          canMoveUp: index > 0,
-          canMoveDown: index < subPanes.value.length - 1,
-        },
-      ]
-    })
+  const {
+    replacementId: replacementPaneId,
+    replacementRole,
+    replaceLegend,
+  } = useLegendActions(controller, canvasLayerRef, {
+    removePane: removeSubPane,
+    movePane: moveSubPane,
+    replacePane: switchSubIndicator,
+    openSelector: () => indicatorSelectorRef.value?.openMenu(),
+    openIndicatorSettings: (definitionId) => indicatorSelectorRef.value?.openParams(definitionId),
   })
-
-  /** 打开指标选择器，并将下一次选择限定为替换指定副图 Pane。 */
-  function openPaneIndicatorReplacement(paneId: string): void {
-    replacementPaneId.value = paneId
-    indicatorSelectorRef.value?.openMenu()
-  }
-
-  /** 使用选择器中选定的副图指标原子替换 Pane 内容，保留 Pane 身份和尺寸。 */
-  function replacePaneIndicator(paneId: string, indicatorId: string): void {
-    switchSubIndicator(
-      paneId,
-      indicatorId as import('@363045841yyt/klinechart-core/controllers').SubIndicatorType,
-    )
-    replacementPaneId.value = null
-  }
-
-  function movePaneUp(paneId: string): void {
-    moveSubPane(paneId, 'up')
-  }
-
-  function movePaneDown(paneId: string): void {
-    moveSubPane(paneId, 'down')
-  }
 
   const {
     drawingController,
@@ -1251,9 +1234,11 @@
 
   function applyLegendRenderMode(ctrl: ChartController | null, external: boolean): void {
     if (!ctrl) return
-    ctrl.updateRendererConfig('mainIndicatorLegend', {
-      visible: !external && props.legend?.visible !== false,
-      visibleIndicatorIds: props.legend?.visibleIndicatorIds,
+    ctrl.updateOptionsFacade({
+      legend: {
+        visible: !external && props.legend?.visible !== false,
+        visibleIndicatorIds: props.legend?.visibleIndicatorIds,
+      },
     })
   }
 
@@ -1325,9 +1310,7 @@
     }
     return null
   })
-  const showExternalKLineTooltip = computed(
-    () => chartMode.value !== 'comparison' && externalHoveredKLine.value !== null && !isMobile,
-  )
+  const showExternalKLineTooltip = computed(() => externalHoveredKLine.value !== null && !isMobile)
   const externalKLineTooltipStyle = computed(() => {
     const position = dragPos.value ?? externalInteractionState.value.tooltipPos
     const offset = getLayerOffset()
@@ -1521,25 +1504,13 @@
     Math.max(props.rightAxisWidth + props.priceLabelWidth, effectiveRightAxisWidth.value),
   )
 
-  const computedLeftAxisWidth = computed(() => props.leftAxisWidth ?? 0)
-
-  const leftAxisHostStyle = computed(() => {
-    const width = computedLeftAxisWidth.value
-    if (width <= 0) return { display: 'none' }
-    if (kLineLevel.value === 'timeshare') return { width: `${width}px` }
-    const leftDisplay = chartSettings.value?.mainLeftAxisDisplaySetting
-    if (!leftDisplay || leftDisplay === 'none') return { width: `${width}px`, display: 'none' }
-    return { width: `${width}px` }
-  })
-
-  const chartContainerStyle = computed(() => {
-    const base: Record<string, string> = {}
-    if (leftAxisHostStyle.value.display === 'none') {
-      base.borderRadius = '3px 0 0 3px'
-      base.borderLeft = '1px solid var(--chart-border)'
-    }
-    return base
-  })
+  // 位置只改变同一 DOM 轴的 flex 顺序，Canvas、范围与交互实例保持同一份。
+  const priceAxisPosition = useControllerSignalValue(
+    controller,
+    (ctrl) => ctrl.settings,
+    (settings) => settings.priceAxisPosition,
+    () => _initialResolved.priceAxisPosition,
+  )
 
   function applyZoomToLevel(targetLevel: number, anchorX?: number) {
     controller.value?.zoomToLevel(targetLevel, anchorX)
@@ -1576,7 +1547,6 @@
     canvasLayer: HTMLDivElement,
     rightAxisLayer: HTMLDivElement,
     xAxisCanvas: HTMLCanvasElement,
-    leftAxisLayer?: HTMLDivElement,
   ): Promise<ChartController> {
     const ctrl = createChartController({
       container,
@@ -1584,14 +1554,14 @@
       marketSessions: props.marketSessions,
       canvasLayer,
       rightAxisLayer,
-      leftAxisLayer,
+      leftAxisLayer: leftAxisLayerRef.value ?? undefined,
+      leftAxisWidth: props.rightAxisWidth + props.priceLabelWidth,
       xAxisCanvas,
       theme: _initialTheme,
       initialZoomLevel: props.initialZoomLevel,
       zoomLevels: props.zoomLevels,
       yPaddingPx: props.yPaddingPx,
       rightAxisWidth: props.rightAxisWidth,
-      leftAxisWidth: props.leftAxisWidth,
       bottomAxisHeight: props.bottomAxisHeight,
       priceLabelWidth: props.priceLabelWidth,
       minKWidth: props.minKWidth,
@@ -1621,16 +1591,17 @@
       })
     })
 
-    let paneHeaderViewportSignature = ''
-    const updatePaneHeaderViewportSignature = () => {
+    // 轴快捷入口读取画布真实几何；容器尺寸或 DPR 变化后需重新读取，横向滚动不触发。
+    let paneAxisViewportSignature = ''
+    const refreshPaneAxisLayout = () => {
       const viewport = ctrl.viewport.peek()
       const nextSignature = `${viewport.plotWidth}:${viewport.plotHeight}:${viewport.dpr}`
-      if (nextSignature === paneHeaderViewportSignature) return
-      paneHeaderViewportSignature = nextSignature
-      paneHeaderLayoutEpoch.value += 1
+      if (nextSignature === paneAxisViewportSignature) return
+      paneAxisViewportSignature = nextSignature
+      paneAxisLayoutEpoch.value += 1
     }
-    updatePaneHeaderViewportSignature()
-    const unsubscribeViewport = ctrl.viewport.subscribe(updatePaneHeaderViewportSignature)
+    refreshPaneAxisLayout()
+    const unsubscribeViewport = ctrl.viewport.subscribe(refreshPaneAxisLayout)
 
     const unsubscribeData = ctrl.data.subscribe(() => {
       const data = ctrl.data.peek()
@@ -1764,8 +1735,8 @@
       unsubscribeData()
       unsubscribeDataLoading()
       unsubscribeDataError()
-      unsubscribeViewport()
       unsubscribePaneLayout()
+      unsubscribeViewport()
       unsubscribeTheme()
       unsubscribeDrawingTool()
       unsubscribeUndo()
@@ -1836,16 +1807,16 @@
 
     // 1) 滚轮缩放处理
     const onWheelHandler = setupWheelHandler()
-    container.addEventListener('wheel', onWheelHandler, { passive: false })
+    // 绘图区与价格轴是兄弟节点，由共同父节点接收滚轮事件。
+    chartMain.addEventListener('wheel', onWheelHandler, { passive: false })
 
     // 2) 创建 Chart 控制器（使用模板 DOM 元素）
     const canvasLayer = container.querySelector<HTMLDivElement>('.canvas-layer')
     const xAxisCanvas = container.querySelector<HTMLCanvasElement>('.x-axis-canvas')
     const rightAxisLayer = chartMain.querySelector<HTMLDivElement>('.right-axis-host')
-    const leftAxisLayer = chartMain.querySelector<HTMLDivElement>('.left-axis-host') ?? undefined
     let ctrl: ChartController
     try {
-      ctrl = await initChart(container, canvasLayer!, rightAxisLayer!, xAxisCanvas!, leftAxisLayer)
+      ctrl = await initChart(container, canvasLayer!, rightAxisLayer!, xAxisCanvas!)
     } catch (err) {
       console.error('[KLineChart] initChart failed:', err)
       return
@@ -1942,6 +1913,8 @@
 
 <style scoped>
   .chart-wrapper {
+    font-family: var(--klc-typography-font-family);
+    font-variant-numeric: tabular-nums;
     --kmap-height: var(--kmap-chart-height, 100%);
     --kmap-width: var(--kmap-chart-width, 100%);
 
@@ -2054,25 +2027,48 @@
     cursor: move;
   }
 
-  .chart-container {
+  /* 绘图区与左右轴共用布局、背景和手势规则。 */
+  .chart-container,
+  .left-axis-host,
+  .right-axis-host {
     position: relative;
+    min-height: inherit;
+    box-sizing: border-box;
+    background: var(--chart-bg);
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+    touch-action: none;
+  }
+
+  .chart-container {
     flex: 1 1 auto;
     overflow-x: auto;
     overflow-y: hidden;
-    min-height: inherit;
     scrollbar-width: none;
     -ms-overflow-style: none;
     border: 1px solid var(--chart-border);
     border-right: 0;
     border-left: 0;
     border-radius: 0;
-    box-sizing: border-box;
-    background: var(--chart-bg);
+  }
 
-    -webkit-touch-callout: none;
-    -webkit-user-select: none;
-    user-select: none;
-    touch-action: none;
+  .chart-container {
+    border-radius: 3px 0 0 3px;
+    border-left: 1px solid var(--chart-border);
+  }
+
+  .chart-container--axis-left {
+    border-radius: 0 3px 3px 0;
+    border-left: 0;
+    border-right: 1px solid var(--chart-border);
+  }
+
+  /* 双轴分隔线由各自轴容器绘制，行情区不再叠加侧边框。 */
+  .chart-container--dual-axis {
+    border-left: 0;
+    border-right: 0;
+    border-radius: 0;
   }
 
   .drawing-line-label-editor {
@@ -2151,37 +2147,50 @@
   }
 
   .right-axis-host {
-    position: relative;
     flex: 0 0 auto;
-    min-height: inherit;
-    box-sizing: border-box;
-    background: var(--chart-bg);
-    overflow: visible;
     border: 1px solid var(--chart-border);
-    border-top-right-radius: 3px;
-    border-bottom-right-radius: 3px;
-
-    -webkit-touch-callout: none;
-    -webkit-user-select: none;
-    user-select: none;
-    touch-action: none;
   }
 
+  /* 分时左轴独立占据 flex 宽度，容器缩放由 Core 的 ResizeObserver 感知。 */
   .left-axis-host {
     position: relative;
     flex: 0 0 auto;
-    min-height: inherit;
-    box-sizing: border-box;
-    background: var(--chart-bg);
-    overflow: visible;
     border: 1px solid var(--chart-border);
     border-top-left-radius: 3px;
     border-bottom-left-radius: 3px;
+  }
 
-    -webkit-touch-callout: none;
-    -webkit-user-select: none;
-    user-select: none;
-    touch-action: none;
+  .left-axis-host :deep(> canvas) {
+    display: block;
+  }
+
+  .right-axis-host {
+    border-top-right-radius: 3px;
+    border-bottom-right-radius: 3px;
+  }
+
+  .pane-axis-controls-host {
+    position: absolute;
+    width: 100%;
+    z-index: 2;
+  }
+
+  .pane-axis-controls-host:hover :deep(.price-axis-shortcuts) {
+    visibility: visible;
+    pointer-events: auto;
+  }
+
+  .price-axis-host--left {
+    order: -1;
+    border-top-left-radius: 3px;
+    border-bottom-left-radius: 3px;
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+  }
+
+  /* 轴画布由 Core 动态创建，定位与叠层由 Core 管理，Vue 只负责显示样式。 */
+  .right-axis-host :deep(> canvas) {
+    display: block;
   }
 
   .scroll-content {
@@ -2279,32 +2288,12 @@
     display: block;
   }
 
-  .right-axis,
-  .right-axis-overlay,
-  .left-axis,
-  .left-axis-overlay {
-    position: absolute;
-    display: block;
-    left: 0;
-  }
-
   .x-axis-canvas {
     position: absolute;
     left: 0;
     bottom: 0;
     display: block;
     z-index: 10;
-  }
-
-  .right-axis,
-  .left-axis {
-    z-index: 15;
-  }
-
-  .right-axis-overlay,
-  .left-axis-overlay {
-    z-index: 16;
-    pointer-events: none;
   }
 </style>
 

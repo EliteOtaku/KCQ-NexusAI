@@ -5,7 +5,7 @@
 
 import type { KLineData, TimeShareData } from '../../controllers/types.js'
 import type { MarketSessionConfig } from '../../foundation/utils/sessionTimeLabels.js'
-import type { DepthSource } from '../depth/depthTypes.js'
+import type { DepthSource } from '../depth/types.js'
 import type { LiveBarsDataSource } from '../live/types.js'
 
 /** 前端可识别的品种类别；unknown 用于尚未完成语义归一化的数据源品种。 */
@@ -30,6 +30,14 @@ export type KnownAssetClass = Exclude<AssetClass, 'unknown'>
 export const KNOWN_ASSET_CLASS_VALUES: readonly KnownAssetClass[] = ASSET_CLASS_VALUES.filter(
   (value): value is KnownAssetClass => value !== 'unknown',
 )
+
+/**
+ * 判断资产类别是否可作为筛选条件参与匹配。
+ * unknown 与缺省同义，仅表示数据源未完成归一化，返回 false 时调用方必须按“无条件”处理。
+ */
+export function isFilterableAssetClass(value: AssetClass | undefined): value is KnownAssetClass {
+  return value !== undefined && value !== 'unknown'
+}
 
 /** 图表当前支持的标准 K 线周期。 */
 export type KLinePeriod =
@@ -337,4 +345,83 @@ export interface MarketDataFailure {
   sourceId: string
   retryable: boolean
   details?: Readonly<Record<string, unknown>>
+}
+
+// ---------------------------------------------------------------------------
+// 注册表与 Router 契约
+// ---------------------------------------------------------------------------
+
+/** 未指定具体数据源时的路由来源标识。 */
+export const AUTO_SOURCE_ID = 'auto'
+
+/** 单个行情数据源的运行时配置。 */
+export interface MarketDataSourceConfig {
+  enabled: boolean
+  priority: number
+  baseUrl?: string
+}
+
+/** 数据源配置的局部更新。 */
+export type MarketDataSourceConfigPatch = Partial<MarketDataSourceConfig>
+
+/** 源级能力筛选条件。 */
+export interface SourceCapabilityQuery {
+  capability: 'bars' | 'timeShare' | 'timeShareRange' | 'depth'
+  assetClass?: AssetClass
+  period?: KLinePeriod
+  adjustment?: KLineAdjustment
+  days?: number
+}
+
+/** Router 识别的统一品种身份，不包含任何 Provider 私有路由字段。 */
+export interface SourceRouterInstrumentIdentity {
+  symbol: string
+  exchange?: string
+  assetClass?: AssetClass
+}
+
+/** K 线流转请求。 */
+export interface SourceRouterBarsRequest extends SourceRouterInstrumentIdentity {
+  preferredSourceId?: string
+  instrument?: InstrumentDescriptor
+  period: KLinePeriod
+  adjustment: KLineAdjustment
+  barAggregation: BarAggregation
+  limit: number
+  beforeTimestamp?: number
+  signal?: AbortSignal
+}
+
+/** 分时流转请求。 */
+export interface SourceRouterTimeShareRequest extends SourceRouterInstrumentIdentity {
+  preferredSourceId?: string
+  instrument?: InstrumentDescriptor
+  tradingDate?: TradingDate
+  resolveTradingDate?: (instrument: InstrumentDescriptor) => TradingDate
+  signal?: AbortSignal
+}
+
+/** 多日分时流转请求。 */
+export interface SourceRouterTimeShareRangeRequest extends SourceRouterInstrumentIdentity {
+  preferredSourceId?: string
+  instrument?: InstrumentDescriptor
+  endTradingDate?: TradingDate
+  resolveEndTradingDate?: (instrument: InstrumentDescriptor) => TradingDate
+  days: number
+  signal?: AbortSignal
+}
+
+/** 单次源尝试的结果，用于链耗尽后的诊断。 */
+export interface SourceRouteAttempt {
+  sourceId: string
+  code: MarketDataErrorCode
+  message: string
+}
+
+/** 成功请求的实际 Provider 与目标源品种。 */
+export interface RoutedMarketData<T> {
+  series: T
+  provider: MarketDataProvider
+  instrument: InstrumentDescriptor
+  attempts: ReadonlyArray<SourceRouteAttempt>
 }

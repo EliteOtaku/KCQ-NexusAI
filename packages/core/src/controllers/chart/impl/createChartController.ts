@@ -1,16 +1,15 @@
-import { marketDataProviderRegistry } from '@/data/provider/registry.js'
-import { Chart } from '@/engine/chart.js'
+import { marketDataProviderRegistry } from '@/data/provider/impl/registry.js'
 import type {
   ChartOptions,
-  IndicatorInstance as LegacyIndicatorInstance,
-  SubPaneInfo as LegacySubPaneInfo,
-  ViewportState as LegacyViewportState,
-} from '@/engine/chartTypes.js'
+  IndicatorInstance as EngineIndicatorInstance,
+  SubPaneInfo as EngineSubPaneInfo,
+  ViewportState as EngineViewportState,
+} from '@/engine/chart/index.js'
+import { Chart } from '@/engine/chart/index.js'
 import { getRegisteredIndicatorDefinition } from '@/engine/indicators/indicatorDefinitionRegistry.js'
 import { loadBuiltinIndicators } from '@/engine/indicators/registerBuiltins.js'
-import { MAIN_PANE_ID } from '@/engine/paneIds.js'
-import { hasSubPaneRendererMetadata } from '@/engine/subPaneManager.js'
-import { kGapFromKWidth, zoomLevelToKWidth } from '@/engine/utils/zoom.js'
+import { hasSubPaneRendererMetadata } from '@/engine/pane/index.js'
+import { MAIN_PANE_ID } from '@/engine/pane/types.js'
 import { CONTROLLER_ERROR_CODES, KLineChartError } from '@/errors.js'
 import { createChartAgentController } from '@/features/agent/impl/chartAgentController.js'
 import { createIndicatorQuery } from '@/features/agent/impl/indicator/indicatorQuery.js'
@@ -20,9 +19,11 @@ import { generateUUID } from '@/foundation/utils/uuid.js'
 import { createDefaultRendererHost, type RendererBackend } from '@/rendering/render/index.js'
 import { allIndicatorDefinitions } from '../../indicatorDefinitionCatalog.js'
 import {
+  createPanePriceAxisPersistence,
   createViewWorkspacePersistence,
+  loadStoredPanePriceAxisModes,
   loadStoredViewWorkspaces,
-} from '../../viewWorkspacePersistence.js'
+} from '../../persistence/index.js'
 import type {
   ChartController,
   ChartMountOptions,
@@ -39,7 +40,9 @@ import { createDataMethods } from './createDataMethods.js'
 import { createDrawingMethods } from './createDrawingMethods.js'
 import { mountChartDom } from './mountChartDom.js'
 
-function mapViewportState(vp: LegacyViewportState): ChartViewport {
+// engine 侧模型 → controller 公开模型的字段投影：engine 的指标实例带 internal ordinal，
+// 公开实例不含，故在此收窄为面向前端的快照。
+function mapViewportState(vp: EngineViewportState): ChartViewport {
   return {
     zoomLevel: vp.zoomLevel,
     plotWidth: vp.plotWidth,
@@ -52,7 +55,7 @@ function mapViewportState(vp: LegacyViewportState): ChartViewport {
   }
 }
 
-function mapIndicatorInstance(indicator: LegacyIndicatorInstance): IndicatorInstance {
+function mapIndicatorInstance(indicator: EngineIndicatorInstance): IndicatorInstance {
   return {
     id: indicator.id,
     definitionId: indicator.definitionId,
@@ -64,7 +67,7 @@ function mapIndicatorInstance(indicator: LegacyIndicatorInstance): IndicatorInst
   }
 }
 
-function mapSubPaneInfo(subPane: LegacySubPaneInfo): SubPaneInfo {
+function mapSubPaneInfo(subPane: EngineSubPaneInfo): SubPaneInfo {
   return {
     instanceId: subPane.instanceId,
     paneId: subPane.paneId,
@@ -91,6 +94,7 @@ export async function createChartController(opts: ChartMountOptions): Promise<Ch
 
   await loadBuiltinIndicators()
   const initialViewWorkspaces = loadStoredViewWorkspaces()
+  const initialPanePriceAxisModes = loadStoredPanePriceAxisModes()
   const mounted = mountChartDom(opts)
 
   const initialZoomLevel = opts.initialZoomLevel ?? DEFAULT_OPTS.initialZoomLevel
@@ -103,7 +107,6 @@ export async function createChartController(opts: ChartMountOptions): Promise<Ch
     minKWidth: opts.minKWidth ?? DEFAULT_OPTS.minKWidth,
     maxKWidth: opts.maxKWidth ?? DEFAULT_OPTS.maxKWidth,
     priceLabelWidth: opts.priceLabelWidth ?? DEFAULT_OPTS.priceLabelWidth,
-    futureScreens: opts.futureScreens,
     panes: [{ id: MAIN_PANE_ID, ratio: 1 }],
     paneGap: 0,
     zoomLevels: zoomLevelCount,
@@ -128,25 +131,20 @@ export async function createChartController(opts: ChartMountOptions): Promise<Ch
       rendererHost,
       initialSettings,
       initialViewWorkspaces: initialViewWorkspaces ?? undefined,
+      initialPanePriceAxisModes: initialPanePriceAxisModes ?? undefined,
       marketSessions: opts.marketSessions,
     },
   )
   chart.setViewWorkspacePersistence(
     createViewWorkspacePersistence(() => chart.kernel.snapshotViewWorkspaces()),
   )
+  chart.setPanePriceAxisPersistence(
+    createPanePriceAxisPersistence(() => chart.snapshotPanePriceAxisModes()),
+  )
 
   if (import.meta.env?.MODE !== 'production' && typeof window !== 'undefined') {
     ;(window as Window & { __chart?: Chart }).__chart = chart
   }
-
-  const currentDpr =
-    typeof window !== 'undefined' && window.devicePixelRatio > 0 ? window.devicePixelRatio : 1
-  const currentKWidth = zoomLevelToKWidth(initialZoomLevel, {
-    minKWidth: DEFAULT_OPTS.minKWidth,
-    maxKWidth: DEFAULT_OPTS.maxKWidth,
-    zoomLevelCount,
-  })
-  const currentKGap = kGapFromKWidth(currentKWidth, currentDpr)
 
   const viewport = computed(() => mapViewportState(chart.viewport()))
   const indicators = computed(() => chart.indicators.instances().map(mapIndicatorInstance))
@@ -160,7 +158,7 @@ export async function createChartController(opts: ChartMountOptions): Promise<Ch
   const symbolCatalog: ReadonlySignal<ReadonlyArray<SymbolInfo>> = chart.symbolCatalog
 
   try {
-    chart.applyRenderState(currentKWidth, currentKGap, initialZoomLevel)
+    chart.zoom.toLevel(initialZoomLevel)
   } catch {
     /* tolerate jsdom */
   }
@@ -219,20 +217,19 @@ export async function createChartController(opts: ChartMountOptions): Promise<Ch
     },
   })
 
-  function dispose(): void {
-    if (disposed) return
+  let disposal: Promise<void> | undefined
+
+  function dispose(): Promise<void> {
+    if (disposal) return disposal
     disposed = true
     dataMethods.dispose()
-    try {
-      void chart.destroy()
-    } catch {
-      /* best-effort */
-    }
+    disposal = chart.destroy()
     try {
       mounted.cleanup()
     } catch {
       /* best-effort */
     }
+    return disposal
   }
 
   return {
@@ -246,6 +243,8 @@ export async function createChartController(opts: ChartMountOptions): Promise<Ch
     symbols: chart.symbols,
     theme: themeSignal,
     settings: chart.kernel.settings.readonly.settings,
+    paneScaleTypes: chart.kernel.pane.readonly.paneScaleTypes,
+    panePriceAxisRanges: chart.kernel.mainPriceAxis.readonly.paneRanges,
     rendererRuntime: chart.kernel.renderer.readonly.runtime,
     chartMode: chart.kernel.mode.readonly.chartMode,
     lastBarPeriod: chart.kernel.mode.readonly.lastBarPeriod,
@@ -272,11 +271,6 @@ export async function createChartController(opts: ChartMountOptions): Promise<Ch
     ...dataMethods.methods,
     ...chartMethods,
     ...drawingMethods,
-    // 渲染器插件注册：宿主业务 overlay 图层入口（委托核心 Chart 实例，按 name 幂等）
-    useRenderer: (plugin, config) => chart.useRenderer(plugin, config),
-    removeRenderer: (name) => chart.removeRenderer(name),
-    getRenderer: (name) => chart.getRenderer(name),
-    scheduleDraw: (level) => chart.scheduleDraw(level),
     // Agent 工具宿主注册（@Tool 方法归属解析；幂等去重）
     registerToolHost: (host) => {
       if (!extraToolHosts.includes(host)) extraToolHosts.push(host)

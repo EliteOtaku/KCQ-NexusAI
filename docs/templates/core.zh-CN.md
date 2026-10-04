@@ -69,7 +69,7 @@ chart.dispose()
 
 ## 状态内核
 
-引擎以 `ChartStateKernel` 为图表业务状态的单一事实来源。它组合 options、zoom、data、viewport、pane layout、settings、system theme、chart mode、drawing、interaction、comparison、indicator、marker 和 renderer runtime 等独立子状态。
+引擎以 `ChartStateKernel` 为图表业务状态的单一事实来源。它组合 options、zoom、data、viewport、pane layout、settings、system theme、chart model（数据视图）、drawing、interaction、comparison、indicator、marker 和 renderer runtime 等独立子状态。数据视图（kline / timeshare / fiveDayTimeShare）的唯一事实来源是 `engine/chartModel/` 模块。
 
 ```text
 Controller 方法 / DOM 输入
@@ -221,7 +221,7 @@ Chart
 - `RendererHost` 负责后端生命周期、resize、切换和降级。GPU batch 未输出时，Layer 必须完成 Canvas2D fallback。
 - 图表逻辑对外使用逻辑像素；Canvas buffer 与 GPU viewport 使用 Kernel 的有效 DPR 和物理像素。
 
-运行时契约、扩展规则、后端行为和诊断方式见[渲染管线文档](../../docs/rendering-pipeline.md)。
+运行时契约、扩展规则、后端行为和诊断方式见[渲染管线文档](../../docs/rendering/rendering-pipeline.md)。
 
 ## 其他公开 API
 

@@ -2,21 +2,36 @@
 
 import type { SymbolInfo, SymbolSpec } from '../../controllers/types.js'
 import type { ChartSettings } from '../../foundation/config/chartSettings.js'
-import { PRICE_AXIS_RANGE_MODE } from '../../foundation/config/priceAxisRangeMode.js'
+import type { MarketSessionRegistry } from '../../foundation/config/marketSession/marketSessionRegistry.js'
+import { resolveSymbolMarketSession } from '../../foundation/config/marketSession/resolveSymbolMarketSession.js'
+import {
+  PRICE_AXIS_RANGE_MODE,
+  type PriceAxisRangeMode,
+} from '../../foundation/config/priceAxisRangeMode.js'
 import { makePluginLayerId } from '../../foundation/plugin/impl/rendererLayerId.js'
 import { batch, computed, type ReadonlySignal } from '../../foundation/reactivity/signal.js'
 import { ChartWorkspaceId } from '../../foundation/types/chartView.js'
 import { resolveMarketSessionSlots } from '../../foundation/utils/sessionTimeLabels.js'
 import type { RendererBackendRuntime } from '../../rendering/render/rendererHost.js'
-import type { PaneSpec } from '../chartTypes.js'
+import {
+  CHART_VIEW_DEFINITIONS,
+  type ChartDataView,
+  ChartDataViewId,
+  type ChartModelModule,
+  type ComparisonStateModule,
+  createChartModel,
+  createComparisonState,
+  isTimeShareDataView,
+  resolveChartWorkspaceId,
+} from '../chartModel/index.js'
+import { symbolSpecIdentityKey } from '../data/symbolIdentity.js'
 import type { DrawingToolId } from '../drawing/index.js'
 import { getRegisteredIndicatorDefinition } from '../indicators/indicatorDefinitionRegistry.js'
 import type { IndicatorMetadata } from '../indicators/indicatorMetadata.js'
 import type { CustomMarkerEntity, MarkerEntity } from '../marker/registry.js'
-import type { MarketSessionRegistry } from '../market/marketSessionRegistry.js'
-import { resolveSymbolMarketSession } from '../market/resolveSymbolMarketSession.js'
-import { PaneManager } from '../paneManager.js'
-import { type ComparisonStateModule, createComparisonState } from './comparisonState.js'
+import { PaneManager } from '../pane/index.js'
+import type { PaneSpec } from '../pane/types.js'
+import { SCALE_X_STRATEGIES } from '../scale/index.js'
 import { createDataManagerState, type DataManagerStateModule } from './dataManagerState.js'
 import { createDataState, type DataStateModule } from './dataState.js'
 import { createDrawingState, type DrawingStateModule } from './drawingState.js'
@@ -33,14 +48,6 @@ import {
 } from './interactionState.js'
 import { createMainPriceAxisState, type MainPriceAxisStateModule } from './mainPriceAxisState.js'
 import { createMarkerState, type MarkerStateModule } from './markerState.js'
-import {
-  type ChartDataView,
-  ChartDataViewId,
-  createModeState,
-  isTimeShareDataView,
-  type ModeStateModule,
-  resolveChartWorkspaceId,
-} from './modeState.js'
 import { createOptionsState, type OptionsStateModule } from './optionsState.js'
 import { createPaneState, type PaneStateModule } from './paneState.js'
 import { createRendererState, type RendererStateModule } from './rendererState.js'
@@ -124,10 +131,7 @@ function resolveIndicatorRenderers(
       }
     }
     // 无 @Indicator 定义的裸主序列 renderer 直接按实例 id 挂载。
-    if (
-      instance.source === 'mode' &&
-      (instance.indicatorId === 'candle' || instance.indicatorId === 'comparisonLine')
-    ) {
+    if (instance.source === 'mode' && instance.indicatorId === 'candle') {
       add(mainRenderers, instance.indicatorId)
       continue
     }
@@ -176,6 +180,8 @@ export interface ChartStateKernelDeps {
   initialRendererRuntime?: RendererBackendRuntime
   /** 已校验的用户视图工作区快照；系统 mode 实例不参与恢复。 */
   initialViewWorkspaces?: ViewWorkspacesSnapshot
+  /** 已持久化的各 Pane 价格轴范围模式；缺失时回退 settings 偏好。 */
+  initialPanePriceAxisModes?: Readonly<Record<string, PriceAxisRangeMode>>
   /** 各市场分时交易时段注册表（分时几何 / 槽位共用）；未注入时分时槽位退化为 0 */
   marketSessions?: MarketSessionRegistry
   scheduleDraw: (level?: unknown) => void
@@ -193,7 +199,7 @@ export class ChartStateKernel extends StateKernel {
   readonly systemTheme: SystemThemeStateModule
   readonly settings: SettingsStateModule
   readonly mainPriceAxis: MainPriceAxisStateModule
-  readonly mode: ModeStateModule
+  readonly mode: ChartModelModule
   readonly drawing: DrawingStateModule
   readonly interaction: InteractionStateModule
   readonly dataManager: DataManagerStateModule
@@ -213,8 +219,6 @@ export class ChartStateKernel extends StateKernel {
   readonly optionsForViewport$: ReadonlySignal<{
     bottomAxisHeight: number
     kWidth: number
-    /** 未来区屏数；未传时 viewportState 用 DEFAULT_FUTURE_SCREENS 解析 */
-    futureScreens?: number
   }>
   /** 分时交易时段槽位数（由当前品种 market 派生，供可见区间与布局共用） */
   readonly sessionSlots$: ReadonlySignal<number>
@@ -229,7 +233,7 @@ export class ChartStateKernel extends StateKernel {
     this.options = createOptionsState(deps.initialOptions)
 
     // ── Data view state（缩放宽度需按视图派生）──
-    this.mode = createModeState()
+    this.mode = createChartModel()
 
     // ── Zoom state ──
     this.zoom = createZoomState({
@@ -244,7 +248,6 @@ export class ChartStateKernel extends StateKernel {
     this.optionsForViewport$ = computed(() => ({
       bottomAxisHeight: this.options.readonly.options().bottomAxisHeight,
       kWidth: this.zoom.readonly.kWidth(),
-      futureScreens: this.options.readonly.options().futureScreens,
     }))
 
     // ── Data state ──
@@ -253,26 +256,21 @@ export class ChartStateKernel extends StateKernel {
     // ── Comparison state（对比品种独立 SSOT，不派生自 kline 主品种）──
     this.comparison = createComparisonState()
 
-    // 比较视图激活时，视口数据长度由对比参考序列长度决定；否则由 kline 主品种决定。
-    this.dataLength$ = computed(() => {
-      if (this.comparison.readonly.specs().length > 0) {
-        return this.comparison.readonly.referenceLength()
-      }
-      return this.data.readonly.dataLength()
-    })
-    const timeShareDayCount$ = computed(() => this.data.readonly.timeShareRange()?.days.length ?? 0)
+    // 比较叠加不替换主序列，视口与指标始终消费主品种数据长度。
+    this.dataLength$ = this.data.readonly.dataLength
 
     // ── Data manager state (coordination layer) ──
     this.dataManager = createDataManagerState()
     // computed() 立即求值一次，故须在 dataManager 创建之后定义
-    this.sessionSlots$ = computed(() => {
+    const marketSession$ = computed(() => {
+      if (!SCALE_X_STRATEGIES[this.mode.readonly.dataView()].requiresMarketSession) return null
       const spec = this.dataManager.readonly.currentSpec()
-      if (!deps.marketSessions || !spec?.market) return 0
-      try {
-        return resolveMarketSessionSlots(resolveSymbolMarketSession(spec, deps.marketSessions))
-      } catch {
-        return 0
-      }
+      if (!deps.marketSessions || !spec) return null
+      return resolveSymbolMarketSession(spec, deps.marketSessions)
+    })
+    this.sessionSlots$ = computed(() => {
+      const session = marketSession$()
+      return session ? resolveMarketSessionSlots(session) : 0
     })
 
     // ── Indicator state ──
@@ -285,10 +283,11 @@ export class ChartStateKernel extends StateKernel {
     this.viewport = createViewportState({
       options$: this.optionsForViewport$,
       dataLength$: this.dataLength$,
-      period$: this.dataManager.readonly.currentPeriod,
+      dataView$: this.mode.readonly.dataView,
+      data$: this.data.readonly.data,
+      marketSession$,
+      timeShareRange$: this.data.readonly.timeShareRange,
       zoomLevel$: this.zoomLevel$,
-      sessionSlots$: this.sessionSlots$,
-      timeShareDayCount$,
       timeShareSlotWidth$: this.zoom.readonly.timeShareSlotWidth,
     })
 
@@ -314,6 +313,7 @@ export class ChartStateKernel extends StateKernel {
     this.settings = createSettingsState(deps.initialSettings)
     this.mainPriceAxis = createMainPriceAxisState(
       this.settings.readonly.settings.peek().mainPriceAxisRangeMode ?? PRICE_AXIS_RANGE_MODE.AUTO,
+      deps.initialPanePriceAxisModes,
     )
     this.renderer = createRendererState(
       deps.initialRendererRuntime ?? { effective: 'webgl', status: 'ready', error: null },
@@ -331,7 +331,13 @@ export class ChartStateKernel extends StateKernel {
     // 主图和指标统一从 kernel 状态投影；此处只输出意图，不执行 Layer 副作用。
     this.activeRenderers$ = computed(() => {
       const dataView = this.mode.readonly.dataView()
-      const renderers = resolveIndicatorRenderers(dataView, this.indicator.readonly.instances())
+      const renderers = [
+        ...resolveIndicatorRenderers(dataView, this.indicator.readonly.instances()),
+      ]
+      // 原生比较 Layer 由功能集合派生，不注册成图表模式或指标实例。
+      if (dataView === ChartDataViewId.KLine && this.comparison.readonly.active()) {
+        renderers.push({ name: 'comparisonLine', layerId: makePluginLayerId('comparisonLine') })
+      }
       return Object.freeze([
         ...new Map(
           renderers.map((descriptor) => [descriptor.layerId, Object.freeze(descriptor)]),
@@ -345,7 +351,8 @@ export class ChartStateKernel extends StateKernel {
         if (instance.role !== 'main' || instance.source === 'mode') continue
         const definition = getRegisteredIndicatorDefinition(instance.indicatorId)
         if (definition && supportsIndicatorDataView(definition, dataView)) {
-          ids.add(definition.name)
+          // 对外统一使用规范 ID（displayName），与实例目录的 definitionId 同一身份空间。
+          ids.add(definition.displayName)
         }
       }
       return Object.freeze([...ids])
@@ -426,11 +433,17 @@ export class ChartStateKernel extends StateKernel {
     // ── Flat actions bag for framework adapters ──
     this.actions = {
       setZoomLevel: (level: number) => this.zoom.actions.setZoomLevel(level),
-      setTimeShareKWidth: (kWidth: number) => this.zoom.actions.setTimeShareKWidth(kWidth),
-      clearTimeShareKWidth: () => this.zoom.actions.clearTimeShareKWidth(),
       setSymbols: (symbols: ReadonlyArray<SymbolSpec>) => {
         const snapshot = symbols.map((symbol) => ({ ...symbol }))
-        this.data.actions.setSymbols(snapshot)
+        const previous = this.data.readonly.symbols.peek()[0]
+        const next = snapshot[0]
+        const previousIdentity = previous ? symbolSpecIdentityKey(previous) : null
+        const nextIdentity = next ? symbolSpecIdentityKey(next) : null
+        batch(() => {
+          // 手动价格范围属于本次品种展示，不缓存，也不随品种或数据源继承。
+          if (previousIdentity !== nextIdentity) this.mainPriceAxis.actions.resetAllHandRanges()
+          this.data.actions.setSymbols(snapshot)
+        })
       },
       setComparisonSpecs: (specs: ReadonlyArray<SymbolSpec>) => {
         const snapshot = specs.map((spec) => ({ ...spec }))
@@ -452,74 +465,16 @@ export class ChartStateKernel extends StateKernel {
         this.renderer.actions.setRuntime(runtime),
       setDataView: (view: ChartDataView, lastBarPeriod?: string) => {
         const workspaceId = resolveChartWorkspaceId(view)
-        const modeInstances: IndicatorInstanceSpec[] =
-          view === ChartDataViewId.FiveDayTimeShare
-            ? [
-                {
-                  instanceId: 'mode:five-day-timeshare',
-                  indicatorId: ChartDataViewId.FiveDayTimeShare,
-                  paneId: 'main',
-                  role: 'main',
-                  ordinal: 0,
-                  params: {},
-                },
-              ]
-            : isTimeShareDataView(view)
-              ? [
-                  {
-                    instanceId: 'mode:timeshare',
-                    indicatorId: 'timeShare',
-                    paneId: 'main',
-                    role: 'main',
-                    ordinal: 0,
-                    params: {},
-                  },
-                ]
-              : view === ChartDataViewId.Comparison
-                ? [
-                    {
-                      instanceId: 'mode:comparison',
-                      indicatorId: 'comparisonLine',
-                      paneId: 'main',
-                      role: 'main',
-                      ordinal: 0,
-                      params: {},
-                    },
-                  ]
-                : [
-                    {
-                      instanceId: 'mode:candle',
-                      indicatorId: 'candle',
-                      paneId: 'main',
-                      role: 'main',
-                      ordinal: 0,
-                      params: {},
-                    },
-                    {
-                      instanceId: 'mode:extrema-markers',
-                      indicatorId: 'extremaMarkers',
-                      paneId: 'main',
-                      role: 'main',
-                      ordinal: 0,
-                      params: {},
-                    },
-                    {
-                      instanceId: 'mode:last-price-line',
-                      indicatorId: 'lastPriceLine',
-                      paneId: 'main',
-                      role: 'main',
-                      ordinal: 0,
-                      params: {},
-                    },
-                    {
-                      instanceId: 'mode:last-price-label',
-                      indicatorId: 'lastPriceLabelRegistrar',
-                      paneId: 'main',
-                      role: 'main',
-                      ordinal: 0,
-                      params: {},
-                    },
-                  ]
+        const modeInstances: IndicatorInstanceSpec[] = CHART_VIEW_DEFINITIONS[
+          view
+        ].mainInstances.map((instance) => ({
+          instanceId: instance.instanceId,
+          indicatorId: instance.indicatorId,
+          paneId: 'main',
+          role: 'main',
+          ordinal: 0,
+          params: { ...(instance.params ?? {}) },
+        }))
         batch(() => {
           this.mode.actions.setDataView(view, lastBarPeriod)
           this.indicator.actions.setActiveWorkspace(workspaceId)

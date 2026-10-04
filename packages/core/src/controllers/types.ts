@@ -14,8 +14,7 @@ import type {
   InstrumentCapabilities,
   InstrumentDescriptor,
 } from '../data/provider/types.js'
-import type { InteractionSnapshot } from '../engine/chart.js'
-import type { PaneSpec } from '../engine/chartTypes.js'
+import type { InteractionSnapshot } from '../engine/chart/index.js'
 import type {
   BatchDrawingPatch,
   CreateDrawingInput,
@@ -29,13 +28,15 @@ import type {
   UpdateDrawingPatch,
 } from '../engine/drawing/index.js'
 import type { CustomMarkerEntity } from '../engine/marker/registry.js'
-import type { CreatePaneInput, PanePatch } from '../engine/paneManager.js'
+import type { CreatePaneInput, PanePatch, PaneSpec } from '../engine/pane/types.js'
 import type { ChartAgentController } from '../features/agent/types.js'
 import type { AlertController } from '../features/alerts/types.js'
 import type { ChartSettings } from '../foundation/config/chartSettings.js'
-import type { RendererPlugin, RendererPluginWithHost } from '../foundation/plugin/types.js'
+import type { Plugin, PluginConfig, RenderContext } from '../foundation/plugin/types.js'
+import type { Layer } from '@/rendering/scene/types.js'
 import type { ReadonlySignal } from '../foundation/reactivity/index.js'
 import type { ChartDataView } from '../foundation/types/chartView.js'
+import type { ChartRendererAccess } from './renderers/index.js'
 
 export {
   FIVE_DAY_TIME_SHARE_DAYS,
@@ -391,14 +392,20 @@ export interface ChartMountOptions {
   priceLabelWidth?: number
   minKWidth?: number
   maxKWidth?: number
-  /** 未来区屏数：最后一根 K 线右侧允许的滚动空间（屏宽倍数）；缺省 3 屏 */
-  futureScreens?: number
 
   // Initial chart settings (overrides > stored preferences > DEFAULT_SETTINGS)
   settings?: Partial<ChartSettings>
 }
 
-export interface ChartController extends DrawingChartAdapter {
+export interface ChartController extends DrawingChartAdapter, ChartRendererAccess {
+  /** 在完整绘制帧结束时同步调用捕获函数，返回其异步合成结果。 */
+  captureFrame<T>(
+    capture: (frame: import('./screenshot/types.js').ChartFrameCaptureContext) => T | Promise<T>,
+  ): Promise<T>
+  /** 使用现有 PluginHost 安装插件；插件可通过 getChartRenderers 获取渲染能力。 */
+  usePlugin(plugin: Plugin, config?: PluginConfig): Promise<void>
+  /** 卸载插件；其 uninstall 负责移除自有 Layer 和取消订阅。 */
+  removePlugin(name: string): Promise<void>
   /** 按当前视口偏移复制所选图元，一次撤回移除全部副本。 */
   copyDrawings(ids: ReadonlyArray<string>): ReadonlyArray<DrawingObject>
   /** Stable, serializable Agent context and deterministic query facade. */
@@ -413,7 +420,7 @@ export interface ChartController extends DrawingChartAdapter {
   readonly dataError: ReadonlySignal<string | null>
   /** 图表实例缓存的近似内存使用量与配置上限。 */
   readonly marketDataCacheStats: ReadonlySignal<
-    import('../data/buffer/marketDataCache.js').MarketDataCacheStats
+    import('../data/buffer/impl/marketDataCache.js').MarketDataCacheStats
   >
   readonly symbols: ReadonlySignal<ReadonlyArray<SymbolSpec>>
   readonly theme: ReadonlySignal<'light' | 'dark'>
@@ -442,6 +449,24 @@ export interface ChartController extends DrawingChartAdapter {
   readonly globalDrawingLock: ReadonlySignal<boolean>
   readonly paneRatios: ReadonlySignal<Readonly<Record<string, number>>>
   readonly paneLayout: ReadonlySignal<ReadonlyArray<PaneSpec>>
+  /** 每个 Pane 的有效刻度和独立范围状态。 */
+  readonly paneScaleTypes: ReadonlySignal<
+    ReadonlyMap<string, import('../foundation/types/scaleType.js').ScaleType>
+  >
+  readonly panePriceAxisRanges: ReadonlySignal<
+    Readonly<Record<string, import('../engine/state/mainPriceAxisState.js').PanePriceAxisRange>>
+  >
+  /** 设置目标 Pane 的轴状态；百分比仅支持主图。 */
+  setPanePriceAxisScaleType(
+    paneId: string,
+    type: import('../foundation/types/scaleType.js').ScaleType,
+  ): void
+  setPanePriceAxisRangeMode(
+    paneId: string,
+    mode: import('../foundation/config/priceAxisRangeMode.js').PriceAxisRangeMode,
+  ): void
+  /** 重置目标 Pane 的范围变换，保留自动/手动模式。 */
+  resetPanePriceAxis(paneId: string): void
   readonly interactionState: ReadonlySignal<InteractionSnapshot>
   /** 区间选择工具确认的时间范围。 */
   readonly selectedRange: ReadonlySignal<{ from: number; to: number } | null>
@@ -456,7 +481,7 @@ export interface ChartController extends DrawingChartAdapter {
    * Vue `#legend` slot 等外部模板消费；null 表示当前帧无图例数据。
    */
   readonly legendTemplateContext: ReadonlySignal<
-    | import('../engine/renderers/Indicator/mainIndicatorLegendContext.js').LegendTemplateContext
+    | import('../engine/renderers/Indicator/mainIndicatorLegend/types.js').LegendTemplateContext
     | null
   >
   readonly comparisonColors: ReadonlySignal<ReadonlyMap<string, string>>
@@ -480,10 +505,12 @@ export interface ChartController extends DrawingChartAdapter {
   setDefaultBarAggregation(value: BarAggregation): void
   /** Register symbols into the available symbol catalog for UI pickers */
   registerSymbols(symbols: ReadonlyArray<SymbolInfo>): void
-  /** 直接设置对比集合（对比视图唯一 SSOT），与 kline 主品种解耦。 */
+  /** 设置 K 线主图的原生比较折线集合，不改变 chartMode 或主品种。 */
   setComparisonSpecs(next: ReadonlyArray<SymbolSpec>): void
   addComparisonSymbol(spec: SymbolSpec, primary?: SymbolSpec | null): void
   removeComparisonSymbol(symbol: string): void
+  /** 隐藏或显示比较折线，保留品种选择及图例。 */
+  setComparisonHidden(identity: string, hidden: boolean): void
   /** Inject comparison product data directly (bypasses fetcher) */
   setComparisonData(symbol: string, data: ReadonlyArray<KLineData>): void
   /** Update the main symbol code without triggering a fetch */
@@ -520,18 +547,18 @@ export interface ChartController extends DrawingChartAdapter {
   zoomIn(anchorX?: number): void
   zoomOut(anchorX?: number): void
 
-  // ---- Renderer plugins ----
-  /** 注册 canvas 自绘渲染器插件（幂等，按 plugin.name）；宿主业务 overlay 图层入口。 */
-  useRenderer(
-    plugin: RendererPlugin | RendererPluginWithHost,
-    config?: Record<string, unknown>,
-  ): void
-  /** 按名称移除渲染器插件。 */
+  // ---- Renderer layers（#283 官方注册面；Layer 契约，同对象兼容旧插件）----
+  /** 注册第三方渲染层（幂等；Layer.pane 声明绘制目标，Layer.id 查询/移除）。 */
+  useRenderer(layer: Layer<RenderContext>): void
+  /** 按名称移除渲染层。 */
   removeRenderer(name: string): void
-  /** 获取已注册渲染器插件实例。 */
-  getRenderer<T extends RendererPlugin = RendererPlugin>(name: string): T | undefined
-  /** 请求重绘（插件数据异步到达后触发；缺省 UpdateLevel.All）。 */
-  scheduleDraw(level?: import('../engine/layout/pane.js').UpdateLevel): void
+  /** 获取已注册渲染层实例。 */
+  getRenderer(name: string): Layer<RenderContext> | undefined
+  /** 请求重绘（#283 后替代 scheduleDraw；缺省 UpdateLevel.All）。 */
+  requestRender(): void
+
+  /** 声明非对比视图的缺省聚合口径（下游 MT5 品牌口径特性；须在 setSymbols 前调用生效）。 */
+  setDefaultBarAggregation(value: BarAggregation): void
 
   // ---- Agent tool hosts ----
   /**
@@ -565,8 +592,15 @@ export interface ChartController extends DrawingChartAdapter {
     params?: Record<string, unknown>,
   ): string | null
   removeIndicator(instanceId: string): boolean
+  /** 调整主图指标的 Legend 顺序。 */
+  moveMainIndicator(definitionId: string, direction: 'up' | 'down'): boolean
+  /** 在原有 Legend 位置原子替换主图指标。 */
+  replaceMainIndicator(definitionId: string, nextDefinitionId: string): boolean
+  /** 隐藏或显示主图指标；只影响绘制，保留实例与参数。 */
+  setMainIndicatorHidden(definitionId: string, hidden: boolean): boolean
+  /** 隐藏或显示指定 pane 的副图指标；只影响绘制，保留 pane 与参数。 */
+  setSubIndicatorHidden(paneId: string, hidden: boolean): boolean
   updateIndicatorParams(instanceId: string, params: Record<string, unknown>): boolean
-  updateRendererConfig(name: string, config: Record<string, unknown>): void
 
   // ---- Drawing ----
   /**
@@ -621,10 +655,13 @@ export interface ChartController extends DrawingChartAdapter {
 
   // ---- Settings ----
   updateSettingsFacade(settings: Record<string, unknown>): void
+  /** 按当前可见 range 的 Max/Min 适配主图纵轴，保留轴类型与范围模式。 */
+  resetMainPriceAxis(): void
   updateOptionsFacade(options: Record<string, unknown>): void
 
   /** tear down DOM + listeners; idempotent */
-  dispose(): void
+  /** 立即关闭公开操作并清理挂载 DOM，返回插件卸载与资源释放的完成任务。 */
+  dispose(): Promise<void>
 }
 
 /**

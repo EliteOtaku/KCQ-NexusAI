@@ -1,9 +1,7 @@
 /** X 轴刻度、十字线时间签与绘图轴标签的绘制入口。 */
-import type {
-  AxisLabelCollector,
-  RenderContext,
-  RendererPlugin,
-} from '../../foundation/plugin/index.js'
+
+import { makePluginLayerId } from '../../foundation/plugin/impl/rendererLayerId.js'
+import type { AxisLabelCollector, RenderContext } from '../../foundation/plugin/index.js'
 import { AXIS_LABEL_KIND, RENDERER_PRIORITY } from '../../foundation/plugin/index.js'
 import { resolveThemeColors } from '../../foundation/tokens/index.js'
 import {
@@ -15,6 +13,7 @@ import type { KLineData } from '../../foundation/types/price.js'
 import { getMarketSessionTimeFormatter } from '../../foundation/utils/dateFormat.js'
 import {
   formatFutureSlotLabel,
+  formatPastSlotLabel,
   resolveAxisTimeLabel,
 } from '../../foundation/utils/futureSlotLabel.js'
 import {
@@ -23,10 +22,10 @@ import {
   minuteOfDayToTimestamp,
   resolveTimestampSessionSlot,
 } from '../../foundation/utils/timeShareAxisLabels.js'
-import { paintAxisLabels, registerAxisLabel } from '../axisLabels/index.js'
-
-/** 时间轴面板 ID（特殊标识，用于单独渲染） */
-const TIME_AXIS_PANE_ID = Symbol('time-axis')
+import type { Layer } from '../../rendering/scene/types.js'
+import { LAYER_PANE_GLOBAL } from '../../rendering/scene/types.js'
+import { createKLineSlotGrid, slotWorldX } from '../viewport/slotGrid.js'
+import { paintAxisLabels, registerAxisLabel } from './impl/labels/index.js'
 
 /** 未来占位刻度之间的最小逻辑像素间距。 */
 const FUTURE_TICK_MIN_SPACING = 56
@@ -139,6 +138,27 @@ function collectTimeAxisTicks(
   const minX = paddingX
   const maxX = Math.max(paddingX, width - paddingX)
 
+  // 过去空白使用同一槽位中心网格，不伪造首根行情之前的交易日期。
+  const grid = createKLineSlotGrid(context.kWidth, context.kGap, context.dpr)
+  const pastStep = resolveFutureTickStep(grid.step, FUTURE_TICK_MIN_SPACING)
+  const pastStart = Math.ceil((scrollLeft + minX - grid.origin) / grid.step)
+  const pastEnd = Math.min(-1, Math.floor((scrollLeft + maxX - grid.origin) / grid.step))
+  for (
+    let index = Math.ceil(pastStart / pastStep) * pastStep;
+    index <= pastEnd;
+    index += pastStep
+  ) {
+    const text = formatPastSlotLabel(index)
+    if (text === null) continue
+    surface.register({
+      kind: AXIS_LABEL_KIND.TICK,
+      text,
+      pos: slotWorldX(grid, index) - scrollLeft,
+      color: colors.text.tertiary,
+      fontSize,
+    })
+  }
+
   for (const idx of boundaries) {
     if (idx < range.start || idx >= range.end) continue
     const k = klineData[idx]
@@ -189,26 +209,8 @@ function collectTimeAxisTicks(
   }
 
   // 日历未覆盖的槽位按整齐的相对索引步长标注；位置始终由槽位 index 决定。
+  // 不强制补 T+1：首条未来刻度完全由步长决定，避免紧贴末根 K 线的标签拥挤。
   if (!klineData.length || range.end <= klineData.length) return
-  const firstFutureIndex = klineData.length
-  const firstText = formatFutureSlotLabel(firstFutureIndex, klineData.length)
-  if (
-    range.start <= firstFutureIndex &&
-    firstText !== null &&
-    context.getTimestampAtLogicalIndex?.(firstFutureIndex) == null
-  ) {
-    const centerX = context.kLineCenters[firstFutureIndex - range.start]
-    const screenX = centerX === undefined ? null : centerX - scrollLeft
-    if (screenX !== null && screenX >= minX && screenX <= maxX) {
-      surface.register({
-        kind: AXIS_LABEL_KIND.TICK,
-        text: firstText,
-        pos: screenX,
-        color: colors.text.tertiary,
-        fontSize,
-      })
-    }
-  }
   const step = resolveFutureTickStep(context.kWidth + context.kGap, FUTURE_TICK_MIN_SPACING)
   const firstOffset = Math.max(1, range.start - klineData.length + 1)
   for (
@@ -298,24 +300,24 @@ export function collectFutureTimeBoundaries(params: {
   return boundaries
 }
 
-/**
- * 创建时间轴渲染器插件
- * 注意：时间轴渲染到 xAxisCanvas，需要特殊处理
- */
-export function createTimeAxisRendererPlugin(options: {
+/** 时间轴 Layer 选项。 */
+export interface TimeAxisLayerOptions {
   height: number
   getCrosshair?: () => { x: number; index: number } | null
-}): RendererPlugin {
-  return {
-    name: 'timeAxis',
-    version: '1.0.0',
-    description: '时间轴渲染器',
-    debugName: '时间轴',
-    paneId: TIME_AXIS_PANE_ID,
-    priority: RENDERER_PRIORITY.SYSTEM_XAXIS,
-    isSystem: true, // 系统渲染器：由 Scene Layer 调度
+}
 
-    draw(context: RenderContext) {
+/**
+ * 时间轴 Layer。时间轴渲染到 xAxisCanvas，由 ChartRenderer 直接调度。
+ * @param options 时间轴高度与十字线读取器
+ */
+export function createTimeAxisLayer(options: TimeAxisLayerOptions): Layer<RenderContext> {
+  return {
+    id: makePluginLayerId('timeAxis'),
+    role: 'background',
+    pane: LAYER_PANE_GLOBAL,
+    z: RENDERER_PRIORITY.SYSTEM_XAXIS,
+    visible: true,
+    paint(context) {
       const { ctx, paneWidth, dpr } = context
       const colors = resolveThemeColors(
         context.theme,
@@ -362,8 +364,8 @@ export function createTimeAxisRendererPlugin(options: {
             kind: AXIS_LABEL_KIND.TAG,
             text,
             pos: crosshair.x,
-            bgColor: colors.label.bg,
-            textColor: colors.label.text,
+            bgColor: colors.crosshairLabelBg,
+            textColor: colors.crosshairLabelText,
             fontSize: 12,
           })
         }
@@ -378,5 +380,6 @@ export function createTimeAxisRendererPlugin(options: {
       // 图元装饰标签（帧准备阶段注册）最后绘制
       paintAxisLabels(ctx, context.axisLabels.forSurface('xLabels').labels, 'xLabels', metrics)
     },
+    dispose() {},
   }
 }

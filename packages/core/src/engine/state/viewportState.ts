@@ -1,6 +1,6 @@
 /** 视口状态模块：几何、DPR clamp 与尺寸的单一来源。 */
 
-import { FIVE_DAY_TIME_SHARE_PERIOD, isTimeSharePeriod } from '../../controllers/types.js'
+import type { TimeShareRange } from '../../data/provider/types.js'
 import {
   batch,
   computed,
@@ -8,23 +8,12 @@ import {
   effect,
   type ReadonlySignal,
 } from '../../foundation/reactivity/signal.js'
-import type { Viewport, ViewportState } from '../chartTypes.js'
-import type { VisibleRange } from '../layout/pane.js'
-import { computeTimeShareVisibleRange } from '../modes/index.js'
-import { getPhysicalKLineConfig } from '../utils/klineConfig.js'
-import { deriveKGap } from '../utils/zoom.js'
-import {
-  clampVisibleRange,
-  computeMaxScrollLeftWithVisibleData,
-  DEFAULT_FUTURE_SCREENS,
-  futureBarCount,
-  getVisibleRange,
-} from '../viewport/viewport.js'
-import {
-  computeContentWidth as pureContentWidth,
-  computeLeftLoadBufferWidth as pureLeftBuffer,
-  computeMaxScrollLeft as pureMaxScrollLeft,
-} from './contentGeometry.js'
+import { type ChartDataView, ChartDataViewId } from '../../foundation/types/chartView.js'
+import type { ChartSeriesDatum } from '../../foundation/types/price.js'
+import type { MarketSessionConfig } from '../../foundation/utils/timeShareAxisLabels.js'
+import type { Viewport, ViewportState } from '../chart/index.js'
+import { SCALE_X_STRATEGIES, type ScaleXInput } from '../scale/index.js'
+import type { VisibleRange } from '../viewport/viewport.js'
 
 /**
  * 钳制 effective DPR，避免超出 MAX_CANVAS_PIXELS 上限。
@@ -72,16 +61,13 @@ export interface ViewportSignalDeps {
   options$: ReadonlySignal<{
     bottomAxisHeight: number
     kWidth: number
-    /** 未来区屏数；未传时 viewportState 用 DEFAULT_FUTURE_SCREENS 解析 */
-    futureScreens?: number
   }>
   dataLength$: ReadonlySignal<number>
-  period$: ReadonlySignal<string>
+  dataView$: ReadonlySignal<ChartDataView>
+  data$: ReadonlySignal<ReadonlyArray<ChartSeriesDatum>>
+  marketSession$: ReadonlySignal<MarketSessionConfig | null>
+  timeShareRange$: ReadonlySignal<TimeShareRange | null>
   zoomLevel$: ReadonlySignal<number>
-  /** 分时交易时段槽位数（由当前品种 market 经 MarketSessionRegistry 派生，与渲染器同源） */
-  sessionSlots$?: ReadonlySignal<number>
-  /** 多日分时快照中的实际交易日数量。 */
-  timeShareDayCount$?: ReadonlySignal<number>
   /** 分时每个交易槽的逻辑宽度；未初始化时按最小物理像素布局。 */
   timeShareSlotWidth$?: ReadonlySignal<number | null>
 }
@@ -108,16 +94,8 @@ const NULL_DOM_RETURN: ReturnType<ViewportDomDeps['getDom']> = {
 
 export function createViewportState(signalDeps: ViewportSignalDeps) {
   let _domDeps: ViewportDomDeps | undefined
-  const readTimeShareDayCount = (): number => signalDeps.timeShareDayCount$?.() ?? 0
-  const readSessionSlots = (): number => signalDeps.sessionSlots$?.() ?? 0
   const readTimeShareSlotWidth = (): number | undefined =>
     signalDeps.timeShareSlotWidth$?.() ?? undefined
-  // 未来区屏数默认值解析单点（负值钳 0，与 viewport.ts 的 futureBars 边界一致）：
-  // contentWidth / maxScrollLeft / rawVisibleRange end 夹取必须同源，否则内容宽度
-  // 不覆盖默认 3 屏滚动空间（contentMaxScrollLeft 先触顶，拖不出未来区）
-  const readFutureScreens = (): number =>
-    Math.max(0, signalDeps.options$().futureScreens ?? DEFAULT_FUTURE_SCREENS)
-
   const _getDom = () => (_domDeps ? _domDeps.getDom() : NULL_DOM_RETURN)
   const _resizeSharedWebGLSurface = (w: number, h: number, dpr: number) => {
     if (_domDeps) _domDeps.resizeSharedWebGLSurface(w, h, dpr)
@@ -132,24 +110,13 @@ export function createViewportState(signalDeps: ViewportSignalDeps) {
   const computePlotHeight = (viewHeight: number): number =>
     Math.round(viewHeight - signalDeps.options$().bottomAxisHeight)
 
-  const computeViewport = (
-    viewWidth: number,
-    viewHeight: number,
-    scrollLeftRaw: number,
-    leftLoadBufferWidth: number,
-    preciseDpr: number,
-  ): Viewport => {
-    const dpr = computeDpr(viewWidth, viewHeight, preciseDpr)
-    const plotWidth = computePlotWidth(viewWidth)
-    const plotHeight = computePlotHeight(viewHeight)
-    const logicalScrollLeft = scrollLeftRaw - leftLoadBufferWidth
-    const scrollLeft = Math.round(logicalScrollLeft * dpr) / dpr
-    return { viewWidth, viewHeight, plotWidth, plotHeight, scrollLeft, dpr }
-  }
-
   const { signals, readonly } = createSubState(
     {
-      requestedScrollLeft: 0,
+      navigation: {
+        [ChartDataViewId.KLine]: 0,
+        [ChartDataViewId.TimeShare]: 0,
+        [ChartDataViewId.FiveDayTimeShare]: 0,
+      },
       viewWidth: 0,
       viewHeight: 0,
       preciseDpr: 0,
@@ -159,80 +126,44 @@ export function createViewportState(signalDeps: ViewportSignalDeps) {
       dpr: (s) => computeDpr(s.viewWidth(), s.viewHeight(), s.preciseDpr()),
       plotWidth: (s) => computePlotWidth(s.viewWidth()),
       plotHeight: (s) => computePlotHeight(s.viewHeight()),
-      leftLoadBufferWidth: (s) =>
-        pureLeftBuffer({
-          viewWidth: s.viewWidth(),
-          plotWidth: Math.round(s.viewWidth()),
-          dataLength: signalDeps.dataLength$(),
-          period: signalDeps.period$(),
-          dpr: 1,
-          kWidth: 0,
-          kGap: 0,
-          timeShareDayCount: readTimeShareDayCount(),
-          sessionSlots: readSessionSlots(),
-          timeShareSlotWidth: readTimeShareSlotWidth(),
-        }),
     },
   )
 
-  const kGap = computed<number>(() => {
-    return deriveKGap({
-      kWidth: signalDeps.options$().kWidth,
-      dpr: readonly.dpr(),
-      period: signalDeps.period$(),
-    })
-  })
-
-  // 对外暴露已解析的未来区屏数：readFutureScreens 是唯一默认值解析点，
-  // zoom 等跨模块消费方必须读这里，禁止各自 ?? 0 / ?? DEFAULT 二次解析
-  const futureScreens = computed<number>(() => readFutureScreens())
-
-  const contentWidth = computed(() => {
-    const options = signalDeps.options$()
-    return pureContentWidth({
-      viewWidth: readonly.plotWidth(),
-      plotWidth: readonly.plotWidth(),
-      dataLength: signalDeps.dataLength$(),
-      period: signalDeps.period$(),
-      dpr: readonly.dpr(),
-      kWidth: options.kWidth,
-      kGap: kGap(),
-      timeShareDayCount: readTimeShareDayCount(),
-      sessionSlots: readSessionSlots(),
-      timeShareSlotWidth: readTimeShareSlotWidth(),
-      futureScreens: readFutureScreens(),
-    })
-  })
-  const maxScrollLeft = computed(() => {
-    const contentMaxScrollLeft = pureMaxScrollLeft(contentWidth(), readonly.viewWidth())
-    const options = signalDeps.options$()
-    return computeMaxScrollLeftWithVisibleData(
-      contentMaxScrollLeft,
-      readonly.leftLoadBufferWidth(),
-      options.kWidth,
-      kGap(),
-      signalDeps.dataLength$(),
-      readonly.dpr(),
-      { plotWidth: readonly.plotWidth(), futureScreens: readFutureScreens() },
-    )
-  })
-  const scrollLeft = computed(() =>
-    Math.max(0, Math.min(readonly.requestedScrollLeft(), maxScrollLeft())),
-  )
-  const scrollLeftLogical = computed(() => scrollLeft() - readonly.leftLoadBufferWidth())
+  // 唯一投影入口：视图状态选择策略，所有几何消费者读取同一快照。
+  const viewInput = computed<ScaleXInput>(() => ({
+    view: signalDeps.dataView$(),
+    width: readonly.plotWidth(),
+    dpr: readonly.dpr(),
+    kWidth: signalDeps.options$().kWidth,
+    sessionSlotWidth: readTimeShareSlotWidth() ?? null,
+    data: signalDeps.data$(),
+    dataLength: signalDeps.dataLength$(),
+    marketSession: signalDeps.marketSession$(),
+    timeShareRange: signalDeps.timeShareRange$(),
+    scroll: readonly.navigation()[signalDeps.dataView$()],
+  }))
+  const viewSnapshot = computed(() => SCALE_X_STRATEGIES[viewInput().view].project(viewInput()))
+  const kGap = computed(() => viewSnapshot().kGap)
+  const slotGrid = computed(() => viewSnapshot().grid)
+  const contentWidth = computed(() => viewSnapshot().contentWidth)
+  const maxScrollLeft = computed(() => Math.max(0, contentWidth() - readonly.viewWidth()))
+  const scrollLeft = computed(() => viewSnapshot().domScroll)
+  const scrollLeftLogical = computed(() => viewSnapshot().scroll)
+  const leftLoadBufferWidth = computed(() => viewSnapshot().domOffset)
 
   // ── 带引用缓存的 computed —— 仅在字段值实际变化时返回新对象 ──
   // 避免 Object.is 短路失效导致下游 effect / Vue 订阅在子像素滚动时虚假重跑
 
   let _cachedViewport: Viewport | null = null
   const cachedViewport = computed<Viewport>(() => {
-    const vp = computeViewport(
-      readonly.viewWidth(),
-      readonly.viewHeight(),
-      scrollLeft(),
-      readonly.leftLoadBufferWidth(),
-      readonly.preciseDpr(),
-    )
+    const vp: Viewport = {
+      viewWidth: readonly.viewWidth(),
+      viewHeight: readonly.viewHeight(),
+      plotWidth: readonly.plotWidth(),
+      plotHeight: readonly.plotHeight(),
+      dpr: readonly.dpr(),
+      scrollLeft: viewSnapshot().scroll,
+    }
     if (
       _cachedViewport &&
       _cachedViewport.viewWidth === vp.viewWidth &&
@@ -250,38 +181,7 @@ export function createViewportState(signalDeps: ViewportSignalDeps) {
 
   let _cachedRawVisibleRange: VisibleRange | null = null
   const cachedRawVisibleRange = computed<VisibleRange>(() => {
-    const vp = cachedViewport()
-    // 分时：与 computeTimeShareXLayout 共用 slot 网格，避免 kWidth/kGap 取整误差截断右缘数据；
-    // K 线：仍按 kWidth/kGap 物理像素网格计算
-    const period = signalDeps.period$()
-    let vr: VisibleRange
-    if (period === FIVE_DAY_TIME_SHARE_PERIOD) {
-      vr = { start: 0, end: signalDeps.dataLength$() }
-    } else if (isTimeSharePeriod(period)) {
-      vr = computeTimeShareVisibleRange({
-        scrollLeft: vp.scrollLeft,
-        totalWidth: contentWidth(),
-        viewWidth: vp.plotWidth,
-        dataLength: signalDeps.dataLength$(),
-        sessionSlots: readSessionSlots(),
-      })
-    } else {
-      const raw = getVisibleRange(
-        vp.scrollLeft,
-        vp.plotWidth,
-        signalDeps.options$().kWidth,
-        kGap(),
-        signalDeps.dataLength$(),
-        vp.dpr,
-      )
-      // 未来区：end 上限 = 数据尾 + futureBars + 扩窗 1（复用 futureBarCount，物理像素量纲）
-      const { unitPx } = getPhysicalKLineConfig(signalDeps.options$().kWidth, kGap(), vp.dpr)
-      const futureBars = futureBarCount(vp.plotWidth, vp.dpr, unitPx, readFutureScreens())
-      vr = {
-        start: raw.start,
-        end: Math.min(raw.end, signalDeps.dataLength$() + futureBars + 1),
-      }
-    }
+    const vr = viewSnapshot().slotRange
     if (
       _cachedRawVisibleRange &&
       _cachedRawVisibleRange.start === vr.start &&
@@ -296,7 +196,7 @@ export function createViewportState(signalDeps: ViewportSignalDeps) {
   // 可索引可见区间（start>=0）— 绘制 / hit-test / 指标 / ViewportState 的 SSOT
   let _cachedVisibleRange: VisibleRange | null = null
   const cachedVisibleRange = computed<VisibleRange>(() => {
-    const clamped = clampVisibleRange(cachedRawVisibleRange())
+    const clamped = viewSnapshot().range
     if (
       _cachedVisibleRange &&
       _cachedVisibleRange.start === clamped.start &&
@@ -312,7 +212,6 @@ export function createViewportState(signalDeps: ViewportSignalDeps) {
   const cachedViewportState = computed<ViewportState>(() => {
     const vp = cachedViewport()
     const vr = cachedVisibleRange()
-    const opts = signalDeps.options$()
     const next: ViewportState = {
       zoomLevel: signalDeps.zoomLevel$(),
       plotWidth: vp.plotWidth,
@@ -320,7 +219,7 @@ export function createViewportState(signalDeps: ViewportSignalDeps) {
       dpr: vp.dpr,
       visibleFrom: vr.start,
       visibleTo: vr.end,
-      kWidth: opts.kWidth,
+      kWidth: viewSnapshot().kWidth,
       kGap: kGap(),
     }
     if (
@@ -346,22 +245,25 @@ export function createViewportState(signalDeps: ViewportSignalDeps) {
 
   let canvasDomEffect: (() => void) | null = null
   let webglEffect: (() => void) | null = null
-  let contentWidthDomEffect: (() => void) | null = null
 
   /**
    * 写入请求 scrollLeft；与当前值相等时跳过，避免 pan 重复事件空通知。
    */
-  const setRequestedScrollLeft = (value: number): boolean => {
-    const normalized = Number.isFinite(value) ? value : 0
-    const clamped = Math.max(0, Math.min(normalized, maxScrollLeft.peek()))
-    if (signals.requestedScrollLeft.peek() === clamped) return false
-    signals.requestedScrollLeft.set(clamped)
+  /** 世界导航仅由当前视图策略裁决，DOM 位置不进入业务状态。 */
+  const setLogicalScrollLeft = (value: number): boolean => {
+    if (!Number.isFinite(value)) return false
+    const snapshot = viewSnapshot.peek()
+    const next = SCALE_X_STRATEGIES[snapshot.view].navigate(snapshot, value)
+    if (next === snapshot.scroll) return false
+    signals.navigation.set({ ...readonly.navigation.peek(), [snapshot.view]: next })
     return true
   }
 
   const syncFromDomScroll = (): boolean => {
     const container = _getDom().container
-    return container ? setRequestedScrollLeft(container.scrollLeft) : false
+    return container
+      ? setLogicalScrollLeft(container.scrollLeft - leftLoadBufferWidth.peek())
+      : false
   }
 
   /**
@@ -385,15 +287,6 @@ export function createViewportState(signalDeps: ViewportSignalDeps) {
       if (plotWidth <= 0 || plotHeight <= 0) return
       const dpr = readonly.dpr()
       _resizeSharedWebGLSurface(plotWidth, plotHeight, dpr)
-    })
-    contentWidthDomEffect = effect(() => {
-      if (!readonly.initialized()) return
-      const derivedContentWidth = contentWidth()
-      const scrollContent = _getDom().scrollContent
-      const cssWidth = `${derivedContentWidth}px`
-      if (scrollContent && scrollContent.style.width !== cssWidth) {
-        scrollContent.style.width = cssWidth
-      }
     })
   }
 
@@ -442,11 +335,14 @@ export function createViewportState(signalDeps: ViewportSignalDeps) {
   const mergedReadonly = {
     ...readonly,
     contentWidth,
+    viewInput,
+    viewSnapshot,
+    slotGrid,
+    leftLoadBufferWidth,
     maxScrollLeft,
     scrollLeft,
     scrollLeftLogical,
     kGap,
-    futureScreens,
     viewport: cachedViewport,
     /** raw：含左右扩窗，start 可能为 -1（增量加载左缘检测） */
     rawVisibleRange: cachedRawVisibleRange,
@@ -471,7 +367,18 @@ export function createViewportState(signalDeps: ViewportSignalDeps) {
        * @param v - 目标 scrollLeft（CSS px）
        */
       scrollTo(v: number): boolean {
-        return setRequestedScrollLeft(v)
+        return setLogicalScrollLeft(v - leftLoadBufferWidth.peek())
+      },
+
+      /** 按世界坐标滚动，必要时扩展过去与未来槽位。 */
+      scrollToLogical(v: number): boolean {
+        return setLogicalScrollLeft(v)
+      },
+
+      /** 提交由模型策略已裁决的导航结果，用于缩放的原子事务。 */
+      setNavigation(v: number): void {
+        const view = signalDeps.dataView$.peek()
+        signals.navigation.set({ ...readonly.navigation.peek(), [view]: v })
       },
 
       /**
@@ -486,7 +393,7 @@ export function createViewportState(signalDeps: ViewportSignalDeps) {
       /**
        * 响应容器尺寸变化，更新视口尺寸与 DPR。
        *
-       * @remarks 首次初始化时若 scrollLeft 为 0，自动设为 viewWidth 以触发初始渲染。
+       * @remarks 尺寸只更新布局输入，不负责初始化或重置导航。
        * 三个字段在 batch() 内同步写入，保证 computed 只触发一次重求值，只触发一次重绘。
        *
        * @param width  - 新视口 CSS 宽度
@@ -498,9 +405,6 @@ export function createViewportState(signalDeps: ViewportSignalDeps) {
         const h = Number.isFinite(height) ? Math.max(0, height) : 0
         const d = Number.isFinite(dpr) ? dpr : 1
         batch(() => {
-          if (signals.requestedScrollLeft.peek() === 0 && w > 0) {
-            signals.requestedScrollLeft.set(w)
-          }
           signals.viewWidth.set(w)
           signals.viewHeight.set(h)
           signals.preciseDpr.set(d)
@@ -527,12 +431,6 @@ export function createViewportState(signalDeps: ViewportSignalDeps) {
             signals.viewWidth.set(w)
             signals.viewHeight.set(h)
           }
-          // 与 resize 一致：首帧 scrollLeft 为 0 时落到 viewWidth
-          if (container.scrollLeft === 0 && w > 0) {
-            signals.requestedScrollLeft.set(w)
-          } else {
-            setRequestedScrollLeft(container.scrollLeft)
-          }
         })
         setupCanvasSync()
       },
@@ -547,16 +445,18 @@ export function createViewportState(signalDeps: ViewportSignalDeps) {
     dispose() {
       canvasDomEffect?.()
       webglEffect?.()
-      contentWidthDomEffect?.()
       canvasDomEffect = null
       webglEffect = null
-      contentWidthDomEffect = null
       batch(() => {
         signals.initialized.set(false)
         signals.preciseDpr.set(0)
         signals.viewWidth.set(0)
         signals.viewHeight.set(0)
-        signals.requestedScrollLeft.set(0)
+        signals.navigation.set({
+          [ChartDataViewId.KLine]: 0,
+          [ChartDataViewId.TimeShare]: 0,
+          [ChartDataViewId.FiveDayTimeShare]: 0,
+        })
       })
     },
   }

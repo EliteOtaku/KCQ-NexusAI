@@ -112,13 +112,13 @@ async function flushMount() {
 }
 
 describe('KLineChart legend slot lifecycle', () => {
-  it('does not subscribe to legend context and keeps Canvas legend visible without a legend slot', async () => {
+  it('does not subscribe to legend context and keeps native DOM legend visible without a legend slot', async () => {
     const wrapper = mount(KlineChart, { attachTo: document.body })
     await flushMount()
 
     expect(mockController.legendSubscriberCount()).toBe(0)
-    expect(mockController.rendererConfigCalls()).toEqual([
-      { name: 'mainIndicatorLegend', config: { visible: true, visibleIndicatorIds: undefined } },
+    expect(mockController.optionsFacadeCalls()).toEqual([
+      { legend: { visible: true, visibleIndicatorIds: undefined } },
     ])
 
     wrapper.unmount()
@@ -144,9 +144,8 @@ describe('KLineChart legend slot lifecycle', () => {
     await nextTick()
 
     expect(mockController.legendSubscriberCount()).toBe(1)
-    expect(mockController.rendererConfigCalls().at(-1)).toEqual({
-      name: 'mainIndicatorLegend',
-      config: { visible: false, visibleIndicatorIds: undefined },
+    expect(mockController.optionsFacadeCalls().at(-1)).toEqual({
+      legend: { visible: false, visibleIndicatorIds: undefined },
     })
 
     showLegend.value = false
@@ -154,9 +153,8 @@ describe('KLineChart legend slot lifecycle', () => {
     await nextTick()
 
     expect(mockController.legendSubscriberCount()).toBe(0)
-    expect(mockController.rendererConfigCalls().at(-1)).toEqual({
-      name: 'mainIndicatorLegend',
-      config: { visible: true, visibleIndicatorIds: undefined },
+    expect(mockController.optionsFacadeCalls().at(-1)).toEqual({
+      legend: { visible: true, visibleIndicatorIds: undefined },
     })
 
     wrapper.unmount()
@@ -214,7 +212,14 @@ describe('KLineChart legend slot lifecycle', () => {
         changeColor: '#ff0000',
       },
       indicators: [
-        { name: 'MA', params: [5], values: [{ label: 'MA5', value: 10.5, color: '#2962ff' }] },
+        {
+          instanceId: 'main:MA',
+          definitionId: 'MA',
+          hidden: false,
+          name: 'MA',
+          params: [5],
+          values: [{ label: 'MA5', value: 10.5, color: '#2962ff' }],
+        },
       ],
       comparisons: [{ symbol: 'SPY', percent: 1.25, color: '#f59e0b', percentColor: '#ff0000' }],
       bar: { timestamp: 1, open: 10, high: 12, low: 9, close: 11, volume: 1000 },
@@ -224,9 +229,8 @@ describe('KLineChart legend slot lifecycle', () => {
     await nextTick()
 
     expect(wrapper.get('.legend-contract').text()).toBe(JSON.stringify(context))
-    expect(mockController.rendererConfigCalls().at(-1)).toEqual({
-      name: 'mainIndicatorLegend',
-      config: { visible: false, visibleIndicatorIds: undefined },
+    expect(mockController.optionsFacadeCalls().at(-1)).toEqual({
+      legend: { visible: false, visibleIndicatorIds: undefined },
     })
 
     wrapper.unmount()

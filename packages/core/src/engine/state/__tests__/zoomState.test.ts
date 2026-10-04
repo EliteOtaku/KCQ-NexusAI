@@ -6,7 +6,7 @@ import { createZoomState } from '../zoomState'
 function createState() {
   const minKWidth$ = createSignal(4)
   const maxKWidth$ = createSignal(20)
-  const dataView$ = createSignal<'kline' | 'timeshare' | 'fiveDayTimeShare' | 'comparison'>('kline')
+  const dataView$ = createSignal<'kline' | 'timeshare' | 'fiveDayTimeShare'>('kline')
   return {
     state: createZoomState({ minKWidth$, maxKWidth$, dataView$, zoomLevelCount: 5 }),
     dataView$,
@@ -24,19 +24,17 @@ describe('zoomState', () => {
     expect(state.readonly.zoomLevel()).toBe(1)
   })
 
-  it('uses the time-share width only in the time-share view', () => {
+  it('isolates zoom and slot width state across views', () => {
     const { state, dataView$ } = createState()
 
-    state.actions.setTimeShareKWidth(7.25)
-    expect(state.readonly.kWidth()).toBe(4)
-
-    dataView$.set('timeshare')
-    expect(state.readonly.kWidth()).toBe(7.25)
-
     state.actions.setZoomLevel(3)
-    expect(state.readonly.kWidth()).toBe(7.25)
+    dataView$.set('fiveDayTimeShare')
+    state.actions.setSessionSlotWidth(7.25)
+    expect(state.readonly.kWidth()).toBe(4)
+    expect(state.readonly.timeShareSlotWidth()).toBe(7.25)
 
     dataView$.set('kline')
     expect(state.readonly.kWidth()).toBe(12)
+    expect(state.readonly.timeShareSlotWidth()).toBeNull()
   })
 })

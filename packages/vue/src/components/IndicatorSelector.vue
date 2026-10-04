@@ -17,6 +17,7 @@
             :model-value="searchQuery"
             placeholder="搜索指标名称..."
             aria-label="搜索指标"
+            autofocus
             @update:model-value="controller.setSearchQuery"
           />
           <SegmentedTabs v-model="indicatorView" :tabs="viewOptions" aria-label="指标视图" />
@@ -146,6 +147,8 @@
     activeIndicators?: string[]
     indicatorParams?: Record<string, Record<string, unknown>>
     replacePaneId?: string | null
+    /** 替换目标所在位置；与 replacePaneId 同时提供。 */
+    replaceRole: 'main' | 'sub'
   }>()
 
   const emit = defineEmits<{
@@ -199,6 +202,11 @@
   /** 按当前视图组织搜索后的指标，所有分组始终保持展开。 */
   const indicatorGroups = computed<IndicatorGroup[]>(() => {
     if (props.replacePaneId) {
+      if (props.replaceRole === 'main') {
+        return filteredMain.value.length > 0
+          ? [{ key: 'main', label: '主图指标', items: filteredMain.value }]
+          : []
+      }
       return filteredSub.value.length > 0
         ? [{ key: 'sub', label: '副图指标', items: filteredSub.value }]
         : []
@@ -272,7 +280,9 @@
   function toggleIndicator(indicatorId: string) {
     if (props.replacePaneId) {
       const indicator = findIndicator(indicatorId)
-      if (!indicator || indicator.pane !== 'sub') return
+      if (!indicator || indicator.pane !== props.replaceRole) return
+      // 替换源本身不允许再次选中；主图和副图同一规则，避免出现重复指标。
+      if (isActive(indicatorId)) return
       emit('replace', props.replacePaneId, indicatorId)
       closeMenu()
       return
@@ -333,6 +343,8 @@
     openMenu: () => controller.openMenu(),
     closeMenu,
     toggleMenu: () => controller.toggleMenu(),
+    /** 直接打开指定指标的参数设置，供 Legend 悬浮工具条复用。 */
+    openParams: showParams,
   })
 </script>
 

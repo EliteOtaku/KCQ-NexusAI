@@ -5,13 +5,11 @@
  * 每个指标通过 metadata 描述其渲染器工厂、计算描述与展示配置等元信息
  */
 
-import type {
-  IndicatorRenderStateReader,
-  RendererPluginWithHost,
-} from '../../foundation/plugin/index.js'
+import type { IndicatorRenderStateReader, RenderContext } from '../../foundation/plugin/index.js'
 import type { ColorTokens } from '../../foundation/tokens/index.js'
 import type { KLineData } from '../../foundation/types/price.js'
-import type { ChartDataView } from '../state/modeState.js'
+import type { Layer } from '../../rendering/scene/types.js'
+import type { ChartDataView } from '../chartModel/index.js'
 
 import type { IndicatorRenderEntryOf, IndicatorStateName } from './indicatorContracts.js'
 
@@ -95,7 +93,7 @@ export type IndicatorCategory = 'main' | 'sub' | 'oscillator' | 'volume'
 /**
  * 渲染器工厂函数
  */
-export type RendererFactory = (options?: IndicatorRendererOptions) => RendererPluginWithHost
+export type RendererFactory = (options?: IndicatorRendererOptions) => Layer<RenderContext>
 
 /** 解析 renderer plugin 名称所需的稳定上下文，不创建 renderer 实例。 */
 export interface IndicatorRendererNameOptions {
@@ -111,9 +109,7 @@ export type IndicatorAuxiliaryRendererNameResolver = (
   options: IndicatorRendererNameOptions,
 ) => string | null
 
-export type ScaleRendererFactory = (
-  options: IndicatorScaleRendererOptions,
-) => RendererPluginWithHost
+export type ScaleRendererFactory = (options: IndicatorScaleRendererOptions) => Layer<RenderContext>
 
 export interface IndicatorVisibleRange {
   start: number
@@ -168,6 +164,8 @@ export type IndicatorVisibleStateComposer = (
 export interface TitleValueItem {
   label: string
   value: number
+  /** 指标专用的数值展示文本；未指定时按通用精度展示。 */
+  formattedValue?: string
   color: string
 }
 

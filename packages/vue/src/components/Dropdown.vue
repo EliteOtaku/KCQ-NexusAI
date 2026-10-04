@@ -1,24 +1,32 @@
 <template>
   <div ref="rootRef" class="dropdown" :class="[`dropdown--${size}`, { 'is-open': isOpen }]">
-    <button
-      ref="triggerRef"
-      type="button"
-      class="dropdown__trigger"
-      :title="title"
-      :style="triggerStyle"
-      aria-haspopup="listbox"
-      :aria-expanded="isOpen"
-      :disabled="disabled"
-      @click="toggleOpen"
-      @keydown.escape.stop="close"
-      @keydown.down.prevent="open"
-      @keydown.enter.prevent="toggleOpen"
-      @keydown.space.prevent="toggleOpen"
+    <BaseTooltip
+      :content="title"
+      placement="top"
+      :disabled="!title || isOpen"
+      trigger-display="contents"
     >
-      <span v-if="label" class="dropdown__label">{{ label }}</span>
-      <span class="dropdown__value">{{ selectedOption?.label ?? placeholder }}</span>
-      <span class="dropdown__chevron" aria-hidden="true"></span>
-    </button>
+      <button
+        ref="triggerRef"
+        type="button"
+        class="control-button dropdown__trigger"
+        :class="{ 'control-button--sm': size === 'sm' }"
+        :style="triggerStyle"
+        :aria-label="ariaLabel"
+        aria-haspopup="listbox"
+        :aria-expanded="isOpen"
+        :disabled="disabled"
+        @click="toggleOpen"
+        @keydown.escape.stop="close"
+        @keydown.down.prevent="open"
+        @keydown.enter.prevent="toggleOpen"
+        @keydown.space.prevent="toggleOpen"
+      >
+        <span v-if="label" class="dropdown__label">{{ label }}</span>
+        <span class="dropdown__value">{{ selectedOption?.label ?? placeholder }}</span>
+        <span class="dropdown__chevron" aria-hidden="true"></span>
+      </button>
+    </BaseTooltip>
 
     <Teleport :to="teleportTarget">
       <div
@@ -58,6 +66,7 @@
   import { useClickOutside } from '../composables/useClickOutside.js'
   import { useFullscreenTeleportTarget } from '../composables/useFullscreenTeleportTarget.js'
   import { useTeleportedPopup } from '../composables/useTeleportedPopup.js'
+  import BaseTooltip from './common/BaseTooltip.vue'
 
   export interface DropdownOption<T extends string = string> {
     label: string
@@ -74,6 +83,8 @@
       placement?: 'auto' | 'top' | 'bottom'
       label?: string
       title?: string
+      /** 触发器按钮的无障碍名称 */
+      ariaLabel?: string
       placeholder?: string
       allowEmpty?: boolean
       disabled?: boolean
@@ -187,6 +198,8 @@
   onBeforeUnmount(close)
 </script>
 
+<style scoped src="./common/control-button.css"></style>
+
 <style scoped>
   .dropdown {
     position: relative;
@@ -194,56 +207,20 @@
   }
 
   .dropdown__trigger {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 0 8px;
-    border: 1px solid var(--dropdown-trigger-border, var(--klc-color-ui-border));
-    border-radius: 8px;
-    background: var(--dropdown-trigger-background, var(--klc-color-ui-control-background));
-    color: var(--dropdown-trigger-color, var(--klc-color-ui-text));
-    font: inherit;
-    cursor: pointer;
-    transition:
-      background-color 0.2s ease,
-      border-color 0.2s ease,
-      box-shadow 0.2s ease;
-  }
-
-  .dropdown--md .dropdown__trigger {
-    height: 28px;
-  }
-
-  .dropdown--sm .dropdown__trigger {
-    height: 24px;
-    padding: 0 6px;
-    gap: 4px;
-  }
-
-  .dropdown__trigger:hover:not(:disabled),
-  .dropdown.is-open .dropdown__trigger {
-    border-color: var(--dropdown-trigger-active-border, var(--klc-color-ui-border-strong));
-    background: var(--dropdown-trigger-active-background, var(--klc-color-ui-hover));
-  }
-
-  .dropdown__trigger:focus-visible {
-    border-color: var(--dropdown-trigger-focus-border, var(--klc-color-ui-accent));
-    background: var(--dropdown-trigger-focus-background, var(--klc-color-ui-hover));
-    box-shadow: var(
-      --dropdown-trigger-focus-shadow,
-      0 0 0 2px color-mix(in srgb, var(--klc-color-ui-accent) 24%, transparent)
-    );
-    outline: 0;
-  }
-
-  .dropdown__trigger:disabled {
-    opacity: 0.55;
-    cursor: not-allowed;
+    /* Dropdown 的主题接口映射到共享按钮变量，供 Agent 等场景定制外观。 */
+    --control-button-border: var(--dropdown-trigger-border);
+    --control-button-background: var(--dropdown-trigger-background);
+    --control-button-color: var(--dropdown-trigger-color);
+    --control-button-active-border: var(--dropdown-trigger-active-border);
+    --control-button-active-background: var(--dropdown-trigger-active-background);
+    --control-button-focus-border: var(--dropdown-trigger-focus-border);
+    --control-button-focus-background: var(--dropdown-trigger-focus-background);
+    --control-button-focus-shadow: var(--dropdown-trigger-focus-shadow);
   }
 
   .dropdown__label {
     color: var(--klc-color-ui-muted);
-    font-size: 12px;
+    font-size: var(--klc-typography-font-size-md);
     line-height: 1;
     white-space: nowrap;
   }
@@ -253,16 +230,17 @@
     min-width: 0;
     overflow: hidden;
     color: var(--dropdown-trigger-color, var(--klc-color-ui-text));
-    font-size: 13px;
+    font-size: calc(var(--klc-typography-font-size-md) + 1px);
     font-weight: 500;
-    line-height: 1;
+    /* 为字体下沿留出空间，避免省略号裁切区域截断文字。 */
+    line-height: 1.4;
     text-align: left;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   .dropdown--sm .dropdown__value {
-    font-size: 12px;
+    font-size: var(--klc-typography-font-size-md);
     min-width: 24px;
   }
 
@@ -272,7 +250,7 @@
     border-left: 4px solid transparent;
     border-right: 4px solid transparent;
     border-top: 5px solid var(--dropdown-trigger-chevron, var(--klc-color-ui-muted));
-    transition: transform 0.15s ease;
+    transition: transform var(--klc-motion-duration-fast) ease;
   }
 
   .dropdown.is-open .dropdown__chevron {
@@ -293,27 +271,27 @@
 
   .dropdown__option {
     width: 100%;
-    height: 28px;
+    height: calc(12px + 2 * var(--klc-spacing-sm));
     display: flex;
     align-items: center;
-    padding: 0 8px;
+    padding: 0 var(--klc-spacing-sm);
     border: 0;
     border-radius: 3px;
     background: transparent;
     color: var(--klc-color-ui-text);
     font: inherit;
-    font-size: 13px;
+    font-size: calc(var(--klc-typography-font-size-md) + 1px);
     font-weight: 500;
     text-align: left;
     white-space: nowrap;
     cursor: pointer;
-    transition: background 0.15s ease;
+    transition: background var(--klc-motion-duration-fast) ease;
   }
 
   .dropdown--sm .dropdown__option {
-    height: 24px;
+    height: calc(8px + 2 * var(--klc-spacing-sm));
     padding: 0 6px;
-    font-size: 12px;
+    font-size: var(--klc-typography-font-size-md);
     white-space: nowrap;
   }
 
@@ -329,24 +307,18 @@
   }
 
   @media (max-width: 768px), (max-height: 640px) {
-    .dropdown--md .dropdown__trigger {
-      height: 26px;
-      gap: 4px;
-      padding: 0 6px;
-    }
-
     .dropdown--md .dropdown__label {
       display: none;
     }
 
     .dropdown--md .dropdown__value {
       min-width: 42px;
-      font-size: 12px;
+      font-size: var(--klc-typography-font-size-md);
     }
 
     .dropdown--md .dropdown__option {
       height: 26px;
-      font-size: 12px;
+      font-size: var(--klc-typography-font-size-md);
     }
   }
 </style>

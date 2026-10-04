@@ -6,8 +6,19 @@ export * from './components/orderBookHeatmap/index.js'
 // ── Batch 5: Component data models ────────────────────────────────────────
 export * from './components/volumeProfile/index.js'
 export * from './controllers/index.js'
-export * from './engine/market/marketSessionRegistry.js'
-export * from './engine/market/resolveSymbolMarketSession.js'
+export type { BuiltinIndicatorName, IndicatorName } from './engine/indicators/indicatorContracts.js'
+export {
+  Indicator,
+  type IndicatorDefinitionConfig,
+} from './engine/indicators/indicatorDefinitionRegistry.js'
+export {
+  IndicatorKind,
+  type IndicatorMetadata,
+  type IndicatorRendererOptions,
+  type IndicatorRuntimeDescriptor,
+  type IndicatorScaleRendererOptions,
+  type RendererFactory,
+} from './engine/indicators/indicatorMetadata.js'
 // ── Batch 1: Error taxonomy ───────────────────────────────────────────────
 export {
   createMarketDataError,
@@ -37,8 +48,11 @@ export {
   unregisterChartTool,
 } from './foundation/agent/chartToolRegistry.js'
 export type { ChartSettings } from './foundation/config/chartSettings.js'
+export * from './foundation/config/marketSession/marketSessionRegistry.js'
+export * from './foundation/config/marketSession/resolveSymbolMarketSession.js'
 export * from './foundation/persistence/index.js'
-export type { RendererPlugin, RendererPluginWithHost } from './foundation/plugin/types.js'
+export { makePluginLayerId } from './foundation/plugin/impl/rendererLayerId.js'
+export type { Plugin, PluginConfig, PluginHost, RenderContext } from './foundation/plugin/types.js'
 export * from './foundation/reactivity/index.js'
 export * from './foundation/tokens/index.js'
 export { formatDateTimeInTimeZone, formatTimeInTimeZone } from './foundation/utils/dateFormat.js'
@@ -46,9 +60,7 @@ export * from './foundation/utils/rendererCapability.js'
 export type { MarketSessionConfig, OpenTimeRange } from './foundation/utils/sessionTimeLabels.js'
 export { generateUUID } from './foundation/utils/uuid.js'
 export type * from './rendering/render/index.js'
-export * from './rendering/renderer-tier/index.js'
 // ── Batch 3: Scene abstraction (depends on render) ────────────────────────
 export * from './rendering/scene/index.js'
-export * from './rendering/scheduler/index.js'
 export * from './scale/index.js'
 export { VERSION } from './version.js'

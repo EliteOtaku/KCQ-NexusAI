@@ -1,5 +1,6 @@
-import { KLineChartError } from '../../errors.js'
-import type { ChartDataView } from '../state/modeState.js'
+/** 指标定义装饰器与全局定义目录，实例挂载由图表状态驱动。 */
+import { GENERIC_ERROR_CODES, KLineChartError } from '../../errors.js'
+import type { ChartDataView } from '../chartModel/index.js'
 import type { IndicatorName } from './indicatorContracts.js'
 import type {
   GetTitleInfoFn,
@@ -16,7 +17,7 @@ import type {
 } from './indicatorMetadata.js'
 
 export type IndicatorDefinitionConfig<T = unknown> = {
-  /** 指标内部 name，必须是契约注册表（`indicatorContracts.ts`）登记的键。 */
+  /** 指标定义名称，允许第三方扩展；注册定义后仍须添加指标实例。 */
   name: IndicatorName
   aliases?: readonly string[]
   displayName: string
@@ -50,6 +51,7 @@ export type IndicatorDefinitionConfig<T = unknown> = {
 type IndicatorDefinitionClass = {
   new (...args: never[]): unknown
   rendererFactory?: RendererFactory
+  scaleRendererFactory?: ScaleRendererFactory
 }
 
 const indicatorDefinitions = new Map<string, IndicatorMetadata>()
@@ -83,7 +85,7 @@ function removeAliasesFor(name: string): void {
  * 使用方式：
  * @Indicator({ name: 'ma', ... })
  * class MADefinition {
- *   static rendererFactory = createMARendererPlugin
+ *   static rendererFactory = createMALayer
  * }
  */
 /** 组装指标元数据并写入注册表：@Indicator 装饰器与编程式注册的共享实现。
@@ -96,6 +98,7 @@ function defineIndicator<C>(
     aliases?: readonly string[]
   },
   rendererFactory: RendererFactory,
+  registryScaleFactory?: ScaleRendererFactory,
 ): void {
   const normalizedName = normalizeIndicatorId(config.name)
   const getRendererName: IndicatorRendererNameResolver =
@@ -124,6 +127,7 @@ function defineIndicator<C>(
     getPaneTitleRendererName,
     runtime,
     rendererFactory,
+    scaleRendererFactory: registryScaleFactory ?? config.scaleRendererFactory,
     paneIdField: config.paneIdField,
     allowMainPane: config.allowMainPane,
   })
@@ -143,11 +147,11 @@ export function Indicator<C>(config: IndicatorDefinitionConfig<C>) {
       const rendererFactory = this.rendererFactory
       if (typeof rendererFactory !== 'function') {
         throw new KLineChartError(
-          'INVALID_PARAM',
+          GENERIC_ERROR_CODES.INVALID_PARAM,
           `[Indicator] '${config.name}' definition must expose static rendererFactory`,
         )
       }
-      defineIndicator(config, rendererFactory)
+      defineIndicator(config, rendererFactory, this.scaleRendererFactory)
     })
 
     return value

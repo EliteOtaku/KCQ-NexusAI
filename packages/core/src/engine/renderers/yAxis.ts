@@ -1,47 +1,37 @@
-import { resolveEffectiveAxisDisplay } from '../../foundation/config/axisSettings.js'
-import type { RenderContext, RendererPlugin } from '../../foundation/plugin/index.js'
-import {
-  AXIS_LABEL_KIND,
-  GLOBAL_PANE_ID,
-  RENDERER_PRIORITY,
-} from '../../foundation/plugin/index.js'
+/** 价格轴刻度、范围带与十字线价签的静态和动态绘制。 */
+import { AXIS_DISPLAY } from '../../foundation/config/axisSettings.js'
+import { makePluginLayerId } from '../../foundation/plugin/impl/rendererLayerId.js'
+import type { RenderContext } from '../../foundation/plugin/index.js'
+import { AXIS_LABEL_KIND, RENDERER_PRIORITY } from '../../foundation/plugin/index.js'
 import { resolveThemeColors } from '../../foundation/tokens/index.js'
-import { paintAxisLabels, registerAxisLabel } from '../axisLabels/index.js'
-import { formatAxisPriceValue } from './axisValueFormat.js'
+import { isTimeSharePeriod } from '../../foundation/types/chartPeriod.js'
+import type { Layer } from '../../rendering/scene/types.js'
+import { LAYER_PANE_GLOBAL } from '../../rendering/scene/types.js'
+import {
+  formatAxisPriceValue,
+  resolvePriceAxisDisplay,
+  usesPercentAxis,
+} from './axisValueFormat.js'
+import { paintAxisLabels, registerAxisLabel } from './impl/labels/index.js'
 
 type YAxisOptions = {
   axisWidth: number
-  /** 与 pane 一致的 Y 轴内边距；保留以兼容既有插件选项形状。 */
-  yPaddingPx?: number
   getCrosshair?: () => { y: number; price: number; activePaneId: string | null } | null
-}
-
-/** 右轴当前展示语义：分时强制价格，比较视图默认百分比 */
-function resolveRightAxisDisplay(context: RenderContext) {
-  return resolveEffectiveAxisDisplay('right', {
-    period: context.period,
-    comparisonActive: (context.comparisonSymbols?.length ?? 0) > 0,
-    leftSetting: context.settings?.mainLeftAxisDisplaySetting,
-    rightTypeSetting: context.settings?.mainRightAxisTypeSetting,
-  })
 }
 
 /**
  * Y 轴静态层：刻度，画到 yAxisCtx（main 级刷新）
  */
-export function createYAxisStaticRendererPlugin(options: YAxisOptions): RendererPlugin {
+export function createYAxisStaticRendererLayer(options: YAxisOptions): Layer<RenderContext> {
   return {
-    name: 'yAxis',
-    version: '2.0.0',
-    description: 'Y轴价格刻度渲染器（静态）',
-    debugName: 'Y轴刻度',
-    paneId: GLOBAL_PANE_ID,
-    priority: RENDERER_PRIORITY.SYSTEM_YAXIS,
-
-    draw(context: RenderContext) {
+    id: makePluginLayerId('yAxis'),
+    role: 'background',
+    pane: LAYER_PANE_GLOBAL,
+    z: RENDERER_PRIORITY.SYSTEM_YAXIS,
+    visible: true,
+    paint(context) {
       const { ctx, pane, dpr, yAxisCtx } = context
-      const axisDisplay = resolveRightAxisDisplay(context)
-      if (axisDisplay === 'none') return
+      if (resolvePriceAxisDisplay(context) === AXIS_DISPLAY.NONE) return
 
       const tokenColors = resolveThemeColors(
         context.theme,
@@ -50,7 +40,7 @@ export function createYAxisStaticRendererPlugin(options: YAxisOptions): Renderer
       )
       const targetCtx = yAxisCtx || ctx
       const axisWidth = yAxisCtx?.canvas ? yAxisCtx.canvas.width / dpr : options.axisWidth
-      const isPercent = axisDisplay === 'percent' && pane.role === 'price'
+      const isPercent = usesPercentAxis(context)
 
       if (pane.capabilities.showPriceAxisTicks && context.yAxisTicks) {
         targetCtx.clearRect(0, 0, axisWidth, pane.height)
@@ -71,28 +61,45 @@ export function createYAxisStaticRendererPlugin(options: YAxisOptions): Renderer
           axisWidth,
           axisHeight: pane.height,
         })
+        // 分时左右轴共用刻度坐标，左侧直接显示对应的原始价格。
+        const leftCtx = context.leftAxisCtx
+        if (leftCtx && isTimeSharePeriod(context.period) && pane.role === 'price') {
+          const leftWidth = leftCtx.canvas.width / dpr
+          const leftLabels = context.axisLabels.forSurface('yLeftStatic', pane.id)
+          for (const tick of context.yAxisTicks) {
+            leftLabels.register({
+              kind: AXIS_LABEL_KIND.TICK,
+              text: formatAxisPriceValue(tick.value, false),
+              pos: tick.y,
+              color: tokenColors.text.secondary,
+              fontSize: 12,
+            })
+          }
+          paintAxisLabels(leftCtx, leftLabels.labels, 'yLeftStatic', {
+            dpr,
+            axisWidth: leftWidth,
+            axisHeight: pane.height,
+          })
+        }
       }
     },
+    dispose() {},
   }
 }
 
 /**
  * Y 轴动态层：价格范围带、装饰标签与十字线价签，画到 yAxisOverlayCtx（overlay 级刷新）
  */
-export function createYAxisOverlayRendererPlugin(options: YAxisOptions): RendererPlugin {
+export function createYAxisOverlayRendererLayer(options: YAxisOptions): Layer<RenderContext> {
   return {
-    name: 'yAxisOverlay',
-    version: '2.0.0',
-    description: 'Y轴动态标签渲染器',
-    debugName: 'Y轴标签',
-    paneId: GLOBAL_PANE_ID,
-    priority: RENDERER_PRIORITY.SYSTEM_YAXIS + 1,
-    layer: 'overlay',
-
-    draw(context: RenderContext) {
+    id: makePluginLayerId('yAxisOverlay'),
+    role: 'overlay',
+    pane: LAYER_PANE_GLOBAL,
+    z: RENDERER_PRIORITY.SYSTEM_YAXIS + 1,
+    visible: true,
+    paint(context) {
       const { pane, dpr, yAxisOverlayCtx, yAxisCtx } = context
-      const axisDisplay = resolveRightAxisDisplay(context)
-      if (axisDisplay === 'none') return
+      if (resolvePriceAxisDisplay(context) === AXIS_DISPLAY.NONE) return
 
       const targetCtx = yAxisOverlayCtx ?? yAxisCtx
       if (!targetCtx) return
@@ -107,7 +114,7 @@ export function createYAxisOverlayRendererPlugin(options: YAxisOptions): Rendere
       const axisWidth = targetCtx.canvas ? targetCtx.canvas.width / dpr : options.axisWidth
       targetCtx.clearRect(0, 0, axisWidth, pane.height)
 
-      const isPercent = axisDisplay === 'percent' && pane.role === 'price'
+      const isPercent = usesPercentAxis(context)
 
       // 绘图范围带在绘图 overlay 阶段注册，必须在同一 overlay 层绘制。
       if (pane.role === 'price') {
@@ -133,10 +140,29 @@ export function createYAxisOverlayRendererPlugin(options: YAxisOptions): Rendere
           pos: crosshair.y,
           origin: pane.top,
           variant: 'crosshair',
-          bgColor: tokenColors.label.bg,
-          textColor: tokenColors.label.text,
+          bgColor: tokenColors.crosshairLabelBg,
+          textColor: tokenColors.crosshairLabelText,
           fontSize: 12,
         })
+        const leftCtx = context.leftAxisOverlayCtx
+        if (leftCtx && isTimeSharePeriod(context.period) && pane.role === 'price') {
+          registerAxisLabel(context, 'yLeftOverlay', {
+            kind: AXIS_LABEL_KIND.TAG,
+            text: formatAxisPriceValue(crosshair.price, false),
+            pos: crosshair.y,
+            origin: pane.top,
+            variant: 'crosshair',
+            bgColor: tokenColors.crosshairLabelBg,
+            textColor: tokenColors.crosshairLabelText,
+            fontSize: 12,
+          })
+          paintAxisLabels(
+            leftCtx,
+            context.axisLabels.forSurface('yLeftOverlay', pane.id).labels,
+            'yLeftOverlay',
+            { dpr, axisWidth: leftCtx.canvas.width / dpr, axisHeight: pane.height },
+          )
+        }
       }
 
       paintAxisLabels(
@@ -146,13 +172,6 @@ export function createYAxisOverlayRendererPlugin(options: YAxisOptions): Rendere
         { dpr, axisWidth, axisHeight: pane.height },
       )
     },
+    dispose() {},
   }
-}
-
-/**
- * @deprecated 使用 createYAxisStaticRendererPlugin + createYAxisOverlayRendererPlugin
- * 保留兼容：静态+动态合画到 yAxisCtx
- */
-export function createYAxisRendererPlugin(options: YAxisOptions): RendererPlugin {
-  return createYAxisStaticRendererPlugin(options)
 }

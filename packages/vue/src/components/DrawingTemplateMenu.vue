@@ -4,6 +4,7 @@
     :groups="groups"
     :disabled="disabled"
     :message="message"
+    empty-text="暂无模板"
     :trigger-class="triggerClass"
     @open="emit('open')"
     @select="select"

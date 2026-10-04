@@ -1,12 +1,13 @@
+/** 验证网格按行情模式绘制，并避免重复绘制 Pane 分隔边界。 */
 import { describe, expect, it, vi } from 'vitest'
 import {
   createMockCanvasContext,
   createMockRenderContext,
 } from '@/engine/__tests__/helpers/renderTestKit'
+import { createGridLinesLayer } from '@/engine/renderers/gridLines'
 import type { ChartDataView } from '@/foundation/types/chartView'
 import { ChartDataViewId } from '@/foundation/types/chartView'
 import { createDisplayTimeFormatter } from '@/foundation/utils/dateFormat'
-import { createGridLinesRendererPlugin } from '../gridLines'
 import { createDailyBars, createDailyFutureTimestamp } from './helpers/futureAxisTestKit'
 
 /** 构造记录 fillRect 矩形的画布。 */
@@ -44,7 +45,8 @@ const CROSS_MONTH_DATA = [
   },
 ]
 
-function buildContext(dataView: ChartDataView) {
+/** 构造指定视图和 Pane 顶部位置的网格绘制上下文。 */
+function buildContext(dataView: ChartDataView, paneTop = 0) {
   const { ctx, fillRects } = createMockCtx()
   const context = createMockRenderContext({
     ctx,
@@ -54,7 +56,7 @@ function buildContext(dataView: ChartDataView) {
     kGap: 2,
     kLinePositions: [0, 10, 20],
     kLineCenters: [1, 11, 21],
-    pane: { top: 0, height: 400 },
+    pane: { top: paneTop, height: 400 },
     period: 'daily',
     dataView,
     isAsiaMarket: true,
@@ -65,9 +67,24 @@ function buildContext(dataView: ChartDataView) {
 }
 
 describe('gridLines mode', () => {
+  it('draws only interior ticks for a sub-pane without duplicating separator borders', () => {
+    const { fillRects, context } = buildContext(ChartDataViewId.TimeShare, 400)
+    context.yAxisTicks = [
+      { value: 100, y: 0 },
+      { value: 50, y: 200 },
+      { value: 0, y: 400 },
+    ]
+
+    createGridLinesLayer().paint(context)
+
+    expect(fillRects).toHaveLength(1)
+    expect(fillRects[0]!.y).toBeGreaterThan(0)
+    expect(fillRects[0]!.y + fillRects[0]!.height).toBeLessThan(context.pane.height)
+  })
+
   it('draws vertical month boundary lines in kline mode', () => {
     const { fillRects, context } = buildContext(ChartDataViewId.KLine)
-    createGridLinesRendererPlugin().draw(context)
+    createGridLinesLayer().paint(context)
     const verticals = fillRects.filter((r) => r.width < r.height)
     expect(verticals.length).toBeGreaterThan(0)
     expect(verticals[0]?.x).toBe(1)
@@ -75,7 +92,7 @@ describe('gridLines mode', () => {
 
   it('does not draw vertical month boundary lines in timeshare mode', () => {
     const { fillRects, context } = buildContext(ChartDataViewId.TimeShare)
-    createGridLinesRendererPlugin().draw(context)
+    createGridLinesLayer().paint(context)
     const verticals = fillRects.filter((r) => r.width < r.height)
     expect(verticals.length).toBe(0)
   })
@@ -89,7 +106,7 @@ describe('gridLines mode', () => {
       verticalGridLineXs: [0, 400, 800],
     }
 
-    createGridLinesRendererPlugin().draw(context)
+    createGridLinesLayer().paint(context)
 
     const verticals = fillRects.filter((r) => r.width < r.height)
     expect(verticals.map((line) => line.x)).toEqual([0, 400, 800])
@@ -120,7 +137,7 @@ describe('gridLines 未来区纵向网格', () => {
       pane: { top: 0, height: 400 },
     })
 
-    createGridLinesRendererPlugin().draw(context)
+    createGridLinesLayer().paint(context)
 
     // 只保留历史月界（首根 + 三个月界）；未来槽位不参与网格线定位。
     const verticals = fillRects.filter((r) => r.width < r.height)

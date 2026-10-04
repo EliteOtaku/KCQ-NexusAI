@@ -1,14 +1,18 @@
-import { paintAxisLabels, registerAxisLabel } from '@/engine/axisLabels/index.js'
-import { calculateValueTickPositions } from '@/engine/utils/tickPosition.js'
-import type {
-  BaseIndicatorState,
-  PluginHost,
-  RenderContext,
-  RendererPluginWithHost,
-} from '@/foundation/plugin/index.js'
+/**
+ * 通用指标坐标轴刻度 Layer 工厂。
+ *
+ * 按实例投影的极值计算刻度与十字线价签，绘制到右轴静态画布；
+ * 状态经 `context.indicatorStateReader` 读取，不再持有 config。
+ */
+
+import { paintAxisLabels, registerAxisLabel } from '@/engine/renderers/impl/labels/index.js'
+import { calculateValueTickPositions } from '@/engine/scale/index.js'
+import type { BaseIndicatorState, RenderContext } from '@/foundation/plugin/index.js'
 import { AXIS_LABEL_KIND, RENDERER_PRIORITY } from '@/foundation/plugin/index.js'
 import { resolveThemeColors } from '@/foundation/tokens/index.js'
 import { ScaleType } from '@/foundation/types/scaleType.js'
+import type { Layer } from '@/rendering/scene/types.js'
+import { createIndicatorRendererLayer } from '../shared/indicatorRendererLayer.js'
 import { formatScaleValue, resolveAdaptiveDecimals } from './scaleFormat.js'
 
 interface IndicatorScaleRenderState extends BaseIndicatorState {
@@ -24,7 +28,7 @@ export interface IndicatorScaleRendererOptions {
   indicatorKey: string
   label: string
   decimals?: number
-  /** 与 pane 一致的 Y 轴内边距；保留以兼容既有插件选项形状。 */
+  /** 与 pane 一致的 Y 轴内边距；保留以兼容既有工厂选项形状。 */
   yPaddingPx?: number
   scaleType?: ScaleType
   getCrosshair?: () => { y: number; price: number; activePaneId: string | null } | null
@@ -34,9 +38,9 @@ export interface IndicatorScaleRendererOptions {
   instanceId: string
 }
 
-export function createIndicatorScaleRendererPlugin(
+export function createIndicatorScaleLayer(
   options: IndicatorScaleRendererOptions,
-): RendererPluginWithHost {
+): Layer<RenderContext> {
   const {
     axisWidth,
     paneId,
@@ -49,24 +53,15 @@ export function createIndicatorScaleRendererPlugin(
     formatCrosshairLabel,
     instanceId,
   } = options
-  let pluginHost: PluginHost | null = null
 
-  return {
+  return createIndicatorRendererLayer({
     name: `${indicatorKey}Scale_${paneId}`,
-    version: '1.0.0',
-    description: `${label} 刻度渲染器`,
-    debugName: `${label}刻度`,
     paneId,
-    priority: RENDERER_PRIORITY.INDICATOR_SCALE,
-    layer: 'overlay',
-
-    onInstall(host: PluginHost) {
-      pluginHost = host
-    },
-
-    draw(context: RenderContext) {
+    role: 'indicator',
+    z: RENDERER_PRIORITY.INDICATOR_SCALE,
+    draw(context) {
       const { yAxisCtx, pane, dpr } = context
-      if (!yAxisCtx || !pluginHost) return
+      if (!yAxisCtx) return
 
       const state = context.indicatorStateReader?.get<IndicatorScaleRenderState>(instanceId)
       if (!state) return
@@ -89,10 +84,7 @@ export function createIndicatorScaleRendererPlugin(
         context.colorPresetSettings,
       )
 
-      const displayRange = pane.yAxis.getDisplayRange({
-        minPrice: valueMin,
-        maxPrice: valueMax,
-      })
+      const displayRange = pane.yAxis.getDisplayRange()
 
       // 无自定义格式化时按显示范围自适应小数位，避免小量级指标刻度全部折叠为 ±0.00。
       const effectiveDecimals = formatTickLabel
@@ -144,8 +136,8 @@ export function createIndicatorScaleRendererPlugin(
           pos: localY,
           origin: 0,
           variant: 'crosshair',
-          bgColor: tokenColors.label.bg,
-          textColor: tokenColors.label.text,
+          bgColor: tokenColors.crosshairLabelBg,
+          textColor: tokenColors.crosshairLabelText,
           fontSize: 12,
         })
       }
@@ -156,5 +148,5 @@ export function createIndicatorScaleRendererPlugin(
         axisHeight: pane.height,
       })
     },
-  }
+  })
 }

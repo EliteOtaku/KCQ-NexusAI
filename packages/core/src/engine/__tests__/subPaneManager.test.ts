@@ -1,8 +1,11 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { RenderContext } from '../../foundation/plugin/index'
+import type { Layer } from '../../rendering/scene/types'
 import { getRegisteredIndicatorDefinition } from '../indicators/indicatorDefinitionRegistry'
 import { loadBuiltinIndicators } from '../indicators/registerBuiltins'
+import { type SubPaneContext, SubPaneManager } from '../pane/index'
 import type { SubPaneSpec } from '../state/indicatorState'
-import { type SubPaneContext, SubPaneManager } from '../subPaneManager'
+import { createRendererLayerStore } from './helpers/rendererLayerStoreTestKit'
 
 beforeAll(async () => {
   await loadBuiltinIndicators()
@@ -13,20 +16,14 @@ afterEach(() => {
 })
 
 /** 构造副图管理器的最小运行时上下文；metadata 由静态定义注册表提供。 */
-function createMockContext(): SubPaneContext & {
-  renderers: Map<string, unknown>
-  layers: Set<string>
-} {
-  const renderers = new Map<string, unknown>()
-  const layers = new Set<string>()
+function createMockContext() {
+  const rendererLayers = createRendererLayerStore()
   return {
-    renderers,
-    layers,
+    layers: rendererLayers.layers,
     onPaneProjectionChanged: vi.fn(),
-    getRenderer: vi.fn((name) => renderers.get(name) as never),
-    useRenderer: vi.fn((renderer) => renderers.set(renderer.name, renderer)),
-    removeRenderer: vi.fn((name) => renderers.delete(name)),
-    updateRendererConfig: vi.fn(),
+    getRenderer: rendererLayers.getRenderer,
+    useRenderer: rendererLayers.useRenderer,
+    removeRenderer: rendererLayers.removeRenderer,
     getOption: () => ({
       rightAxisWidth: 60,
       priceLabelWidth: 60,
@@ -35,8 +32,7 @@ function createMockContext(): SubPaneContext & {
     getCrosshairPos: () => null,
     getCrosshairPrice: () => null,
     getActivePaneId: () => null,
-    getRenderContext: () => null,
-  }
+  } satisfies SubPaneContext & { layers: Map<string, Layer<RenderContext>> }
 }
 
 describe('SubPaneManager runtime projection', () => {
@@ -55,10 +51,6 @@ describe('SubPaneManager runtime projection', () => {
     ctx = createMockContext()
   })
 
-  it('does not expose or own a business entries signal', () => {
-    expect('entriesSignal' in manager).toBe(false)
-  })
-
   it('mounts desired resources once across repeated reconcile calls', () => {
     manager.reconcile(ctx, [rsi])
     manager.reconcile(ctx, [rsi])
@@ -68,18 +60,37 @@ describe('SubPaneManager runtime projection', () => {
     expect(manager.getMountedResources('RSI_0')?.scaleRendererName).toBe('rsiScale_RSI_0')
   })
 
-  it('updates configs without recreating resources when only params change', () => {
+  it('rebuilds layers when only params change', () => {
     manager.reconcile(ctx, [rsi])
     vi.clearAllMocks()
 
     manager.reconcile(ctx, [{ ...rsi, params: { period1: 12 } }])
 
-    expect(ctx.useRenderer).not.toHaveBeenCalled()
-    expect(ctx.updateRendererConfig).toHaveBeenCalledWith('rsi_RSI_0', { period1: 12 })
-    expect(ctx.updateRendererConfig).toHaveBeenCalledWith('paneTitle_RSI_0', {
-      params: { period1: 12 },
-      indicatorId: 'RSI',
-    })
+    // 参数变化：原子重建（unmount + mount renderer/scale/title）
+    expect(ctx.removeRenderer).toHaveBeenCalled()
+    expect(ctx.useRenderer).toHaveBeenCalled()
+    expect(manager.getMountedResources('RSI_0')).toBeDefined()
+  })
+
+  it('mounts only the pane title while hidden and restores drawing when shown', () => {
+    manager.reconcile(ctx, [{ ...rsi, hidden: true }])
+    expect(ctx.useRenderer).toHaveBeenCalledTimes(1)
+    expect(ctx.layers.size).toBe(1)
+
+    vi.clearAllMocks()
+    manager.reconcile(ctx, [rsi])
+    expect(ctx.layers.size).toBe(3)
+    expect(manager.getMountedResources('RSI_0')?.rendererName).toBe('rsi_RSI_0')
+  })
+
+  it('unmounts drawing layers when a mounted indicator becomes hidden', () => {
+    manager.reconcile(ctx, [rsi])
+    vi.clearAllMocks()
+
+    manager.reconcile(ctx, [{ ...rsi, hidden: true }])
+
+    expect(ctx.removeRenderer).toHaveBeenCalledTimes(3)
+    expect(ctx.layers.size).toBe(1)
   })
 
   it('unmounts resources absent from desired state', () => {
@@ -90,6 +101,7 @@ describe('SubPaneManager runtime projection', () => {
 
     expect(ctx.removeRenderer).toHaveBeenCalledTimes(3)
     expect(manager.getMountedResources('RSI_0')).toBeUndefined()
+    expect(ctx.layers.size).toBe(0)
   })
 
   it('does not record a mount when renderer registration throws', () => {
@@ -109,28 +121,14 @@ describe('SubPaneManager runtime projection', () => {
     expect(manager.getMountedResources('RSI_0')).toBeUndefined()
   })
 
-  it('keeps a failed parameter projection retryable', () => {
-    manager.reconcile(ctx, [rsi])
-    ctx.updateRendererConfig = vi.fn().mockImplementationOnce(() => {
-      throw new Error('config failed')
-    })
-
-    expect(() => manager.reconcile(ctx, [{ ...rsi, params: { period1: 12 } }])).not.toThrow()
-    manager.reconcile(ctx, [{ ...rsi, params: { period1: 12 } }])
-
-    expect(ctx.useRenderer).toHaveBeenCalledTimes(6)
-    expect(manager.getMountedResources('RSI_0')).toBeDefined()
-  })
-
   it('distinguishes non-finite and null parameter values in projection keys', () => {
     manager.reconcile(ctx, [{ ...rsi, params: { threshold: Number.NaN } }])
     vi.clearAllMocks()
 
+    // NaN → null 视为参数变化，触发重建
     manager.reconcile(ctx, [{ ...rsi, params: { threshold: null } }])
 
-    expect(ctx.updateRendererConfig).toHaveBeenCalledWith('rsi_RSI_0', {
-      threshold: null,
-    })
+    expect(ctx.useRenderer).toHaveBeenCalled()
   })
 
   it('removes the old projection when the replacement factory throws', () => {

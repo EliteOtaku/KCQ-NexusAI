@@ -24,7 +24,13 @@ import type {
   SymbolSpec,
 } from '@363045841yyt/klinechart-core'
 import { createIdleInteractionSnapshot } from '@363045841yyt/klinechart-core'
+import {
+  type ChartSettings,
+  PRICE_AXIS_RANGE_MODE,
+  ScaleType,
+} from '@363045841yyt/klinechart-core/config'
 import type { LegendTemplateContext } from '@363045841yyt/klinechart-core/controllers'
+import { MAIN_PANE_ID } from '@363045841yyt/klinechart-core/controllers'
 import type { Signal } from '@363045841yyt/klinechart-core/reactivity'
 import type { App } from 'vue'
 
@@ -33,6 +39,9 @@ import type { App } from 'vue'
 // ---------------------------------------------------------------------------
 
 type TestSignal<T> = Signal<T> & { subscriberCount: () => number }
+
+/** `updateOptionsFacade` 接收的 chart options 补丁。 */
+type OptionsFacadePatch = Parameters<ChartController['updateOptionsFacade']>[0]
 
 function createSignal<T>(initial: T): TestSignal<T> {
   let value = initial
@@ -63,8 +72,8 @@ export interface MockChartController extends ChartController {
   disposeCalls: () => number
   /** spy: themes passed to `setTheme` */
   setThemeCalls: () => ReadonlyArray<'light' | 'dark'>
-  /** spy: main legend renderer configuration updates */
-  rendererConfigCalls: () => ReadonlyArray<{ name: string; config: Record<string, unknown> }>
+  /** spy: 主图图例写入 chart options 的补丁 */
+  optionsFacadeCalls: () => ReadonlyArray<OptionsFacadePatch>
   /** 当前 legendTemplateContext Signal 的订阅数量 */
   legendSubscriberCount: () => number
   /** interactionState Signal 的订阅数量 */
@@ -83,12 +92,19 @@ export interface MockChartController extends ChartController {
   /** test-only: 写入全部已确认图元 */
   _setDrawings: (drawings: ReadonlyArray<DrawingObject>) => void
   _setDrawingHistory: (canUndo: boolean, canRedo: boolean) => void
+  /** test-only: 写入 settings 快照，驱动依赖设置的 UI 断言 */
+  _setSettings: (settings: ChartSettings) => void
+  /** test-only: 切换图表模式，驱动轴布局显示。 */
+  _setChartMode: (mode: ReturnType<ChartController['chartMode']['peek']>) => void
+  /** spy: resetMainPriceAxis 调用次数 */
+  resetMainPriceAxisCalls: () => number
 }
 
 export function createMockChartController(
   opts: Partial<ChartMountOptions> = {},
 ): MockChartController {
   let disposeCalls = 0
+  let resetPriceAxisCalls = 0
   const setThemeCalls: Array<'light' | 'dark'> = []
   const canUndoDrawing = createSignal(false)
   const canRedoDrawing = createSignal(false)
@@ -106,8 +122,13 @@ export function createMockChartController(
   const data = createSignal<ReadonlyArray<KLineData>>(opts.data ?? [])
   const themePreference = opts.theme ?? 'light'
   const theme = createSignal<'light' | 'dark'>(themePreference)
+  const chartMode = createSignal<ReturnType<ChartController['chartMode']['peek']>>('kline')
   const settings = createSignal({ theme: themePreference } as Record<string, unknown>)
   const paneLayout = createSignal<ReadonlyArray<PaneSpec>>([])
+  const paneScaleTypes = createSignal<ReadonlyMap<string, ScaleType>>(new Map())
+  const panePriceAxisRanges = createSignal<
+    ReturnType<ChartController['panePriceAxisRanges']['peek']>
+  >({})
   const rangeSelection = createSignal({
     startTimestamp: null as number | null,
     endTimestamp: null as number | null,
@@ -119,7 +140,7 @@ export function createMockChartController(
   const drawings = createSignal<ReadonlyArray<DrawingObject>>([])
   const globalDrawingLock = createSignal(false)
   const interactionState = createSignal(createIdleInteractionSnapshot())
-  const rendererConfigCalls: Array<{ name: string; config: Record<string, unknown> }> = []
+  const optionsFacadeCalls: OptionsFacadePatch[] = []
   const alertController: AlertController = {
     rules: createSignal<ReadonlyArray<AlertRule>>([]),
     events: createSignal<ReadonlyArray<AlertEvent>>([]),
@@ -146,7 +167,7 @@ export function createMockChartController(
       status: 'ready' as const,
       error: null,
     }),
-    chartMode: createSignal('kline' as const),
+    chartMode,
     lastBarPeriod: createSignal('daily'),
     indicators: createSignal<ReadonlyArray<IndicatorInstance>>([]),
     subPanes: createSignal<ReadonlyArray<SubPaneInfo>>([]),
@@ -158,6 +179,24 @@ export function createMockChartController(
     globalDrawingLock,
     paneRatios: createSignal<Readonly<Record<string, number>>>({}),
     paneLayout,
+    paneScaleTypes,
+    panePriceAxisRanges,
+    setPanePriceAxisScaleType: (paneId, type) => {
+      paneScaleTypes.set(new Map(paneScaleTypes.peek()).set(paneId, type))
+      if (paneId === MAIN_PANE_ID)
+        settings.set({ ...settings.peek(), mainRightAxisTypeSetting: type })
+    },
+    setPanePriceAxisRangeMode: (paneId, rangeMode) => {
+      panePriceAxisRanges.set({
+        ...panePriceAxisRanges.peek(),
+        [paneId]: { rangeMode, handRange: null },
+      })
+      if (paneId === MAIN_PANE_ID)
+        settings.set({ ...settings.peek(), mainPriceAxisRangeMode: rangeMode })
+    },
+    resetPanePriceAxis: () => {
+      resetPriceAxisCalls += 1
+    },
     interactionState,
     selectedRange: createSignal<{ from: number; to: number } | null>(null),
     rangeSelection,
@@ -178,6 +217,7 @@ export function createMockChartController(
     registerSymbols: () => {},
     setComparisonSpecs: () => {},
     addComparisonSymbol: () => {},
+    setComparisonHidden: () => {},
     removeComparisonSymbol: () => {},
     setComparisonData: () => {},
     setCurrentSymbol: () => {},
@@ -232,8 +272,8 @@ export function createMockChartController(
     addIndicator: () => null,
     removeIndicator: () => false,
     updateIndicatorParams: () => false,
-    updateRendererConfig: (name, config) => {
-      rendererConfigCalls.push({ name, config })
+    updateOptionsFacade: (options) => {
+      optionsFacadeCalls.push(options)
     },
     setDrawingTool: () => {},
     setDrawingToolId: () => {},
@@ -270,6 +310,10 @@ export function createMockChartController(
     createPane: () => false,
     updatePane: () => false,
     removePane: () => false,
+    moveMainIndicator: () => false,
+    replaceMainIndicator: () => false,
+    setMainIndicatorHidden: () => false,
+    setSubIndicatorHidden: () => false,
     movePane: () => false,
     replacePaneContent: () => false,
     updatePaneContent: () => false,
@@ -283,14 +327,35 @@ export function createMockChartController(
     getLeftLoadBufferWidth: () => 0,
     scrollToRight: () => {},
     updateSettingsFacade: () => {},
-    updateOptionsFacade: () => {},
-    dispose: () => {
+    resetMainPriceAxis: () => {
+      resetPriceAxisCalls += 1
+    },
+    dispose: async () => {
       disposeCalls += 1
     },
   }
 
   return {
     ...(controller as ChartController),
+    _setChartMode: (mode) => chartMode.set(mode),
+    _setSettings: (next) => {
+      settings.set(next)
+      const type = next.mainRightAxisTypeSetting
+      paneScaleTypes.set(
+        new Map(paneScaleTypes.peek()).set(
+          MAIN_PANE_ID,
+          type === ScaleType.Log || type === ScaleType.Percent ? type : ScaleType.Linear,
+        ),
+      )
+      panePriceAxisRanges.set({
+        ...panePriceAxisRanges.peek(),
+        [MAIN_PANE_ID]: {
+          rangeMode: next.mainPriceAxisRangeMode ?? PRICE_AXIS_RANGE_MODE.AUTO,
+          handRange: null,
+        },
+      })
+    },
+    resetMainPriceAxisCalls: () => resetPriceAxisCalls,
     _setDrawingHistory: (undo, redo) => {
       canUndoDrawing.set(undo)
       canRedoDrawing.set(redo)
@@ -298,7 +363,7 @@ export function createMockChartController(
     _setDrawings: (next) => drawings.set(next),
     disposeCalls: () => disposeCalls,
     setThemeCalls: () => setThemeCalls,
-    rendererConfigCalls: () => rendererConfigCalls,
+    optionsFacadeCalls: () => optionsFacadeCalls,
     legendSubscriberCount: () => legendTemplateContext.subscriberCount(),
     interactionSubscriberCount: () => interactionState.subscriberCount(),
     dataSubscriberCount: () => data.subscriberCount(),

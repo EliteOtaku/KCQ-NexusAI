@@ -8,16 +8,31 @@ import {
 
 import type { DrawingPrimitive } from '@/foundation/plugin/index'
 import { LINE_LABEL_NORMAL_OFFSET } from '../../geometry/impl/labelLayout'
-import { createDrawingRendererPlugin } from '../impl/plugin'
+import { createDrawingLayer, createDrawingSessionLayer } from '../impl/plugin'
 import { createDefaultPrimitiveRendererSet } from '../impl/primitiveRendererSet'
 
-describe('createDrawingRendererPlugin', () => {
-  /** 绘图必须写入覆盖画布，避免被帧末提交的 GPU K 线覆盖。 */
-  it('renders primitives on the overlay canvas when available', () => {
+describe('createDrawingLayer', () => {
+  /** 正式图元与会话图元分别写入独立表面，避免被动态清屏和 GPU 覆盖。 */
+  it.each(['committed', 'session'] as const)('renders %s primitives on its own canvas', (scope) => {
     const mainCtx = createMockCanvasContext()
+    const drawingCtx = createMockCanvasContext()
     const overlayCtx = createMockCanvasContext()
     const point = vi.fn()
-    const plugin = createDrawingRendererPlugin({
+    const context = createMockRenderContext({
+      ctx: mainCtx,
+      drawingCtx,
+      overlayCtx,
+      drawingProjection: {
+        primitives: [{ kind: 'point', point: { x: 10, y: 20 } } satisfies DrawingPrimitive],
+        yAxisRanges: [],
+        xAxisRanges: [],
+      },
+      viewport: { scrollLeft: 0, plotWidth: 800, plotHeight: 400 },
+      pane: { height: 400 },
+    })
+    context.sessionDrawingProjection = context.drawingProjection
+    const createLayer = scope === 'committed' ? createDrawingLayer : createDrawingSessionLayer
+    const layer = createLayer({
       renderers: {
         point,
         line: vi.fn(),
@@ -26,26 +41,14 @@ describe('createDrawingRendererPlugin', () => {
         text: vi.fn(),
       },
     })
-    const primitive: DrawingPrimitive = {
-      kind: 'point',
-      point: { x: 10, y: 20 },
-    }
 
-    plugin.draw(
-      createMockRenderContext({
-        ctx: mainCtx,
-        overlayCtx,
-        drawingProjection: {
-          primitives: [primitive],
-          yAxisRanges: [],
-          xAxisRanges: [],
-        },
-        viewport: { scrollLeft: 0, plotWidth: 800, plotHeight: 400 },
-        pane: { height: 400 },
-      }),
+    layer.paint({ ...context, paneId: 'main', clear: false })
+
+    expect(point).toHaveBeenCalledWith(
+      scope === 'committed' ? drawingCtx : overlayCtx,
+      { kind: 'point', point: { x: 10, y: 20 } },
+      1,
     )
-
-    expect(point).toHaveBeenCalledWith(overlayCtx, primitive, 1)
   })
 })
 

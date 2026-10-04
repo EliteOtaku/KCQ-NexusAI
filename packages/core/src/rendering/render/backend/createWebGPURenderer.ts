@@ -1,5 +1,6 @@
-/** WebGPU 后端实现，管理 GPU 资源、帧内批绘制和 compute dispatch。 */
+/** WebGPU 后端实现，管理 GPU 资源、解析 AA 线条与帧内批绘制。 */
 
+import { buildAnalyticLineGeometry } from '../analyticLineGeometry.js'
 import { createFrameMetrics } from '../frameMetrics.js'
 import { prepareLineStripForPhysicalPixels } from '../physicalLine.js'
 import { toPhysicalRegion } from '../physicalRegion.js'
@@ -9,7 +10,6 @@ import type {
   ComputePipelineHandle,
   DispatchComputeParams,
   DrawInstancesParams,
-  DrawLineStrip,
   DrawLinesParams,
   PipelineHandle,
   Renderer,
@@ -23,13 +23,12 @@ import {
   GPU_TEXTURE_RENDER_ATTACHMENT,
 } from '../webgpuGlobals.js'
 import { createWebGPUResourceTable } from '../webgpuResourceTable.js'
-import { buildWideLineGeometry } from '../wideLineGeometry.js'
 import {
   createWebGPUSurfaceBackend,
   type WebGPUSurfaceBackend,
 } from './createWebGPUSurfaceBackend.js'
 
-type PipelineType = 'candle' | 'line' | 'fill'
+type PipelineType = 'candle' | 'line'
 
 type BufferRecord = {
   buffer: GPUBuffer
@@ -90,22 +89,25 @@ struct Uniforms {
   scrollLeft: f32,
   color: vec4f,
 }
-
-@group(0) @binding(0) var<uniform> uniforms: Uniforms;
-
-@vertex
-fn vertexMain(@location(0) point: vec2f) -> @builtin(position) vec4f {
-  let position = vec2f(
-    (point.x - uniforms.scrollLeft) * uniforms.dpr,
-    point.y * uniforms.dpr,
-  );
-  let clip = vec2f(position.x / uniforms.resolution.x * 2.0 - 1.0, 1.0 - position.y / uniforms.resolution.y * 2.0);
-  return vec4f(clip, 0.0, 1.0);
+struct VertexOutput {
+  @builtin(position) position: vec4f,
+  @location(0) edge: vec2f,
 }
-
+@group(0) @binding(0) var<uniform> uniforms: Uniforms;
+@vertex
+fn vertexMain(@location(0) point: vec2f, @location(1) edge: vec2f) -> VertexOutput {
+  let position = vec2f((point.x - uniforms.scrollLeft) * uniforms.dpr, point.y * uniforms.dpr);
+  let clip = vec2f(position.x / uniforms.resolution.x * 2.0 - 1.0, 1.0 - position.y / uniforms.resolution.y * 2.0);
+  var output: VertexOutput;
+  output.position = vec4f(clip, 0.0, 1.0);
+  output.edge = edge;
+  return output;
+}
 @fragment
-fn fragmentMain() -> @location(0) vec4f {
-  return uniforms.color;
+fn fragmentMain(input: VertexOutput) -> @location(0) vec4f {
+  let aa = max(fwidth(input.edge.x), 1e-4);
+  let coverage = clamp((input.edge.y - abs(input.edge.x)) / aa + 0.5, 0.0, 1.0);
+  return uniforms.color * coverage;
 }
 `
 
@@ -169,15 +171,6 @@ function parseColor(value: unknown): readonly [number, number, number, number] |
   return [rgba[0] * rgba[3], rgba[1] * rgba[3], rgba[2] * rgba[3], rgba[3]]
 }
 
-function linePoints(strip: DrawLineStrip): Float32Array {
-  const values = new Float32Array(strip.points.length * 2)
-  for (let index = 0; index < strip.points.length; index++) {
-    values[index * 2] = strip.points[index]!.x
-    values[index * 2 + 1] = strip.points[index]!.y
-  }
-  return values
-}
-
 export async function createWebGPURenderer(
   options: CreateWebGPURendererOptions = {},
 ): Promise<Renderer> {
@@ -200,6 +193,7 @@ export async function createWebGPURenderer(
         pipeline: GPURenderPipeline
         instanceBuffer: GPUBuffer
         instanceCount: number
+        physicalPixels: boolean
         color: unknown
         scrollLeft: number
       }
@@ -232,7 +226,6 @@ export async function createWebGPURenderer(
     dpr: number
     scrollLeft: number
     scrollSensitive: boolean
-    wide: boolean
     vertexCount: number
     buffer: GPUBuffer
   }
@@ -330,13 +323,17 @@ export async function createWebGPURenderer(
     return record
   }
 
-  function getPipeline(kind: 'candle' | 'line-strip' | 'line-wide' | 'fill'): GPURenderPipeline {
+  function getPipeline(kind: PipelineType): GPURenderPipeline {
     const cached = pipelineCache.get(kind)
     if (cached) return cached
     const isCandle = kind === 'candle'
-    const module = device.createShaderModule({ code: isCandle ? RECT_SHADER : LINE_SHADER })
-    const topology: GPUPrimitiveTopology =
-      kind === 'line-strip' ? 'line-strip' : kind === 'fill' ? 'triangle-strip' : 'triangle-list'
+    const attributes: GPUVertexAttribute[] = [
+      { shaderLocation: 0, offset: 0, format: isCandle ? 'float32x4' : 'float32x2' },
+    ]
+    if (!isCandle) attributes.push({ shaderLocation: 1, offset: 8, format: 'float32x2' })
+    const module = device.createShaderModule({
+      code: isCandle ? RECT_SHADER : LINE_SHADER,
+    })
     const pipeline = device.createRenderPipeline({
       layout: 'auto',
       vertex: {
@@ -344,15 +341,9 @@ export async function createWebGPURenderer(
         entryPoint: 'vertexMain',
         buffers: [
           {
-            arrayStride: isCandle ? 16 : 8,
+            arrayStride: 16,
             stepMode: isCandle ? 'instance' : 'vertex',
-            attributes: [
-              {
-                shaderLocation: 0,
-                offset: 0,
-                format: isCandle ? 'float32x4' : 'float32x2',
-              },
-            ],
+            attributes,
           },
         ],
       },
@@ -361,7 +352,7 @@ export async function createWebGPURenderer(
         entryPoint: 'fragmentMain',
         targets: [{ format, blend: BLEND }],
       },
-      primitive: { topology },
+      primitive: { topology: 'triangle-list' },
       multisample: { count: 4 },
     })
     pipelineCache.set(kind, pipeline)
@@ -391,13 +382,14 @@ export async function createWebGPURenderer(
     colorValue: unknown,
     scrollLeft: number,
     region: import('../SurfaceBackend.js').SurfaceRegion,
+    physicalPixels = false,
   ): { bindGroup: GPUBindGroup } | null {
     const color = parseColor(colorValue ?? '#000000')
     if (!color) return null
     const values = new Float32Array([
       Math.round(region.width * region.dpr),
       Math.round(region.height * region.dpr),
-      region.dpr,
+      physicalPixels ? 1 : region.dpr,
       scrollLeft,
       color[0],
       color[1],
@@ -414,43 +406,11 @@ export async function createWebGPURenderer(
     return { bindGroup }
   }
 
-  function beginPass(
-    encoder: GPUCommandEncoder,
-    region: import('../SurfaceBackend.js').SurfaceRegion,
-    loadOp: 'clear' | 'load',
-  ): GPURenderPassEncoder | null {
-    const view = rawSurface.getCurrentTextureView()
-    const msaaView = ensureMsaaView()
-    if (!view || !msaaView) return null
-    const pass = encoder.beginRenderPass({
-      colorAttachments: [
-        {
-          view: msaaView,
-          resolveTarget: view,
-          clearValue: { r: 0, g: 0, b: 0, a: 0 },
-          loadOp,
-          storeOp: 'store',
-        },
-      ],
-    })
-    const { x, y, width, height } = toPhysicalRegion(region, {
-      width: canvas.width,
-      height: canvas.height,
-    })
-    if (width <= 0 || height <= 0) {
-      pass.end()
-      return null
-    }
-    pass.setViewport(x, y, width, height, 0, 1)
-    pass.setScissorRect(x, y, width, height)
-    return pass
-  }
-
   function regionKey(region: import('../SurfaceBackend.js').SurfaceRegion): string {
     return `${region.x},${region.y},${region.width},${region.height},${region.dpr}`
   }
 
-  function flushPendingDraws(options?: { composite?: boolean }): void {
+  function flushPendingDraws(): void {
     const hadDraws = pendingDraws.length > 0
     const shouldSubmit = hadDraws || frameClearRequested
     if (shouldSubmit) {
@@ -493,7 +453,13 @@ export async function createWebGPURenderer(
             pass.setScissorRect(x, y, width, height)
 
             for (const draw of draws) {
-              const uniform = createUniform(draw.pipeline, draw.color, draw.scrollLeft, draw.region)
+              const uniform = createUniform(
+                draw.pipeline,
+                draw.color,
+                draw.scrollLeft,
+                draw.region,
+                draw.kind === 'instances' && draw.physicalPixels,
+              )
               if (!uniform) continue
               pass.setPipeline(draw.pipeline)
               if (draw.kind === 'instances') {
@@ -519,28 +485,15 @@ export async function createWebGPURenderer(
     retireBuffers()
     frameClearRequested = false
 
-    if (options?.composite) {
-      if (metricsFrameOpen || hadDraws) {
-        openMetricsFrame()
-        metrics.recordComposite()
-      }
-    }
-
-    // endFrame 收口：prune 未 touch 的 strip 资源；composite 中途 flush 保持 frame open
-    if (!options?.composite && metricsFrameOpen) {
+    // endFrame 结束：prune 未 touch 的 strip 资源
+    if (metricsFrameOpen) {
       pruneUnusedStripKeys()
       metrics.endFrame()
       metricsFrameOpen = false
     }
   }
 
-  // M2：compositeTo 为 no-op（可见 GPU canvas）；仅 endFrame submit
-  const surface: WebGPUSurfaceBackend = {
-    ...rawSurface,
-    compositeTo(_targetCtx, _region, _compositeOptions) {
-      // 禁止中途 flush，保证每 chart 帧单次 queue.submit
-    },
-  }
+  const surface: WebGPUSurfaceBackend = rawSurface
 
   const renderer: Renderer = {
     surface,
@@ -578,7 +531,7 @@ export async function createWebGPURenderer(
     createPipeline(descriptor): PipelineHandle {
       if (disposed) throw new Error('Renderer is disposed')
       const type = (descriptor as { type?: PipelineType })?.type
-      if (type !== 'candle' && type !== 'line' && type !== 'fill') {
+      if (type !== 'candle' && type !== 'line') {
         throw new Error('Unsupported WebGPU pipeline type')
       }
       const handle = {}
@@ -621,7 +574,8 @@ export async function createWebGPURenderer(
           instanceBuffer: instanceRecord.buffer,
           instanceCount: params.instanceCount,
           color: params.uniforms?.color,
-          scrollLeft: (params.uniforms?.scrollLeft as number) ?? 0,
+          physicalPixels: params.physicalPixels === true,
+          scrollLeft: params.physicalPixels ? 0 : ((params.uniforms?.scrollLeft as number) ?? 0),
         })
         return true
       } catch {
@@ -666,10 +620,11 @@ export async function createWebGPURenderer(
             }
             if (!cached) {
               const physicalStrip = prepareLineStripForPhysicalPixels(strip, dpr, scrollLeft)
-              const wide = (physicalStrip.width ?? 1) * dpr > 1
-              const values = wide
-                ? buildWideLineGeometry(physicalStrip.points, physicalStrip.width ?? 1)
-                : linePoints(physicalStrip)
+              const values = buildAnalyticLineGeometry(
+                physicalStrip.points,
+                physicalStrip.width ?? 1,
+                dpr,
+              )
               if (!values) return false
               const uploaded = resourceTable.ensureUploadedOwnedExact({
                 key,
@@ -693,8 +648,7 @@ export async function createWebGPURenderer(
                 dpr,
                 scrollLeft,
                 scrollSensitive: vertical && !horizontal,
-                wide,
-                vertexCount: values.length / 2,
+                vertexCount: values.length / 4,
                 buffer: uploaded.buffer,
               }
               stripGeometry.set(key, cached)
@@ -704,7 +658,7 @@ export async function createWebGPURenderer(
             pendingDraws.push({
               kind: 'lines',
               region: { ...currentRegion },
-              pipeline: getPipeline(cached.wide ? 'line-wide' : 'line-strip'),
+              pipeline: getPipeline('line'),
               vertexBuffer: cached.buffer,
               vertexCount: cached.vertexCount,
               color: strip.color,
@@ -713,20 +667,7 @@ export async function createWebGPURenderer(
           }
           return true
         }
-
-        if (pipelineRecord.type !== 'fill' || !params.vertices || !params.vertexCount) return false
-        const vertexRecord = buffers.get(params.vertices as object)
-        if (!vertexRecord || params.vertexCount < 3) return false
-        pendingDraws.push({
-          kind: 'lines',
-          region: { ...currentRegion },
-          pipeline: getPipeline('fill'),
-          vertexBuffer: vertexRecord.buffer,
-          vertexCount: params.vertexCount,
-          color: params.uniforms?.color,
-          scrollLeft: (params.uniforms?.scrollLeft as number) ?? 0,
-        })
-        return true
+        return false
       } catch {
         return false
       }

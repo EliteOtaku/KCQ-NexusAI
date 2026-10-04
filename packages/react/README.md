@@ -85,7 +85,7 @@ For full setup including the data backend, see the [root README]../../README.md)
 
 ## 📖 More Documentation
 
-- [Rendering Pipeline](../../docs/rendering-pipeline.md) - Current paint path: FrameTransaction, Scene/Layer, Renderer backends
+- [Rendering Pipeline](../../docs/rendering/rendering-pipeline.md) - Current paint path: FrameTransaction, Scene/Layer, Renderer backends
 
 
 ## 🗺️ Roadmap
@@ -117,5 +117,5 @@ For full setup including the data backend, see the [root README]../../README.md)
 
 ## 📄 License
 
-[MIT](LICENSE)
+[Apache-2.0](LICENSE)
 

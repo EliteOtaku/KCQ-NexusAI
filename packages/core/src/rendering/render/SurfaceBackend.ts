@@ -1,8 +1,8 @@
 /**
  * 底层 GPU surface 后端接口。
  *
- * 抽象 canvas 与 context 的生命周期、viewport/scissor 区域、清屏、可选合成到 2D
- * canvas，以及销毁。WebGL / WebGPU canvas 均可直接作为可见 DOM 图层。
+ * 抽象 canvas 与 context 的生命周期、viewport/scissor 区域、清屏，以及销毁。
+ * WebGL / WebGPU canvas 均可直接作为可见 DOM 图层。
  *
  * 本文件是**纯接口**，不含实现，目的是：
  *
@@ -13,7 +13,6 @@
  * 设计说明：
  * - 所有 region 坐标都是**逻辑像素**，DPR 缩放由 surface 内部处理（与
  *   WebGLRegion 语义一致）。
- * - `compositeTo` 是兼容入口；可见 GPU canvas 路径不调用它。
  */
 
 export type SurfaceRegion = {
@@ -29,18 +28,13 @@ export type SurfaceRegion = {
   dpr: number
 }
 
-export type CompositeOptions = {
-  /** multiplied into the destination context's globalAlpha (0..1) */
-  alpha?: number
-  /** if false, blocks `imageSmoothingEnabled` during the drawImage */
-  imageSmoothingEnabled?: boolean
-}
-
 /**
  * One GPU surface (WebGL2 today, WebGPU in P1). Stateless w.r.t. drawing
  * primitives — those belong to `Renderer`.
  */
 export interface SurfaceBackend {
+  /** 可见 GPU 表面的取帧能力；调用方必须在完整绘制帧结束、呈现前调用。 */
+  captureFrame?(): Promise<HTMLCanvasElement>
   /** Returns false if the underlying context could not be initialised. */
   isAvailable(): boolean
 
@@ -61,20 +55,6 @@ export interface SurfaceBackend {
    * 清空指定区域到透明黑色。实现可同时清空离屏 target 和可见 surface。
    */
   clearRegion(region: SurfaceRegion): void
-
-  /**
-   * Copy the contents of `region` (in surface coordinates) onto the
-   * provided 2D context at its current origin. Used to composite GPU
-   * output into the final 2D overlay canvas the user sees.
-   *
-   * Implementations MUST restore any context state they mutate
-   * (`globalAlpha`, `imageSmoothingEnabled`, transform).
-   */
-  compositeTo(
-    targetCtx: CanvasRenderingContext2D,
-    region: SurfaceRegion,
-    options?: CompositeOptions,
-  ): void
 
   /**
    * Tear down GPU resources. After dispose, all other methods become no-ops.

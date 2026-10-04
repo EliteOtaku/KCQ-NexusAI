@@ -18,14 +18,7 @@ import type {
 import type { SurfaceBackend, SurfaceRegion } from '../SurfaceBackend.js'
 
 type WebGLPipelineDescriptor = {
-  type: 'candle' | 'line' | 'fill'
-}
-
-type WebGLDrawUniforms = {
-  color?: string
-  scrollLeft?: number
-  lineWidth?: number
-  alpha?: number
+  type: 'candle' | 'line'
 }
 
 interface BufferRecord {
@@ -35,7 +28,7 @@ interface BufferRecord {
 }
 
 interface PipelineRecord {
-  type: 'candle' | 'line' | 'fill'
+  type: 'candle' | 'line'
 }
 
 const handleCaps: RendererCapabilities = {
@@ -43,10 +36,6 @@ const handleCaps: RendererCapabilities = {
   storageBuffer: false,
   maxInstances: 1_000_000,
   name: 'webgl2',
-}
-
-function toWebGLRegion(r: SurfaceRegion) {
-  return r as { x: number; y: number; width: number; height: number; dpr: number }
 }
 
 export function createWebGLRenderer(surface: SurfaceBackend, gl: SharedWebGLSurface): Renderer {
@@ -177,11 +166,11 @@ export function createWebGLRenderer(surface: SurfaceBackend, gl: SharedWebGLSurf
       currentRegion = { ...region }
       surface.bindRegion(region)
       if (candleSurface) {
-        candleSurface.setRegion(toWebGLRegion(region))
+        candleSurface.setRegion(region)
         candleSurface.resize(region.width, region.height, region.dpr)
       }
       if (lineSurface) {
-        lineSurface.setRegion(toWebGLRegion(region))
+        lineSurface.setRegion(region)
         lineSurface.resize(region.width, region.height, region.dpr)
       }
     },
@@ -204,8 +193,10 @@ export function createWebGLRenderer(surface: SurfaceBackend, gl: SharedWebGLSurf
       // candle 路径 fail-closed：无 surface 则 false，由业务层 2D 兜底
       if (!candleSurface) return false
       const dpr = currentRegion?.dpr ?? 1
-      const screenRects = projectRectsToScreen(floats, rectCount, scrollLeft, dpr)
-      return candleSurface.drawRectBuffer(screenRects, rectCount, color, 0)
+      const screenRects = params.physicalPixels
+        ? floats
+        : projectRectsToScreen(floats, rectCount, scrollLeft, dpr)
+      return candleSurface.drawRectBuffer(screenRects, rectCount, color, 0, params.physicalPixels)
     },
 
     drawLines(params: DrawLinesParams): boolean {
@@ -217,16 +208,15 @@ export function createWebGLRenderer(surface: SurfaceBackend, gl: SharedWebGLSurf
       // 折线/填充 fail-closed：无 surface 则 false，由业务层 2D 兜底
       if (!lineSurface) return false
 
-      // 批量 strips：一次 drawLineStrips（单次 MSAA clear），多周期 MA 必须走此路径
+      // 批量 strips 共用一次几何上传；MSAA clear 与 resolve 由帧边界负责。
       if (params.strips && params.strips.length > 0) {
-        if (pipelineMeta_rec.type === 'fill') return false
         const dpr = currentRegion?.dpr ?? 1
         const lines = params.strips
           .filter((s) => s.points.length >= 2)
           .map((s) => {
             const physical = prepareLineStripForPhysicalPixels(s, dpr, scrollLeft)
             return {
-              points: physical.points.map((p) => ({ x: p.x, y: p.y })),
+              points: physical.points,
               color: physical.color,
               width: physical.width ?? 1,
             }
@@ -240,19 +230,6 @@ export function createWebGLRenderer(surface: SurfaceBackend, gl: SharedWebGLSurf
       if (!vertexMeta || !vertexMeta.data) return false
 
       const color = (params.uniforms?.color as string) ?? '#000000'
-
-      if (pipelineMeta_rec.type === 'fill') {
-        const floats = new Float32Array(vertexMeta.data, 0, params.vertexCount * 2)
-        const pointCount = Math.floor(params.vertexCount / 2)
-        const upperPoints: Array<{ x: number; y: number }> = []
-        const lowerPoints: Array<{ x: number; y: number }> = []
-        for (let i = 0; i < pointCount; i++) {
-          const offset = i * 4
-          upperPoints.push({ x: floats[offset]!, y: floats[offset + 1]! })
-          lowerPoints.push({ x: floats[offset + 2]!, y: floats[offset + 3]! })
-        }
-        return lineSurface.drawFilledBand({ upperPoints, lowerPoints }, color, scrollLeft)
-      }
 
       const floats = new Float32Array(vertexMeta.data, 0, params.vertexCount * 2)
       const points: Array<{ x: number; y: number }> = []

@@ -1,7 +1,7 @@
 // 验证 Provider 装配器的领域映射、能力断言、时区解析与 probe 容错
 import { describe, expect, it } from 'vitest'
 import type { InstrumentDescriptor } from '../../types'
-import { createMarketDataProvider } from '../provider'
+import { createMarketDataProvider } from '../impl/provider'
 import type {
   MarketDataTransport,
   ProtocolBarSeries,
@@ -98,6 +98,10 @@ describe('createMarketDataProvider', () => {
     await expect(
       provider.catalog!.search({ keyword: '茅台', limit: 10, assetClasses: ['index'] }),
     ).resolves.toEqual([])
+    // unknown 不参与筛选：带 unknown 的请求按无条件处理，返回全部品种。
+    await expect(
+      provider.catalog!.search({ keyword: '茅台', limit: 10, assetClasses: ['unknown'] }),
+    ).resolves.toEqual([instrument])
   })
 
   // 验证 K 线请求完成字段映射，并兜底推断 CN 非指数品种的成交量单位

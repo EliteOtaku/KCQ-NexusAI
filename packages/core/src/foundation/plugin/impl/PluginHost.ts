@@ -1,7 +1,7 @@
 /**
  * 插件宿主 - 核心管理类
  */
-import { KLineChartError } from '@/errors.js'
+import { GENERIC_ERROR_CODES, KLineChartError } from '@/errors.js'
 import type {
   BaseIndicatorState,
   HookCallOptions,
@@ -25,6 +25,9 @@ export class PluginHostImpl implements PluginHost {
   private stateStore: StateStore
   private services = new Map<string, unknown>()
   private isDestroyed = false
+  private isDestroying = false
+  private operations: Promise<void> = Promise.resolve()
+  private destruction: Promise<void> | undefined
   private logger: PluginLogger
 
   constructor(logger?: PluginLogger) {
@@ -135,10 +138,25 @@ export class PluginHostImpl implements PluginHost {
    * 安装插件
    */
   async use(plugin: Plugin, config?: PluginConfig): Promise<void> {
-    this.ensureNotDestroyed()
+    return this.enqueue(() => this.installPlugin(plugin, config))
+  }
 
+  /** 顺序执行插件生命周期，销毁等待已接受的操作完成。 */
+  private enqueue(operation: () => Promise<void>): Promise<void> {
+    this.ensureNotDestroyed()
+    const result = this.operations.then(operation)
+    // 单个操作的错误仍交给调用方；队列继续接收后续清理操作。
+    this.operations = result.catch(() => {})
+    return result
+  }
+
+  /** 安装定义并执行安装钩子，失败状态由注册表记录。 */
+  private async installPlugin(plugin: Plugin, config?: PluginConfig): Promise<void> {
     if (this.registry.has(plugin.name)) {
-      throw new KLineChartError('INVALID_STATE', `Plugin "${plugin.name}" is already installed`)
+      throw new KLineChartError(
+        GENERIC_ERROR_CODES.INVALID_STATE,
+        `Plugin "${plugin.name}" is already installed`,
+      )
     }
 
     try {
@@ -178,11 +196,17 @@ export class PluginHostImpl implements PluginHost {
    * 移除插件
    */
   async remove(name: string): Promise<void> {
-    this.ensureNotDestroyed()
+    return this.enqueue(() => this.uninstallPlugin(name))
+  }
 
+  /** 卸载指定插件并清理配置。 */
+  private async uninstallPlugin(name: string): Promise<void> {
     const descriptor = this.registry.get(name)
     if (!descriptor) {
-      throw new KLineChartError('INVALID_STATE', `Plugin "${name}" is not installed`)
+      throw new KLineChartError(
+        GENERIC_ERROR_CODES.INVALID_STATE,
+        `Plugin "${name}" is not installed`,
+      )
     }
 
     try {
@@ -225,9 +249,15 @@ export class PluginHostImpl implements PluginHost {
   /**
    * 销毁宿主
    */
-  async destroy(): Promise<void> {
-    if (this.isDestroyed) return
+  destroy(): Promise<void> {
+    if (this.destruction) return this.destruction
+    this.isDestroying = true
+    this.destruction = this.operations.then(() => this.disposeHost())
+    return this.destruction
+  }
 
+  /** 在安装和移除操作结束后，卸载剩余插件并释放宿主资源。 */
+  private async disposeHost(): Promise<void> {
     // 卸载所有插件
     for (const descriptor of this.registry.getAll()) {
       try {
@@ -251,8 +281,8 @@ export class PluginHostImpl implements PluginHost {
   }
 
   private ensureNotDestroyed(): void {
-    if (this.isDestroyed) {
-      throw new KLineChartError('DISPOSED', 'PluginHost has been destroyed')
+    if (this.isDestroyed || this.isDestroying) {
+      throw new KLineChartError(GENERIC_ERROR_CODES.DISPOSED, 'PluginHost has been destroyed')
     }
   }
 }

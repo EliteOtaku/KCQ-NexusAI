@@ -2,9 +2,9 @@
 
 import { describe, expect, it, vi } from 'vitest'
 
+import * as analyticLineGeometry from '../analyticLineGeometry'
 import { createWebGPURenderer } from '../backend/createWebGPURenderer'
 import { createFrameMetrics, getFrameMetrics, resetFrameMetrics } from '../frameMetrics'
-import * as wideLineGeometry from '../wideLineGeometry'
 import { createMockWebGPU } from './helpers/webgpuTestKit'
 
 describe('createWebGPURenderer', () => {
@@ -115,47 +115,60 @@ describe('createWebGPURenderer', () => {
     expect(fake.buffers[0]?.destroy).toHaveBeenCalledOnce()
   })
 
-  it('draws rectangle instances into an MSAA region', async () => {
-    const fake = createMockWebGPU()
-    const renderer = await createWebGPURenderer({
-      gpu: fake.gpu,
-      canvas: fake.canvas,
-    })
-    renderer.surface.resize(200, 100, 2)
-    renderer.beginFrame({ x: 10, y: 5, width: 80, height: 40, dpr: 2 })
-    const vertices = renderer.createBuffer('vertex', 4)
-    const instances = renderer.createBuffer('instance', 16)
-    const pipeline = renderer.createPipeline({ type: 'candle' })
+  it.each([false, true])(
+    'draws rectangles into an MSAA region with physicalPixels=%s',
+    async (physicalPixels) => {
+      const fake = createMockWebGPU()
+      const renderer = await createWebGPURenderer({
+        gpu: fake.gpu,
+        canvas: fake.canvas,
+      })
+      renderer.surface.resize(200, 100, 2)
+      renderer.beginFrame({ x: 10, y: 5, width: 80, height: 40, dpr: 2 })
+      const vertices = renderer.createBuffer('vertex', 4)
+      const instances = renderer.createBuffer('instance', 16)
+      const pipeline = renderer.createPipeline({ type: 'candle' })
 
-    const drawn = renderer.drawInstances({
-      pipeline,
-      vertices,
-      instances,
-      instanceCount: 3,
-      vertexCount: 6,
-      uniforms: { color: '#ff0000', scrollLeft: 4 },
-    })
+      const drawn = renderer.drawInstances({
+        pipeline,
+        vertices,
+        instances,
+        instanceCount: 3,
+        vertexCount: 6,
+        physicalPixels,
+        uniforms: { color: '#ff0000', scrollLeft: 4 },
+      })
 
-    expect(drawn).toBe(true)
-    expect(fake.queue.submit).not.toHaveBeenCalled()
-    renderer.endFrame()
-    expect(fake.device.createTexture).toHaveBeenCalledWith(
-      expect.objectContaining({ sampleCount: 4, format: 'bgra8unorm' }),
-    )
-    expect(fake.passes[0]?.setViewport).toHaveBeenCalledWith(20, 10, 160, 80, 0, 1)
-    expect(fake.passes[0]?.setScissorRect).toHaveBeenCalledWith(20, 10, 160, 80)
-    expect(fake.passes[0]?.draw).toHaveBeenCalledWith(6, 3)
-    expect(fake.queue.submit).toHaveBeenCalledOnce()
+      expect(drawn).toBe(true)
+      expect(fake.queue.submit).not.toHaveBeenCalled()
+      renderer.endFrame()
+      expect(fake.device.createTexture).toHaveBeenCalledWith(
+        expect.objectContaining({ sampleCount: 4, format: 'bgra8unorm' }),
+      )
+      expect(fake.passes[0]?.setViewport).toHaveBeenCalledWith(20, 10, 160, 80, 0, 1)
+      expect(fake.passes[0]?.setScissorRect).toHaveBeenCalledWith(20, 10, 160, 80)
+      expect(fake.passes[0]?.draw).toHaveBeenCalledWith(6, 3)
+      expect(fake.queue.submit).toHaveBeenCalledOnce()
 
-    const uniformWrite = fake.queue.writeBuffer.mock.calls.find((call) => call[4] === 32)
-    expect(uniformWrite).toBeDefined()
-    expect(
-      Array.from(new Float32Array(uniformWrite![2] as ArrayBuffer, uniformWrite![3], 8)),
-    ).toEqual([160, 80, 2, 4, 1, 0, 0, 1])
-    expect(fake.shaderModules[0]!.code).toContain(
-      'round((rect.x - uniforms.scrollLeft) * uniforms.dpr)',
-    )
-  })
+      const uniformWrite = fake.queue.writeBuffer.mock.calls.find((call) => call[4] === 32)
+      expect(uniformWrite).toBeDefined()
+      const uniformData = uniformWrite?.[2]
+      if (!(uniformData instanceof ArrayBuffer)) throw new Error('Missing uniform data')
+      expect(Array.from(new Float32Array(uniformData, uniformWrite?.[3], 8))).toEqual([
+        160,
+        80,
+        physicalPixels ? 1 : 2,
+        physicalPixels ? 0 : 4,
+        1,
+        0,
+        0,
+        1,
+      ])
+      expect(fake.shaderModules[0]!.code).toContain(
+        'round((rect.x - uniforms.scrollLeft) * uniforms.dpr)',
+      )
+    },
+  )
 
   it('submits a transparent clear for a main frame with no GPU draws', async () => {
     const fake = createMockWebGPU()
@@ -352,6 +365,17 @@ describe('createWebGPURenderer', () => {
     expect(fake.passes).toHaveLength(1)
     expect(fake.passes[0]?.draw).toHaveBeenCalledTimes(2)
     const uniformWrites = fake.queue.writeBuffer.mock.calls.filter((call) => call[4] === 32)
+    expect(fake.pipelineDescriptors).toHaveLength(1)
+    expect(fake.pipelineDescriptors[0]?.primitive?.topology).toBe('triangle-list')
+    expect(fake.pipelineDescriptors[0]?.vertex.buffers?.[0]).toMatchObject({
+      arrayStride: 16,
+      attributes: [
+        { shaderLocation: 0, offset: 0, format: 'float32x2' },
+        { shaderLocation: 1, offset: 8, format: 'float32x2' },
+      ],
+    })
+    expect(fake.passes[0]?.draw).toHaveBeenNthCalledWith(1, 6, 1)
+    expect(fake.shaderModules[0]?.code).toContain('uniforms.color * coverage')
     expect(uniformWrites).toHaveLength(2)
     for (const call of uniformWrites) {
       expect(new Float32Array(call[2] as ArrayBuffer)[3]).toBe(12)
@@ -359,7 +383,7 @@ describe('createWebGPURenderer', () => {
     expect(fake.queue.submit).toHaveBeenCalledOnce()
   })
 
-  it('uses triangle-strip for filled bands and reports device loss', async () => {
+  it('reports device loss', async () => {
     const fake = createMockWebGPU()
     const onDeviceLost = vi.fn()
     const renderer = await createWebGPURenderer({
@@ -368,15 +392,6 @@ describe('createWebGPURenderer', () => {
       onDeviceLost,
     })
     renderer.surface.resize(100, 100, 1)
-    renderer.beginFrame({ x: 0, y: 0, width: 100, height: 100, dpr: 1 })
-    const vertices = renderer.createBuffer('vertex', 32)
-    const pipeline = renderer.createPipeline({ type: 'fill' })
-
-    expect(renderer.drawLines({ pipeline, vertices, vertexCount: 4 })).toBe(true)
-    renderer.endFrame()
-    expect(
-      fake.pipelineDescriptors.some((item) => item.primitive?.topology === 'triangle-strip'),
-    ).toBe(true)
 
     const info: GPUDeviceLostInfo = { reason: 'unknown', message: 'device reset' }
     fake.lost.resolve(info)
@@ -410,9 +425,9 @@ describe('createWebGPURenderer', () => {
     expect(renderer.drawLines({ pipeline, strips, uniforms: { scrollLeft: 0 } })).toBe(true)
     renderer.endFrame()
     const createsAfterFirst = fake.device.createBuffer.mock.calls.length
-    // strip 点列 4 floats = 16 bytes；uniform 为 32 bytes
+    // 解析 AA 每段 6 顶点 × 4 floats = 96 bytes；uniform 为 32 bytes。
     const vertexWritesAfterFirst = fake.queue.writeBuffer.mock.calls.filter(
-      (c) => c[4] === 16,
+      (c) => c[4] === 96,
     ).length
     const uniformWritesAfterFirst = fake.queue.writeBuffer.mock.calls.filter(
       (c) => c[4] === 32,
@@ -424,7 +439,8 @@ describe('createWebGPURenderer', () => {
 
     // 几何未变：strip vertex 不新建、不重传；uniform 仍写
     expect(fake.device.createBuffer.mock.calls.length).toBe(createsAfterFirst)
-    expect(fake.queue.writeBuffer.mock.calls.filter((c) => c[4] === 16).length).toBe(
+    expect(vertexWritesAfterFirst).toBe(1)
+    expect(fake.queue.writeBuffer.mock.calls.filter((c) => c[4] === 96).length).toBe(
       vertexWritesAfterFirst,
     )
     expect(fake.queue.writeBuffer.mock.calls.filter((c) => c[4] === 32).length).toBeGreaterThan(
@@ -433,10 +449,10 @@ describe('createWebGPURenderer', () => {
     expect(getFrameMetrics().queueSubmitCount).toBe(1)
   })
 
-  it('skips wide line expansion for equal points and rebuilds after changes', async () => {
+  it('reuses analytic line geometry for equal points and rebuilds after changes', async () => {
     const fake = createMockWebGPU()
     const renderer = await createWebGPURenderer({ gpu: fake.gpu, canvas: fake.canvas })
-    const expand = vi.spyOn(wideLineGeometry, 'buildWideLineGeometry')
+    const expand = vi.spyOn(analyticLineGeometry, 'buildAnalyticLineGeometry')
     renderer.surface.resize(100, 100, 1)
     const pipeline = renderer.createPipeline({ type: 'line' })
     const region = { x: 0, y: 0, width: 100, height: 100, dpr: 1 }

@@ -23,11 +23,6 @@ export type WebGLRegion = {
   dpr: number
 }
 
-export type WebGLCompositeOptions = {
-  alpha?: number
-  imageSmoothingEnabled?: boolean
-}
-
 export type PhysicalRegion = {
   sourceX: number
   sourceY: number
@@ -171,43 +166,6 @@ export class SharedWebGLSurface {
     gl.clear(gl.COLOR_BUFFER_BIT)
   }
 
-  compositeRegionTo(
-    ctx: CanvasRenderingContext2D,
-    region: WebGLRegion,
-    options: WebGLCompositeOptions = {},
-  ): void {
-    const physical = this.toPhysicalRegion(region)
-    if (!physical || physical.widthPx <= 0 || physical.heightPx <= 0) return
-
-    const prevImageSmoothingEnabled = ctx.imageSmoothingEnabled
-    const prevGlobalAlpha = ctx.globalAlpha
-    const prevTransform = ctx.getTransform()
-
-    if (options.imageSmoothingEnabled !== undefined) {
-      ctx.imageSmoothingEnabled = options.imageSmoothingEnabled
-    }
-    if (options.alpha !== undefined) {
-      ctx.globalAlpha = prevGlobalAlpha * options.alpha
-    }
-
-    ctx.setTransform(1, 0, 0, 1, 0, 0)
-    ctx.drawImage(
-      this.canvas,
-      physical.sourceX,
-      physical.sourceY,
-      physical.widthPx,
-      physical.heightPx,
-      0,
-      0,
-      physical.widthPx,
-      physical.heightPx,
-    )
-    ctx.setTransform(prevTransform)
-
-    ctx.globalAlpha = prevGlobalAlpha
-    ctx.imageSmoothingEnabled = prevImageSmoothingEnabled
-  }
-
   private getPhysicalBounds(): { width: number; height: number } {
     return { width: this.canvas.width, height: this.canvas.height }
   }
@@ -240,7 +198,8 @@ export class SharedWebGLSurface {
         depth: false,
         stencil: false,
         premultipliedAlpha: true,
-        preserveDrawingBuffer: false,
+        // 跳过静态帧时浏览器仍需展示上一帧 resolve 的像素。
+        preserveDrawingBuffer: true,
       })
     } catch {
       return null

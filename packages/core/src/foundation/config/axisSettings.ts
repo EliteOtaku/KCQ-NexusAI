@@ -64,14 +64,14 @@ export function resolveRightAxisDisplayFromType(type: unknown): AxisDisplaySetti
 
 /**
  * 当前轴应展示的标签语义。
- * 分时强制左百分比、右价格；比较视图右轴默认百分比，用户选 none 仍隐藏。
+ * 分时强制左价格、右百分比；比较视图右轴默认百分比，用户选 none 仍隐藏。
  */
 export function resolveEffectiveAxisDisplay(
   side: 'left' | 'right',
   input: EffectiveAxisDisplayInput,
 ): AxisDisplaySetting {
   if (isTimeSharePeriod(input.period))
-    return side === 'left' ? AXIS_DISPLAY.PERCENT : AXIS_DISPLAY.PRICE
+    return side === 'left' ? AXIS_DISPLAY.PRICE : AXIS_DISPLAY.PERCENT
   const rightDisplay = resolveRightAxisDisplayFromType(input.rightTypeSetting)
   if (input.comparisonActive && side === 'right') {
     return rightDisplay === AXIS_DISPLAY.NONE ? AXIS_DISPLAY.NONE : AXIS_DISPLAY.PERCENT
@@ -79,17 +79,14 @@ export function resolveEffectiveAxisDisplay(
   return side === 'left' ? (input.leftSetting ?? AXIS_DISPLAY.NONE) : rightDisplay
 }
 
-/** 按坐标偏好生成各 pane 的生效刻度；percent 只作用于价格 pane */
+/** 主图坐标偏好只作用于价格 Pane；副图独立使用线性默认值。 */
 export function buildPaneScaleTypesFromSetting(
   paneRoles: ReadonlyArray<{ id: string; role: string }>,
   setting: PriceScaleTypeSetting,
 ): Map<string, PriceScaleTypeSetting> {
   const next = new Map<string, PriceScaleTypeSetting>()
   for (const pane of paneRoles) {
-    next.set(
-      pane.id,
-      setting === ScaleType.Percent && pane.role !== 'price' ? ScaleType.Linear : setting,
-    )
+    next.set(pane.id, pane.role === 'price' ? setting : ScaleType.Linear)
   }
   return next
 }

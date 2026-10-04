@@ -1,20 +1,16 @@
-import type {
-  IndicatorRenderStateReader,
-  PluginHost,
-  RenderContext,
-  RendererPluginWithHost,
-} from '@/foundation/plugin/index.js'
+import type { RenderContext } from '@/foundation/plugin/index.js'
 import { RENDERER_PRIORITY } from '@/foundation/plugin/index.js'
 import { resolveThemeColors } from '@/foundation/tokens/index.js'
+import type { Layer } from '@/rendering/scene/types.js'
 import { calcDMAData } from '../../indicators/calculators/index.js'
 import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
 import type { GetTitleInfoFn } from '../../indicators/indicatorMetadata.js'
 import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
-import { INDICATOR_INSTANCE_STATE_SERVICE } from '../../indicators/instances/api/indicatorRenderBinding.js'
 import type { DMARenderState } from '../../indicators/state/dmaState.js'
 import { EMPTY_DMA_STATE } from '../../indicators/state/dmaState.js'
 import { createValuePointVisibleStateComposer } from '../../indicators/visibleStateComposers.js'
 import { tryDrawLinesGpu } from '../linesViaRenderer.js'
+import { createIndicatorRendererLayer } from './shared/indicatorRendererLayer.js'
 
 type LinePoint = { x: number; y: number }
 
@@ -24,27 +20,13 @@ interface DMARendererOptions {
   instanceId?: string
 }
 
-function createDMARendererPlugin(options: DMARendererOptions = {}): RendererPluginWithHost {
+function createDMALayer(options: DMARendererOptions = {}): Layer<RenderContext> {
   const { paneId = 'main', instanceId } = options
-  let pluginHost: PluginHost | null = null
-
-  return {
+  return createIndicatorRendererLayer({
     name: `dma_${paneId}`,
-    version: '1.0.0',
-    description: 'DMA 平行线差渲染器（WebGL + Canvas2D 回退）',
-    debugName: 'DMA',
     paneId,
-    priority: RENDERER_PRIORITY.INDICATOR,
-
-    onInstall(host: PluginHost) {
-      pluginHost = host
-    },
-
-    getDeclaredNamespaces() {
-      return instanceId ? [instanceId] : []
-    },
-
-    draw(context: RenderContext) {
+    z: RENDERER_PRIORITY.INDICATOR,
+    draw(context) {
       const { ctx, pane, range, scrollLeft, kLineCenters } = context
       const colors = resolveThemeColors(
         context.theme,
@@ -62,12 +44,7 @@ function createDMARendererPlugin(options: DMARendererOptions = {}): RendererPlug
       const drawEnd = Math.min(range.end, series.length)
       const rangeStart = range.start
 
-      let valueMin = state.visibleMin
-      let valueMax = state.visibleMax
-      const padding = Math.max(0.05, (valueMax - valueMin) * 0.1)
-      valueMin = valueMin - padding
-      valueMax = valueMax + padding
-      const displayRange = pane.yAxis.getDisplayRange({ minPrice: valueMin, maxPrice: valueMax })
+      const displayRange = pane.yAxis.getDisplayRange()
       const displayMin = displayRange.minPrice
       const displayMax = displayRange.maxPrice
       const displayValueRange = displayMax - displayMin || 1
@@ -114,19 +91,7 @@ function createDMARendererPlugin(options: DMARendererOptions = {}): RendererPlug
 
       ctx.restore()
     },
-
-    getConfig() {
-      if (!instanceId) return {}
-      const state = pluginHost
-        ?.getService<IndicatorRenderStateReader>(INDICATOR_INSTANCE_STATE_SERVICE)
-        ?.get<DMARenderState>(instanceId)
-      return state?.params ?? {}
-    },
-
-    setConfig() {
-      // no-op
-    },
-  }
+  })
 }
 
 const getDMATitleInfo: GetTitleInfoFn = (
@@ -173,5 +138,5 @@ const getDMATitleInfo: GetTitleInfoFn = (
   },
 })
 export class DMADefinition {
-  static rendererFactory = createDMARendererPlugin
+  static rendererFactory = createDMALayer
 }

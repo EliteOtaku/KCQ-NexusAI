@@ -1,7 +1,11 @@
 /** 统一行情领域模型公共入口。 */
 
-export type { InstrumentLookupRequest, InstrumentSearchRequest } from './instrumentSearch.js'
-export { lookupInstrumentsBySymbol, searchInstruments } from './instrumentSearch.js'
+export type { InstrumentLookupRequest, InstrumentSearchRequest } from './impl/instrumentSearch.js'
+export { lookupInstrumentsBySymbol, searchInstruments } from './impl/instrumentSearch.js'
+export { MarketDataProviderRegistry, marketDataProviderRegistry } from './impl/registry.js'
+export { SourceRouter, SourceRoutingError, sourceRouter } from './impl/router.js'
+export type { DataSourceRegistration } from './impl/sourceRegistry.js'
+export { dataSourceRegistry } from './impl/sourceRegistry.js'
 export type {
   HttpTransportOptions,
   MarketDataProviderOptions,
@@ -38,25 +42,10 @@ export {
   createMarketDataProvider,
   DEFAULT_V1_BASE_URL,
   SOURCE_REJECTION_CODES,
+  V1_ENDPOINTS,
   V1_PROTOCOL_NAME,
   V1_PROTOCOL_VERSION,
 } from './protocol/index.js'
-export type {
-  MarketDataSourceConfig,
-  MarketDataSourceConfigPatch,
-  SourceCapabilityQuery,
-} from './registry.js'
-export { MarketDataProviderRegistry, marketDataProviderRegistry } from './registry.js'
-export type {
-  RoutedMarketData,
-  SourceRouteAttempt,
-  SourceRouterBarsRequest,
-  SourceRouterInstrumentIdentity,
-  SourceRouterTimeShareRequest,
-} from './router.js'
-export { SourceRouter, SourceRoutingError, sourceRouter } from './router.js'
-export type { DataSourceRegistration } from './sourceRegistry.js'
-export { dataSourceRegistry } from './sourceRegistry.js'
 export type {
   AssetClass,
   BarAggregation,
@@ -75,10 +64,19 @@ export type {
   MarketDataErrorCode,
   MarketDataFailure,
   MarketDataProvider,
+  MarketDataSourceConfig,
+  MarketDataSourceConfigPatch,
   MarketDataSourceStatus,
   ProviderRef,
+  RoutedMarketData,
   SourceCapabilities,
+  SourceCapabilityQuery,
   SourceProbeResult,
+  SourceRouteAttempt,
+  SourceRouterBarsRequest,
+  SourceRouterInstrumentIdentity,
+  SourceRouterTimeShareRangeRequest,
+  SourceRouterTimeShareRequest,
   TimeShareDataSource,
   TimeShareDay,
   TimeShareQuery,

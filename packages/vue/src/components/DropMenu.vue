@@ -4,7 +4,7 @@
       <button
         ref="triggerRef"
         type="button"
-        class="drop-menu__trigger"
+        class="control-button drop-menu__trigger"
         :class="triggerClass"
         :aria-label="label"
         aria-haspopup="menu"
@@ -47,7 +47,9 @@
               <slot name="item-action" :group="group" :item="item" />
             </span>
           </div>
-          <div v-if="group.items.length === 0" class="drop-menu__empty">暂无模板</div>
+          <div v-if="group.items.length === 0 && emptyText" class="drop-menu__empty">
+            {{ emptyText }}
+          </div>
         </div>
         <div v-if="message" class="drop-menu__message" role="alert">{{ message }}</div>
       </div>
@@ -74,7 +76,11 @@
     groups: ReadonlyArray<DropMenuGroup>
     disabled?: boolean
     triggerClass?: string
+    /** 菜单相对触发按钮的弹出方向。 */
+    placement?: 'auto' | 'top' | 'bottom'
     message?: string
+    /** 分组为空时展示的提示；未提供时不渲染空提示。 */
+    emptyText?: string
   }>()
   const emit = defineEmits<{
     select: [groupId: string, itemId: string]
@@ -88,6 +94,9 @@
   const { popupStyle, startPositionSync, stopPositionSync } = useTeleportedPopup(
     triggerRef,
     menuRef,
+    4,
+    false,
+    props.placement,
   )
   const menuStyle = computed(() => ({ ...popupStyle.value, zIndex: 1010 }))
 
@@ -142,26 +151,12 @@
   onBeforeUnmount(() => hide())
 </script>
 
+<!-- 触发器复用工具栏共享按钮外观，避免各下拉各写一套高度与字体。 -->
+<style scoped src="./common/control-button.css"></style>
+
 <style scoped>
   .drop-menu {
     flex: 0 0 auto;
-  }
-
-  .drop-menu__trigger {
-    height: 24px;
-    padding: 0 7px;
-    border: 1px solid var(--klc-color-ui-border);
-    border-radius: 8px;
-    background: var(--klc-color-ui-control-background);
-    color: var(--klc-color-ui-text);
-    font: inherit;
-    font-size: 12px;
-    cursor: pointer;
-  }
-
-  .drop-menu__trigger:hover,
-  .drop-menu__trigger:focus-visible {
-    background: var(--klc-color-ui-hover);
   }
 
   .drop-menu__panel {

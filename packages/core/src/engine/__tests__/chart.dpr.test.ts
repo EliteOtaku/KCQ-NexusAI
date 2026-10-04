@@ -1,14 +1,28 @@
 // @vitest-environment jsdom
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { Chart, type ChartOptions } from '@/core/chart'
+import { createDrawingMethods } from '@/controllers/chart/impl/createDrawingMethods'
+import {
+  FIVE_DAY_TIME_SHARE_PERIOD,
+  type KLineData,
+  type SymbolSpec,
+  TIME_SHARE_PERIOD,
+} from '@/controllers/types'
+import { Chart, type ChartOptions } from '@/core/chart/index'
 import {
   createChartDom,
   installChartDomStubs,
   ResizeObserverMock,
 } from '@/engine/__tests__/helpers/chartDomTestKit'
-import { createDrawingAdapter } from '../drawing/__tests__/helpers/drawingTestKit'
+import { PRICE_AXIS_RANGE_MODE } from '../../foundation/config/priceAxisRangeMode'
+import { makePluginLayerId } from '../../foundation/plugin/impl/rendererLayerId'
+import { ScaleType } from '../../foundation/types/scaleType'
+import type { ChartModeHandler } from '../chartModel/index'
+import { ChartDataViewId, isTimeShareDataView, resolveChartDataView } from '../chartModel/index'
+import { createDrawingAdapter, createTrendLine } from '../drawing/__tests__/helpers/drawingTestKit'
+import { DrawingInteractionController, DrawingTool } from '../drawing/index'
 import { getRegisteredIndicatorDefinition } from '../indicators/indicatorDefinitionRegistry'
 import { loadBuiltinIndicators } from '../indicators/registerBuiltins'
+import { MAIN_PANE_ID } from '../pane/types'
 
 const defaultOptions: ChartOptions = {
   kWidth: 10,
@@ -40,20 +54,592 @@ function pointerEvent(
   } as PointerEvent
 }
 
+/** 用真实 Chart 文档和视口方法构造绘图会话，共享生产适配器而非测试替身。 */
+function createChartDrawingSession(chart: Chart) {
+  const methods = createDrawingMethods(chart, () => false)
+  const adapter = { ...methods, getData: () => chart.getData() }
+  const session = new DrawingInteractionController(adapter)
+  chart.registerDrawingSession(session)
+  return { adapter, session }
+}
+
+/** 构造测试用 Chart；尺寸与 runtime 可选，销毁由调用方负责。 */
+function mountChart(
+  width = 1000,
+  height = 600,
+  runtime?: ConstructorParameters<typeof Chart>[2],
+): Chart {
+  return new Chart(createChartDom(width, height), defaultOptions, runtime)
+}
+
+/** 挂载锁定纵轴模式 + 指定轴类型的主图，供价格轴缩放与重置用例共用。 */
+function mountHandModeChart(scaleType: ScaleType): Chart {
+  return mountChart(1000, 600, {
+    initialSettings: {
+      mainPriceAxisRangeMode: PRICE_AXIS_RANGE_MODE.HAND,
+      mainRightAxisTypeSetting: scaleType,
+    },
+  })
+}
+
+/** 生成均质 K 线序列；high/low 固定为 close ± 1。 */
+function makeBars(count: number, close = 10): KLineData[] {
+  return Array.from({ length: count }, (_, timestamp) => ({
+    timestamp,
+    open: close,
+    high: close + 1,
+    low: close - 1,
+    close,
+  }))
+}
+
+/** 生成前段低价区（9~11）续后段高价区（99~101）的序列，用于验证按可视区重适配范围。 */
+function makeTwoTierBars(lowCount = 1000, highCount = 1000): KLineData[] {
+  return Array.from({ length: lowCount + highCount }, (_, timestamp) => {
+    const close = timestamp < lowCount ? 10 : 100
+    return { timestamp, open: close, high: close + 1, low: close - 1, close }
+  })
+}
+
+/** 读取 Chart 的 K 线 / 分时模式处理器；私有成员访问集中在此。 */
+function getModeHandlers(chart: Chart): { kLine: ChartModeHandler; timeShare: ChartModeHandler } {
+  return { kLine: chart['_kLineMode'], timeShare: chart['_timeShareMode'] }
+}
+
+/** 触发一次 ResizeObserver 回调，可附带设备像素尺寸模拟 DPR 上报。 */
+function emitResize(
+  observer: ResizeObserverMock,
+  size: { width: number; height: number; devicePixelWidth?: number; devicePixelHeight?: number },
+): void {
+  observer.emit({
+    contentRect: DOMRect.fromRect({ width: size.width, height: size.height }),
+    contentBoxSize: [{ inlineSize: size.width, blockSize: size.height }],
+    ...(size.devicePixelWidth !== undefined && size.devicePixelHeight !== undefined
+      ? {
+          devicePixelContentBoxSize: [
+            { inlineSize: size.devicePixelWidth, blockSize: size.devicePixelHeight },
+          ],
+        }
+      : {}),
+  })
+}
+
 describe('Chart DPR pipeline', () => {
+  const comparison: SymbolSpec = {
+    symbol: 'COMPARE',
+    market: 'CN',
+    source: 'chart-custom:default',
+    period: 'daily',
+    incremental: false,
+  }
+
+  /** 通过真实内联数据入口设置主品种，避免依赖外部行情 Provider。 */
+  function setInlinePrimary(chart: Chart): void {
+    chart.applyCustomData({ symbol: 'PRIMARY', market: 'CN', period: 'daily', data: [] })
+  }
+  const viewCases = [
+    { period: 'daily', specs: [], view: ChartDataViewId.KLine, mode: ChartDataViewId.KLine },
+    {
+      period: 'daily',
+      specs: [comparison],
+      view: ChartDataViewId.KLine,
+      mode: ChartDataViewId.KLine,
+    },
+    {
+      period: TIME_SHARE_PERIOD,
+      specs: [],
+      view: ChartDataViewId.TimeShare,
+      mode: ChartDataViewId.TimeShare,
+    },
+    {
+      period: TIME_SHARE_PERIOD,
+      specs: [comparison],
+      view: ChartDataViewId.TimeShare,
+      mode: ChartDataViewId.TimeShare,
+    },
+    {
+      period: FIVE_DAY_TIME_SHARE_PERIOD,
+      specs: [],
+      view: ChartDataViewId.FiveDayTimeShare,
+      mode: ChartDataViewId.TimeShare,
+    },
+    {
+      period: FIVE_DAY_TIME_SHARE_PERIOD,
+      specs: [comparison],
+      view: ChartDataViewId.FiveDayTimeShare,
+      mode: ChartDataViewId.TimeShare,
+    },
+  ]
+
+  it.each(viewCases)(
+    'resolves $period and comparison specs=$specs consistently across entries',
+    async ({ period, specs, view, mode }) => {
+      const chart = mountChart()
+      try {
+        const timeShare = isTimeShareDataView(view)
+        expect(resolveChartDataView(period)).toBe(view)
+        setInlinePrimary(chart)
+        chart.setComparisonSpecs(specs)
+        const activate = vi.spyOn(chart, 'setActiveMode')
+        chart.setCurrentPeriod(period)
+        expect(activate).toHaveBeenCalledOnce()
+        expect(chart.kernel.mode.readonly.dataView.peek()).toBe(view)
+        expect(chart.kernel.mode.readonly.chartMode.peek()).toBe(view)
+        expect(chart.activeMode).toBe(
+          mode === ChartDataViewId.TimeShare
+            ? getModeHandlers(chart).timeShare
+            : getModeHandlers(chart).kLine,
+        )
+
+        chart.setComparisonSpecs([])
+        if (specs.length > 0) chart.comparisonCommands.add(comparison)
+        expect(chart.kernel.mode.readonly.dataView.peek()).toBe(view)
+        expect(chart.kernel.mode.readonly.chartMode.peek()).toBe(view)
+        expect(chart.activeMode).toBe(
+          mode === ChartDataViewId.TimeShare
+            ? getModeHandlers(chart).timeShare
+            : getModeHandlers(chart).kLine,
+        )
+        expect(chart.kernel.pane.readonly.paneScaleTypes.peek().get(MAIN_PANE_ID)).toBe(
+          timeShare || specs.length > 0 ? ScaleType.Percent : ScaleType.Linear,
+        )
+        activate.mockClear()
+        chart.setSymbols([{ ...chart.symbols.peek()[0]!, period }])
+        expect(activate).toHaveBeenCalledOnce()
+        expect(chart.kernel.mode.readonly.dataView.peek()).toBe(view)
+        chart.comparisonCommands.clear()
+        expect(chart.kernel.mode.readonly.dataView.peek()).toBe(
+          timeShare ? view : ChartDataViewId.KLine,
+        )
+      } finally {
+        await chart.destroy()
+      }
+    },
+  )
+
+  it('restores the configured scale after kline comparison overlays → timeshare → kline', async () => {
+    const chart = mountChart()
+    try {
+      setInlinePrimary(chart)
+      chart.updateSettings({ mainRightAxisTypeSetting: ScaleType.Log })
+      chart.comparisonCommands.add(comparison)
+      chart.setCurrentPeriod(TIME_SHARE_PERIOD)
+      expect(chart.kernel.pane.readonly.paneScaleTypes.peek().get(MAIN_PANE_ID)).toBe(
+        ScaleType.Percent,
+      )
+      chart.setCurrentPeriod('daily')
+      expect(chart.kernel.mode.readonly.dataView.peek()).toBe(ChartDataViewId.KLine)
+      chart.comparisonCommands.clear()
+      expect(chart.kernel.pane.readonly.paneScaleTypes.peek().get(MAIN_PANE_ID)).toBe(ScaleType.Log)
+    } finally {
+      await chart.destroy()
+    }
+  })
+
+  it('adding comparison overlays preserves primary data, viewport and candle renderer', async () => {
+    const chart = mountChart()
+    try {
+      const data = makeBars(100)
+      chart.applyCustomData({ symbol: 'PRIMARY', market: 'CN', period: 'daily', data })
+      const primaryData = chart.data.peek()
+      const count = chart.kernel.dataLength$.peek()
+      const zoom = chart.kernel.zoom.readonly.zoomLevel.peek()
+      const scroll = chart.kernel.viewport.readonly.scrollLeftLogical.peek()
+      chart.comparisonCommands.add(comparison)
+      chart.setComparisonData(comparison.symbol, makeBars(10))
+      const comparisonIdentity = chart.comparisonCommands.list()[0]!.identity
+      chart.setComparisonHidden(comparisonIdentity, true)
+      expect(chart.kernel.comparison.readonly.hidden.peek().get(comparisonIdentity)).toBe(true)
+      chart.setComparisonHidden(comparisonIdentity, false)
+      expect(chart.kernel.comparison.readonly.hidden.peek().has(comparisonIdentity)).toBe(false)
+      expect(chart.data.peek()).toBe(primaryData)
+      expect(chart.kernel.dataLength$.peek()).toBe(count)
+      expect(chart.kernel.mode.readonly.chartMode.peek()).toBe(ChartDataViewId.KLine)
+      expect(chart.kernel.mode.readonly.effectivePrimaryRenderer.peek()).toBe('candlestick')
+      expect(chart.kernel.activeRenderers$.peek()).toContainEqual({
+        name: 'candle',
+        layerId: 'plugin:candle',
+      })
+      expect(chart.kernel.activeRenderers$.peek()).toContainEqual({
+        name: 'comparisonLine',
+        layerId: 'plugin:comparisonLine',
+      })
+      expect(chart.kernel.zoom.readonly.zoomLevel.peek()).toBe(zoom)
+      expect(chart.kernel.viewport.readonly.scrollLeftLogical.peek()).toBe(scroll)
+      chart.comparisonCommands.clear()
+      expect(chart.data.peek()).toBe(primaryData)
+      expect(chart.kernel.activeRenderers$.peek()).not.toContainEqual({
+        name: 'comparisonLine',
+        layerId: 'plugin:comparisonLine',
+      })
+    } finally {
+      await chart.destroy()
+    }
+  })
+
+  it('projects ordinary timeshare from model inputs and rejects horizontal navigation', async () => {
+    const chart = mountChart()
+    try {
+      setInlinePrimary(chart)
+      chart.setCurrentPeriod(TIME_SHARE_PERIOD)
+      const viewport = chart.kernel.viewport
+      expect(viewport.readonly.scrollLeftLogical.peek()).toBe(0)
+      expect(viewport.readonly.contentWidth.peek()).toBe(viewport.readonly.plotWidth.peek())
+      expect(chart.kernel.viewport.readonly.kGap.peek()).toBe(1 / chart.getCurrentDpr())
+      viewport.actions.scrollToLogical(1000)
+      chart.zoom.in(200)
+      expect(viewport.readonly.scrollLeftLogical.peek()).toBe(0)
+      expect(chart.kernel.zoom.readonly.zoomLevel.peek()).toBe(1)
+    } finally {
+      await chart.destroy()
+    }
+  })
+
+  it('rejects multiple primary symbols and clears a timeshare primary explicitly', async () => {
+    const chart = mountChart()
+    try {
+      setInlinePrimary(chart)
+      chart.setCurrentPeriod(TIME_SHARE_PERIOD)
+      const before = chart.symbols.peek()
+      expect(() => chart.setSymbols([...before, comparison])).toThrow(RangeError)
+      expect(chart.symbols.peek()).toBe(before)
+      chart.setSymbols([])
+      expect(chart.symbols.peek()).toEqual([])
+      expect(chart.kernel.mode.readonly.dataView.peek()).toBe(ChartDataViewId.KLine)
+    } finally {
+      await chart.destroy()
+    }
+  })
+
+  it('filters options without mutating a frozen caller object', async () => {
+    const chart = mountChart()
+    try {
+      const patch = Object.freeze({ kWidth: 99, kGap: 98, yPaddingPx: 7 })
+      chart.updateOptions(patch)
+      expect(patch).toEqual({ kWidth: 99, kGap: 98, yPaddingPx: 7 })
+      expect(chart.getOption().yPaddingPx).toBe(7)
+      expect(chart.kernel.zoom.readonly.kWidth.peek()).not.toBe(99)
+    } finally {
+      await chart.destroy()
+    }
+  })
+
+  it('keeps custom-data comparisons inside the kline view', async () => {
+    const chart = mountChart()
+    try {
+      chart.applyCustomData({
+        symbol: 'PRIMARY',
+        market: 'CN',
+        period: 'daily',
+        data: [],
+        comparisons: { COMPARE: [] },
+      })
+      expect(chart.kernel.mode.readonly.dataView.peek()).toBe(ChartDataViewId.KLine)
+      chart.applyCustomData({ symbol: 'PRIMARY', market: 'CN', period: 'daily', data: [] })
+      expect(chart.kernel.mode.readonly.dataView.peek()).toBe(ChartDataViewId.KLine)
+      expect(chart.interactionState).toBe(chart.kernel.interaction.readonly.interactionSnapshot)
+    } finally {
+      await chart.destroy()
+    }
+  })
+
+  it('skips unchanged frames and repaints only overlay on pointer movement', async () => {
+    const dom = createChartDom(1000, 600)
+    const chart = new Chart(dom, defaultOptions)
+    chart.resize()
+    chart.setData(makeBars(100))
+    const paint = vi.spyOn(chart['renderer'].getScene(), 'paint')
+    const instances = vi.spyOn(chart['rendererHost'].renderer, 'drawInstances')
+    const lines = vi.spyOn(chart['rendererHost'].renderer, 'drawLines')
+    chart.draw()
+    paint.mockClear()
+    instances.mockClear()
+    lines.mockClear()
+    chart.draw()
+    expect(paint).not.toHaveBeenCalled()
+    expect(instances).not.toHaveBeenCalled()
+    expect(lines).not.toHaveBeenCalled()
+
+    chart.handlePointerEvent(pointerEvent('pointermove', dom.container, { pointerType: 'mouse' }))
+    chart.draw()
+    expect(paint).toHaveBeenCalled()
+    expect(
+      paint.mock.lastCall?.[0].panes.every((pane) =>
+        pane.roles?.every((role) => role === 'drawing' || role === 'overlay'),
+      ),
+    ).toBe(true)
+    expect(instances).not.toHaveBeenCalled()
+
+    paint.mockClear()
+    chart.kernel.viewport.actions.scrollTo(30)
+    chart.draw()
+    expect(paint.mock.lastCall?.[0].panes.some((pane) => pane.roles?.includes('primary'))).toBe(
+      true,
+    )
+    await chart.destroy()
+  })
+
+  it('refreshes Legend after main instance reorder even when calculation state is unchanged', async () => {
+    const chart = mountChart()
+    try {
+      chart.resize()
+      chart.setData(makeBars(100))
+      chart.indicators.enableMain('MA')
+      chart.indicators.enableMain('BOLL')
+      chart.draw()
+      const paint = vi.spyOn(chart['renderer'].getScene(), 'paint')
+      chart.draw()
+      expect(paint).not.toHaveBeenCalled()
+      expect(chart.indicators.moveMain('BOLL', 'up')).toBe(true)
+      chart.draw()
+      expect(paint).toHaveBeenCalled()
+      paint.mockClear()
+      chart.draw()
+      expect(paint).not.toHaveBeenCalled()
+    } finally {
+      await chart.destroy()
+    }
+  })
+
+  it('shares one clock sample across countdown paint and cached overlay frames', async () => {
+    const opened = Date.parse('2026-06-01T09:30:00+08:00')
+    let now = opened
+    const clock = { now: vi.fn(() => now) }
+    const chart = mountChart(1000, 600, { clock })
+    try {
+      chart.resize()
+      chart.applyCustomData({
+        symbol: 'PRIMARY',
+        market: 'CN',
+        period: '1min',
+        data: [{ timestamp: opened, open: 10, high: 11, low: 9, close: 10 }],
+      })
+      const paint = vi.spyOn(chart['renderer'].getScene(), 'paint')
+      clock.now.mockClear()
+      chart.draw()
+      expect(clock.now).toHaveBeenCalledOnce()
+      expect(chart['renderer'].getPaneCtxMap().get('main')?.countdown).toBe('01:00')
+
+      // 同一秒内可以跳过 paint，但到下一秒必须重新派生缓存帧的倒计时。
+      paint.mockClear()
+      clock.now.mockClear()
+      now = opened + 999
+      chart.draw()
+      expect(clock.now).toHaveBeenCalledOnce()
+      expect(paint).not.toHaveBeenCalled()
+      now = opened + 1_000
+      chart.draw()
+      expect(chart['renderer'].getPaneCtxMap().get('main')?.countdown).toBe('00:59')
+      expect(
+        paint.mock.lastCall?.[0].panes.every((pane) =>
+          pane.roles?.every((role) => role === 'drawing' || role === 'overlay'),
+        ),
+      ).toBe(true)
+
+      chart.updateSettings({ showLastPriceCountdown: false })
+      chart.draw()
+      expect(chart['renderer'].getPaneCtxMap().get('main')?.countdown).toBeUndefined()
+      expect(chart['renderer']['lastPriceCountdownTimer']).toBeNull()
+      chart.updateSettings({ showLastPriceCountdown: true })
+      chart.draw()
+      expect(chart['renderer'].getPaneCtxMap().get('main')?.countdown).toBe('00:59')
+      expect(chart['renderer']['lastPriceCountdownTimer']).not.toBeNull()
+
+      now = opened + 60_000
+      chart.draw()
+      expect(chart['renderer'].getPaneCtxMap().get('main')?.countdown).toBeUndefined()
+      expect(chart['renderer']['lastPriceCountdownTimer']).toBeNull()
+    } finally {
+      await chart.destroy()
+    }
+  })
+
+  it('invalidates main content for data, zoom, settings, resize and DPR changes', async () => {
+    const chart = mountChart()
+    const bars = makeBars(100)
+    chart.resize()
+    chart.setData(bars)
+    chart.draw()
+    const paint = vi.spyOn(chart['renderer'].getScene(), 'paint')
+    const expectMainPaint = (reason: string) => {
+      paint.mockClear()
+      chart.draw()
+      expect(
+        paint.mock.lastCall?.[0].panes.some((pane) => pane.roles?.includes('primary')),
+        reason,
+      ).toBe(true)
+    }
+
+    chart.setData([...bars, { timestamp: 100, open: 11, high: 12, low: 10, close: 11 }])
+    expectMainPaint('data')
+    chart.zoom.toLevel(2)
+    expectMainPaint('zoom')
+    chart.updateSettings({ showGridLines: false })
+    expectMainPaint('settings')
+    chart.resize()
+    expectMainPaint('resize')
+    Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: 2 })
+    emitResize(ResizeObserverMock.instances[0]!, {
+      width: 1000,
+      height: 600,
+      devicePixelWidth: 2000,
+      devicePixelHeight: 1200,
+    })
+    expect(chart.getCurrentDpr()).toBe(2)
+    expectMainPaint('DPR')
+    await chart.destroy()
+  })
+
+  /** 真实交互会话逐帧更新临时坐标，正式表面复用，并在提交或取消后恢复图元。 */
+  it.each(['commit', 'cancel'] as const)(
+    'repaints drag frames independently and restores the committed layer on %s',
+    async (finish) => {
+      const dom = createChartDom(1000, 600)
+      const chart = new Chart(dom, defaultOptions)
+      try {
+        chart.resize()
+        chart.setData(makeBars(100))
+        const { adapter, session } = createChartDrawingSession(chart)
+        const drawing = createTrendLine('dragged', {
+          paneId: MAIN_PANE_ID,
+          anchors: [
+            { id: 'start', time: 40, price: 10 },
+            { id: 'end', time: 60, price: 10 },
+          ],
+          locked: false,
+        })
+        chart.drawing.setDrawings([
+          drawing,
+          {
+            ...drawing,
+            id: 'stationary',
+            anchors: drawing.anchors.map((anchor) => ({ ...anchor, price: 9.5 })),
+          },
+          {
+            ...drawing,
+            id: 'fixed',
+            anchors: drawing.anchors.map((anchor) => ({ ...anchor, price: 10.5 })),
+          },
+        ])
+        chart.drawing.setSelectedIds(['dragged', 'stationary'])
+        chart.draw()
+        // 点选线身会维持多选，整组图元进入会话层。
+        const x = adapter.getScreenXAtLogicalIndex(50)
+        if (x === null) throw new Error('Expected a visible drawing midpoint')
+        const y = adapter.priceToY(MAIN_PANE_ID, 10)
+        const event = (type: string, dy = 0) =>
+          pointerEvent(type, dom.container, {
+            pointerType: 'mouse',
+            clientX: x,
+            clientY: y + dy,
+            button: 0,
+          })
+        const scene = chart['renderer'].getScene()
+        const formalLayer = scene.layers.peek().find((layer) => layer.role === 'drawing')
+        if (!formalLayer) throw new Error('Expected the committed drawing layer')
+        const formalPaint = vi.spyOn(formalLayer, 'paint')
+        const instances = vi.spyOn(chart['rendererHost'].renderer, 'drawInstances')
+        const committed = chart.drawing.drawings.peek()
+        expect(session.onPointerDown(event('pointerdown'), dom.container)).toBe(true)
+        expect(session.onPointerMove(event('pointermove', 20), dom.container)).toBe(true)
+        chart.draw()
+        expect(formalPaint).toHaveBeenCalledOnce()
+        const first = chart['renderer'].getPaneCtxMap().get(MAIN_PANE_ID)
+        expect(first?.drawingProjection?.primitives.length).toBeGreaterThan(0)
+        expect(first?.sessionDrawingProjection?.primitives.length).toBeGreaterThan(0)
+        formalPaint.mockClear()
+        instances.mockClear()
+        expect(session.onPointerMove(event('pointermove', 40), dom.container)).toBe(true)
+        chart.draw()
+        const second = chart['renderer'].getPaneCtxMap().get(MAIN_PANE_ID)
+        expect(second?.sessionDrawingProjection).not.toEqual(first?.sessionDrawingProjection)
+        expect(second?.drawingProjection).toBe(first?.drawingProjection)
+        expect(formalPaint).not.toHaveBeenCalled()
+        expect(instances).not.toHaveBeenCalled()
+        expect(chart.drawing.drawings.peek()).toBe(committed)
+
+        if (finish === 'commit') session.onPointerUp(event('pointerup', 40), dom.container)
+        else session.cancelPendingChanges()
+        chart.draw()
+        expect(formalPaint).toHaveBeenCalledOnce()
+        const final = chart['renderer'].getPaneCtxMap().get(MAIN_PANE_ID)
+        expect(final?.sessionDrawingProjection?.primitives).toHaveLength(0)
+        expect(final?.drawingProjection?.primitives.length).toBeGreaterThan(0)
+        expect(chart.drawing.drawings.peek() === committed).toBe(finish === 'cancel')
+      } finally {
+        await chart.destroy()
+      }
+    },
+  )
+
+  /** 正式投影复用时保留选中图元的轴标签，预览变化仍能触发帧提交。 */
+  it('repaints preview changes and retains committed axis decorations', async () => {
+    const dom = createChartDom(1000, 600)
+    const chart = new Chart(dom, defaultOptions)
+    try {
+      chart.resize()
+      chart.setData(makeBars(100))
+      const { adapter, session } = createChartDrawingSession(chart)
+      session.setTool(DrawingTool.TrendLine)
+      chart.drawing.setDrawings([
+        createTrendLine('selected', {
+          paneId: MAIN_PANE_ID,
+          anchors: [
+            { id: 'start', time: 40, price: 10 },
+            { id: 'end', time: 60, price: 10 },
+          ],
+          locked: false,
+        }),
+      ])
+      chart.drawing.setSelectedIds(['selected'])
+      chart.draw()
+      const x = adapter.getScreenXAtLogicalIndex(50)
+      if (x === null) throw new Error('Expected a visible preview position')
+      const y = adapter.priceToY(MAIN_PANE_ID, 10)
+      expect(
+        session.onPointerDown(
+          pointerEvent('pointerdown', dom.container, {
+            pointerType: 'mouse',
+            clientX: x,
+            clientY: y,
+            button: 0,
+          }),
+          dom.container,
+        ),
+      ).toBe(true)
+      const move = (dy: number) =>
+        session.onPointerMove(
+          pointerEvent('pointermove', dom.container, {
+            pointerType: 'mouse',
+            clientX: x,
+            clientY: y + dy,
+          }),
+          dom.container,
+        )
+      expect(move(20)).toBe(true)
+      chart.draw()
+      const first = chart['renderer'].getPaneCtxMap().get(MAIN_PANE_ID)
+      expect(move(40)).toBe(true)
+      chart.draw()
+      const second = chart['renderer'].getPaneCtxMap().get(MAIN_PANE_ID)
+      expect(second?.drawingProjection).toBe(first?.drawingProjection)
+      expect(second?.sessionDrawingProjection).not.toEqual(first?.sessionDrawingProjection)
+      expect(second?.axisLabels.forSurface('yRightOverlay', MAIN_PANE_ID).labels).toEqual(
+        first?.axisLabels.forSurface('yRightOverlay', MAIN_PANE_ID).labels,
+      )
+      expect(second?.axisLabels.forSurface('xLabels').labels).toEqual(
+        first?.axisLabels.forSurface('xLabels').labels,
+      )
+    } finally {
+      await chart.destroy()
+    }
+  })
+
   it('keeps the crosshair visible while drawing preview consumes mouse moves', async () => {
     const dom = createChartDom(1000, 600)
     const chart = new Chart(dom, defaultOptions)
     chart.resize()
-    chart.setData(
-      Array.from({ length: 100 }, (_, timestamp) => ({
-        timestamp,
-        open: 10,
-        high: 11,
-        low: 9,
-        close: 10,
-      })),
-    )
+    chart.setData(makeBars(100))
     chart.drawing.setTool('trend-line')
     chart.draw()
 
@@ -100,7 +686,16 @@ describe('Chart DPR pipeline', () => {
     await chart.destroy()
   })
 
-  it('checks after mouse pointerup and wheel zoom, but never during a held pointer', async () => {
+  it('checks after smooth wheel zoom settles, but never during a held pointer', async () => {
+    const frames = new Map<number, FrameRequestCallback>()
+    let frameId = 0
+    vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => {
+      frames.set(++frameId, callback)
+      return frameId
+    })
+    vi.spyOn(globalThis, 'cancelAnimationFrame').mockImplementation((id) => {
+      frames.delete(id)
+    })
     const dom = createChartDom(1000, 600)
     dom.container.setPointerCapture = () => {}
     dom.container.hasPointerCapture = () => false
@@ -116,9 +711,13 @@ describe('Chart DPR pipeline', () => {
     expect(check).not.toHaveBeenCalled()
 
     chart.handlePointerEvent(pointerEvent('pointerup', dom.container, mouse))
-    expect(check).toHaveBeenCalledOnce()
+    expect(check).not.toHaveBeenCalled()
     chart.handleWheelEvent({ deltaY: -1, clientX: 100 } as WheelEvent)
-    expect(check).toHaveBeenCalledTimes(2)
+    expect(check).not.toHaveBeenCalled()
+    const callbacks = [...frames.values()]
+    frames.clear()
+    for (const callback of callbacks) callback(performance.now() + 200)
+    expect(check).toHaveBeenCalledOnce()
     await chart.destroy()
   })
 
@@ -126,15 +725,7 @@ describe('Chart DPR pipeline', () => {
     const dom = createChartDom(1000, 600)
     const chart = new Chart(dom, defaultOptions)
     chart.resize()
-    chart.setData(
-      Array.from({ length: 200 }, (_, timestamp) => ({
-        timestamp,
-        open: 10,
-        high: 11,
-        low: 9,
-        close: 10,
-      })),
-    )
+    chart.setData(makeBars(200))
     const check = vi.spyOn(chart, 'checkVisibleRangeGap').mockImplementation(() => {})
     dom.container.scrollLeft = 900
     chart.handleScrollEvent()
@@ -142,7 +733,144 @@ describe('Chart DPR pipeline', () => {
     await chart.destroy()
   })
 
+  it('zooms the price axis around the wheel position without changing time zoom', async () => {
+    const chart = mountHandModeChart(ScaleType.Percent)
+    try {
+      chart.resize()
+      chart.setData(makeBars(200))
+      chart.draw()
+      const pane = chart.getPaneRenderers()[0]!.getPane()
+      const anchorY = pane.height * 0.25
+      const anchorPrice = pane.yAxis.yToPrice(anchorY)
+      const initialRange = pane.yAxis.getDisplayRange()
+      const zoomLevel = chart.kernel.zoom.readonly.zoomLevel.peek()
+      const axisHost = chart.getDom().rightAxisLayer
+      const rect = axisHost.getBoundingClientRect()
+      const event = new WheelEvent('wheel', {
+        deltaY: -100,
+        clientX: rect.left + 1,
+        clientY: rect.top + pane.top + anchorY,
+        cancelable: true,
+      })
+      // 真实 DOM dispatch 设置事件 target，再经公开入口分流。
+      axisHost.addEventListener('wheel', (wheel) => chart.handleWheelEvent(wheel), {
+        once: true,
+      })
+      axisHost.dispatchEvent(event)
+      chart.draw()
+      const nextRange = pane.yAxis.getDisplayRange()
+      expect(nextRange.maxPrice - nextRange.minPrice).toBeLessThan(
+        initialRange.maxPrice - initialRange.minPrice,
+      )
+      expect(pane.yAxis.priceToY(anchorPrice)).toBeCloseTo(anchorY, 6)
+      expect(chart.kernel.zoom.readonly.zoomLevel.peek()).toBe(zoomLevel)
+      expect(event.defaultPrevented).toBe(true)
+    } finally {
+      await chart.destroy()
+    }
+  })
+
   let restoreChartDomStubs: () => void
+
+  it.each([ScaleType.Linear, ScaleType.Log, ScaleType.Percent])(
+    'fits the current visible highs and lows after scrolling without changing the locked mode (%s)',
+    async (scaleType) => {
+      const chart = mountHandModeChart(scaleType)
+      try {
+        chart.resize()
+        chart.applyCustomData({
+          symbol: 'PRIMARY',
+          market: 'CN',
+          period: 'daily',
+          data: makeTwoTierBars(),
+        })
+        chart.draw()
+        const axis = chart.getPaneRenderers()[0]!.getPane().yAxis
+        expect(axis.getScaleType()).toBe(scaleType)
+        const initialRange = axis.getDisplayRange()
+        // 先手动缩放并平移，制造锁定范围与新可视区的偏差。
+        chart.scalePrice(MAIN_PANE_ID, -100)
+        chart.translatePrice(MAIN_PANE_ID, 80)
+        chart.draw()
+        expect(axis.getDisplayRange()).not.toEqual(initialRange)
+
+        // 滚动到早期低价区：锁定模式保留旧范围，重置必须重新适配当前视图。
+        chart.kernel.viewport.actions.scrollTo(chart.getLeftLoadBufferWidth())
+        chart.draw()
+        chart.resetPriceTransform(MAIN_PANE_ID)
+        chart.draw()
+        expect(axis.getDisplayRange().minPrice).toBeCloseTo(9)
+        expect(axis.getDisplayRange().maxPrice).toBeCloseTo(11)
+        expect(chart.kernel.mainPriceAxis.readonly.rangeMode.peek()).toBe(
+          PRICE_AXIS_RANGE_MODE.HAND,
+        )
+        expect(chart.kernel.settings.readonly.settings.peek().mainRightAxisTypeSetting).toBe(
+          scaleType,
+        )
+      } finally {
+        await chart.destroy()
+      }
+    },
+  )
+
+  it.each([ScaleType.Linear, ScaleType.Log, ScaleType.Percent])(
+    'fits a fresh price range on every symbol switch after manual scaling (%s)',
+    async (scaleType) => {
+      const chart = mountHandModeChart(scaleType)
+      try {
+        chart.resize()
+        chart.applyCustomData({
+          symbol: 'PRIMARY',
+          market: 'CN',
+          period: 'daily',
+          data: makeBars(200),
+        })
+        chart.draw()
+        const primary = chart.symbols.peek()[0]!
+        const axis = chart.getPaneRenderers()[0]!.getPane().yAxis
+        const initialRange = axis.getDisplayRange()
+        chart.scalePrice(MAIN_PANE_ID, -100)
+        chart.translatePrice(MAIN_PANE_ID, 80)
+        chart.draw()
+        expect(axis.getDisplayRange()).not.toEqual(initialRange)
+
+        chart.applyCustomData({
+          symbol: 'SECONDARY',
+          market: 'CN',
+          period: 'daily',
+          data: makeBars(200, 100),
+        })
+        // 新品种尚未绘制时，旧轴上的交互不能提前初始化其锁定范围。
+        chart.scalePrice(MAIN_PANE_ID, -100)
+        chart.translatePrice(MAIN_PANE_ID, 80)
+        expect(chart.kernel.mainPriceAxis.readonly.handRange.peek()).toBeNull()
+        chart.draw()
+        expect(axis.getDisplayRange().minPrice).toBeCloseTo(99)
+        expect(axis.getDisplayRange().maxPrice).toBeCloseTo(101)
+        expect(axis.getVerticalScale()).toBe(1)
+        expect(axis.getPriceOffset()).toBe(0)
+        expect(axis.priceToY(101)).toBeGreaterThanOrEqual(0)
+        expect(axis.priceToY(99)).toBeLessThanOrEqual(chart.getPaneRenderers()[0]!.getPane().height)
+
+        const secondaryRange = axis.getDisplayRange()
+        chart.kernel.viewport.actions.scrollTo(0)
+        chart.draw()
+        expect(axis.getDisplayRange()).toEqual(secondaryRange)
+
+        chart.scalePrice(MAIN_PANE_ID, -100)
+        chart.draw()
+        chart.setSymbols([primary])
+        chart.draw()
+        expect(axis.getDisplayRange().minPrice).toBeCloseTo(initialRange.minPrice)
+        expect(axis.getDisplayRange().maxPrice).toBeCloseTo(initialRange.maxPrice)
+        expect(chart.kernel.mainPriceAxis.readonly.rangeMode.peek()).toBe(
+          PRICE_AXIS_RANGE_MODE.HAND,
+        )
+      } finally {
+        await chart.destroy()
+      }
+    },
+  )
 
   beforeAll(async () => {
     await loadBuiltinIndicators()
@@ -158,7 +886,7 @@ describe('Chart DPR pipeline', () => {
   })
 
   it('mounts renderer layers for restored sub-pane indicators', async () => {
-    const chart = new Chart(createChartDom(1000, 600), defaultOptions, {
+    const chart = mountChart(1000, 600, {
       initialViewWorkspaces: {
         kline: {
           instances: [
@@ -187,22 +915,22 @@ describe('Chart DPR pipeline', () => {
       },
     })
 
-    const rsiRendererName = getRegisteredIndicatorDefinition('RSI')?.rendererFactory({
+    const rsiRendererName = getRegisteredIndicatorDefinition('RSI')?.getRendererName({
       paneId: 'RSI_0',
       indicatorId: 'RSI',
-      instanceId: 'rsi-instance',
-    }).name
+    })
     expect(rsiRendererName).toBeDefined()
-    expect(chart.getRenderer(rsiRendererName!)).toBeDefined()
+    expect(chart.getRenderer(makePluginLayerId(rsiRendererName!))).toBeDefined()
     await chart.destroy()
   })
 
   it('registers the latest price line and label layers and follows the data view', async () => {
-    const chart = new Chart(createChartDom(1000, 600), defaultOptions)
+    const chart = mountChart()
     const scene = chart['renderer'].getScene()
     for (const name of ['lastPriceLine', 'lastPriceLabelRegistrar']) {
-      expect(chart.getRenderer(name)).toBeDefined()
+      expect(chart.getRenderer(makePluginLayerId(name))).toBeDefined()
       expect(scene.getLayer(`plugin:${name}`)).toBeDefined()
+      expect(chart.getRenderer(makePluginLayerId(name))?.role).toBe('overlay')
     }
 
     chart['kernel'].actions.setDataView('timeshare')
@@ -217,7 +945,7 @@ describe('Chart DPR pipeline', () => {
 
   it('falls back to default observe when device-pixel-content-box observe fails', async () => {
     ResizeObserverMock.failWithDevicePixelBox = true
-    const chart = new Chart(createChartDom(1000, 600), defaultOptions)
+    const chart = mountChart()
 
     const ro = ResizeObserverMock.instances[0]
     expect(ro).toBeDefined()
@@ -230,65 +958,37 @@ describe('Chart DPR pipeline', () => {
     await chart.destroy()
   })
 
-  it('prefers precise DPR from ResizeObserver devicePixelContentBoxSize', async () => {
+  const dprCases = [
+    {
+      name: 'prefers the precise device-pixel box size',
+      ratio: 1,
+      devicePixel: [2000, 1200] as const,
+      expected: 2,
+    },
+    {
+      name: 'rounds window.devicePixelRatio when the precise box is unavailable',
+      ratio: 1.234,
+      expected: Math.round(1.234 * 64) / 64,
+    },
+    { name: 'clamps to at least 1', ratio: 0.5, expected: 1 },
+  ]
+
+  it.each(dprCases)('derives DPR: $name', async ({ ratio, devicePixel, expected }) => {
     Object.defineProperty(window, 'devicePixelRatio', {
       configurable: true,
       writable: true,
-      value: 1,
+      value: ratio,
     })
 
-    const chart = new Chart(createChartDom(1000, 600), defaultOptions)
-    const ro = ResizeObserverMock.instances[0]
-
-    ro?.emit({
-      contentRect: { width: 1000, height: 600 } as DOMRectReadOnly,
-      devicePixelContentBoxSize: [
-        { inlineSize: 2000, blockSize: 1200 },
-      ] as unknown as ResizeObserverSize[],
-      contentBoxSize: [{ inlineSize: 1000, blockSize: 600 }] as unknown as ResizeObserverSize[],
+    const chart = mountChart()
+    emitResize(ResizeObserverMock.instances[0]!, {
+      width: 1000,
+      height: 600,
+      devicePixelWidth: devicePixel?.[0],
+      devicePixelHeight: devicePixel?.[1],
     })
 
-    expect(chart.getCurrentDpr()).toBe(2)
-
-    await chart.destroy()
-  })
-
-  it('falls back to rounded window.devicePixelRatio when precise DPR is unavailable', async () => {
-    Object.defineProperty(window, 'devicePixelRatio', {
-      configurable: true,
-      writable: true,
-      value: 1.234,
-    })
-
-    const chart = new Chart(createChartDom(1000, 600), defaultOptions)
-    const ro = ResizeObserverMock.instances[0]
-
-    ro?.emit({
-      contentRect: { width: 1000, height: 600 } as DOMRectReadOnly,
-      contentBoxSize: [{ inlineSize: 1000, blockSize: 600 }] as unknown as ResizeObserverSize[],
-    })
-
-    expect(chart.getCurrentDpr()).toBe(Math.round(1.234 * 64) / 64)
-
-    await chart.destroy()
-  })
-
-  it('clamps DPR to at least 1', async () => {
-    Object.defineProperty(window, 'devicePixelRatio', {
-      configurable: true,
-      writable: true,
-      value: 0.5,
-    })
-
-    const chart = new Chart(createChartDom(1000, 600), defaultOptions)
-    const ro = ResizeObserverMock.instances[0]
-
-    ro?.emit({
-      contentRect: { width: 1000, height: 600 } as DOMRectReadOnly,
-      contentBoxSize: [{ inlineSize: 1000, blockSize: 600 }] as unknown as ResizeObserverSize[],
-    })
-
-    expect(chart.getCurrentDpr()).toBe(1)
+    expect(chart.getCurrentDpr()).toBe(expected)
 
     await chart.destroy()
   })
@@ -300,7 +1000,7 @@ describe('Chart DPR pipeline', () => {
       value: 3,
     })
 
-    const chart = new Chart(createChartDom(6000, 4000), defaultOptions)
+    const chart = mountChart(6000, 4000)
     chart.resize()
 
     const viewport = chart.getViewport()
@@ -311,7 +1011,7 @@ describe('Chart DPR pipeline', () => {
   })
 
   it('disconnects ResizeObserver on destroy', async () => {
-    const chart = new Chart(createChartDom(1000, 600), defaultOptions)
+    const chart = mountChart()
     const ro = ResizeObserverMock.instances[0]
 
     await chart.destroy()
@@ -320,7 +1020,7 @@ describe('Chart DPR pipeline', () => {
   })
 
   it('does not emit viewport change on draw when viewport is unchanged', async () => {
-    const chart = new Chart(createChartDom(1000, 600), defaultOptions)
+    const chart = mountChart()
     const onViewportChange = vi.fn()
 
     chart.viewport.subscribe(onViewportChange)
@@ -336,13 +1036,7 @@ describe('Chart DPR pipeline', () => {
   it('publishes each DOM scroll position before scheduling its frame', async () => {
     const dom = createChartDom(1000, 600)
     const chart = new Chart(dom, defaultOptions)
-    const data = Array.from({ length: 200 }, (_, index) => ({
-      timestamp: index,
-      open: 10,
-      high: 11,
-      low: 9,
-      close: 10,
-    }))
+    const data = makeBars(200)
     chart.setData(data)
     const scheduleDrawSpy = vi.spyOn(chart, 'scheduleDraw').mockImplementation(() => {})
 
@@ -357,11 +1051,11 @@ describe('Chart DPR pipeline', () => {
   })
 
   it('does not schedule redraw for identical render state', async () => {
-    const chart = new Chart(createChartDom(1000, 600), defaultOptions)
+    const chart = mountChart()
     const scheduleDrawSpy = vi.spyOn(chart, 'scheduleDraw')
 
-    chart.applyRenderState(12, 3, 2)
-    chart.applyRenderState(12, 3, 2)
+    chart.zoom.toLevel(2)
+    chart.zoom.toLevel(2)
 
     expect(scheduleDrawSpy).toHaveBeenCalledTimes(1)
 
@@ -369,7 +1063,7 @@ describe('Chart DPR pipeline', () => {
   })
 
   it('routes custom markers through kernel and clears position cache', async () => {
-    const chart = new Chart(createChartDom(1000, 600), defaultOptions)
+    const chart = mountChart()
     const manager = chart.markers.getManager()
     const scheduleDrawSpy = vi.spyOn(chart, 'scheduleDraw')
     const clearCacheSpy = vi.spyOn(manager, 'clearPositionCache')
@@ -406,18 +1100,10 @@ describe('Chart DPR pipeline', () => {
   })
 
   it('routes drawings through kernel for store projection', async () => {
-    const chart = new Chart(createChartDom(1000, 600), defaultOptions)
+    const chart = mountChart()
     const store = chart.drawing.getStore()
     const scheduleDrawSpy = vi.spyOn(chart, 'scheduleDraw')
-    const drawing = {
-      id: 'd1',
-      kind: 'trend-line' as const,
-      paneId: 'main',
-      visible: true,
-      anchors: [],
-      params: {},
-      style: { stroke: '#2962ff' },
-    }
+    const drawing = createTrendLine('d1')
 
     chart.drawing.setDrawings([drawing])
     expect(chart.drawing.drawings.peek().map((d) => d.id)).toEqual(['d1'])
@@ -437,13 +1123,11 @@ describe('Chart DPR pipeline', () => {
   })
 
   it('projectState does not commitLayout back to kernel', async () => {
-    const chart = new Chart(createChartDom(1000, 600), defaultOptions)
+    const chart = mountChart()
     const commitSpy = vi.spyOn(chart.kernel.pane.actions, 'commitLayout')
     commitSpy.mockClear()
 
-    const layout = (
-      chart as unknown as { layoutManager: { projectState: (...args: unknown[]) => unknown } }
-    ).layoutManager
+    const layout = chart['layoutManager']
     layout.projectState(
       [
         { id: 'main', ratio: 0.7, role: 'price', visible: true },
@@ -470,7 +1154,7 @@ describe('Chart pane layout regressions', () => {
   })
 
   it('allocates initial pane ratios as 3:1:1 for main+MACD+RSI', async () => {
-    const chart = new Chart(createChartDom(1000, 600), defaultOptions)
+    const chart = mountChart()
     chart.resize()
 
     expect(chart.panes.create({ paneId: 'MACD_0', indicatorId: 'MACD', params: {} })).toBe(true)
@@ -489,7 +1173,7 @@ describe('Chart pane layout regressions', () => {
   })
 
   it('keeps indicator pane heights equal for main+MACD+RSI', async () => {
-    const chart = new Chart(createChartDom(1000, 600), defaultOptions)
+    const chart = mountChart()
     chart.resize()
     chart.panes.create({ paneId: 'MACD_0', indicatorId: 'MACD', params: {} })
     chart.panes.create({ paneId: 'RSI_0', indicatorId: 'RSI', params: {} })
@@ -507,7 +1191,7 @@ describe('Chart pane layout regressions', () => {
   })
 
   it('keeps visible ratio sum at 1 after boundary resize', async () => {
-    const chart = new Chart(createChartDom(1000, 800), defaultOptions)
+    const chart = mountChart(1000, 800)
     chart.resize()
     chart.panes.create({ paneId: 'MACD_0', indicatorId: 'MACD', params: {} })
     chart.panes.create({ paneId: 'RSI_0', indicatorId: 'RSI', params: {} })
@@ -524,7 +1208,7 @@ describe('Chart pane layout regressions', () => {
   })
 
   it('returns false and keeps layout unchanged for invalid boundary resize input', async () => {
-    const chart = new Chart(createChartDom(1000, 600), defaultOptions)
+    const chart = mountChart()
     chart.resize()
     chart.panes.create({ paneId: 'MACD_0', indicatorId: 'MACD', params: {} })
     chart.panes.create({ paneId: 'RSI_0', indicatorId: 'RSI', params: {} })
@@ -542,86 +1226,168 @@ describe('Chart pane layout regressions', () => {
     await chart.destroy()
   })
 
-  it('updateSettings mainRightAxisTypeSetting writes paneScaleTypes then projects', async () => {
-    const chart = new Chart(createChartDom(1000, 600), defaultOptions)
+  it('projects the price axis scale from settings and data view', async () => {
+    const chart = mountChart()
     chart.resize()
     chart.updateSettings({ mainRightAxisTypeSetting: 'log' })
     expect(chart.kernel.pane.readonly.paneScaleTypes.peek().get('main')).toBe('log')
-    const main = chart.getPaneRenderers()[0]?.getPane()
-    expect(main?.yAxis.getScaleType()).toBe('log')
-    await chart.destroy()
-  })
+    expect(chart.getPaneRenderers()[0]?.getPane().yAxis.getScaleType()).toBe('log')
 
-  it('createPane seeds scale from settings and projects', async () => {
-    const chart = new Chart(createChartDom(1000, 600), defaultOptions)
-    chart.resize()
-    chart.updateSettings({ mainRightAxisTypeSetting: 'log' })
+    // 副图不继承主图设置，独立切换后也不被主图覆盖。
     expect(chart.panes.create({ paneId: 'MACD_0', indicatorId: 'MACD', params: {} })).toBe(true)
-    expect(chart.kernel.pane.readonly.paneScaleTypes.peek().get('main')).toBe('log')
-    expect(chart.kernel.pane.readonly.paneScaleTypes.peek().get('MACD_0')).toBe('log')
+    expect(chart.kernel.pane.readonly.paneScaleTypes.peek().get('MACD_0')).toBe(ScaleType.Linear)
     const macd = chart
       .getPaneRenderers()
       .find((r) => r.getPane().id === 'MACD_0')
       ?.getPane()
-    expect(macd?.yAxis.getScaleType()).toBe('log')
-    await chart.destroy()
-  })
+    expect(macd?.yAxis.getScaleType()).toBe(ScaleType.Linear)
+    chart.setPanePriceAxisScaleType('MACD_0', ScaleType.Log)
+    chart.setPanePriceAxisRangeMode('MACD_0', PRICE_AXIS_RANGE_MODE.HAND)
+    chart.updateSettings({ mainRightAxisTypeSetting: ScaleType.Percent })
+    expect(macd?.yAxis.getScaleType()).toBe(ScaleType.Log)
+    expect(chart.kernel.mainPriceAxis.readonly.paneRanges.peek().MACD_0?.rangeMode).toBe(
+      PRICE_AXIS_RANGE_MODE.HAND,
+    )
+    expect(chart.kernel.mainPriceAxis.readonly.rangeMode.peek()).toBe(PRICE_AXIS_RANGE_MODE.AUTO)
 
-  it('enter timeshare writes the price pane percent scale to kernel', async () => {
-    const chart = new Chart(createChartDom(1000, 600), defaultOptions)
-    chart.resize()
-    chart.updateSettings({ mainRightAxisTypeSetting: 'log' })
-    const tsMode = (
-      chart as unknown as { _timeShareMode: import('../modes/types').ChartModeHandler }
-    )._timeShareMode
-    chart.setActiveMode(tsMode)
+    // 分时视图强制主图 percent，覆盖设置里的 log。
+    chart.setActiveMode(getModeHandlers(chart).timeShare)
     expect(chart.kernel.pane.readonly.paneScaleTypes.peek().get('main')).toBe('percent')
     expect(chart.getPaneRenderers()[0]?.getPane().yAxis.getScaleType()).toBe('percent')
     expect(chart.kernel.mode.readonly.dataView.peek()).toBe('timeshare')
     await chart.destroy()
   })
 
-  it('setActiveMode updates kernel chartMode', async () => {
-    const chart = new Chart(createChartDom(1000, 600), defaultOptions)
-    expect(chart.kernel.mode.readonly.chartMode.peek()).toBe('kline')
-    const tsMode = (
-      chart as unknown as { _timeShareMode: import('../modes/types').ChartModeHandler }
-    )._timeShareMode
-    const kMode = (chart as unknown as { _kLineMode: import('../modes/types').ChartModeHandler })
-      ._kLineMode
-    chart.setActiveMode(tsMode)
-    expect(chart.kernel.mode.readonly.chartMode.peek()).toBe('timeshare')
-    chart.setActiveMode(kMode)
-    expect(chart.kernel.mode.readonly.chartMode.peek()).toBe('kline')
+  it('can turn off a restored main log axis when the settings preference is already linear', async () => {
+    const source = mountChart()
+    source.setPanePriceAxisScaleType(MAIN_PANE_ID, ScaleType.Log)
+    const initialViewWorkspaces = source.kernel.snapshotViewWorkspaces()
+    await source.destroy()
+    const chart = mountChart(1000, 600, {
+      initialSettings: { mainRightAxisTypeSetting: ScaleType.Linear },
+      initialViewWorkspaces,
+    })
+    expect(chart.kernel.pane.readonly.paneScaleTypes.peek().get(MAIN_PANE_ID)).toBe(ScaleType.Log)
+    chart.setPanePriceAxisScaleType(MAIN_PANE_ID, ScaleType.Linear)
+    expect(chart.kernel.pane.readonly.paneScaleTypes.peek().get(MAIN_PANE_ID)).toBe(
+      ScaleType.Linear,
+    )
+    expect(chart.getPaneRenderers()[0]?.getPane().yAxis.getScaleType()).toBe(ScaleType.Linear)
+    await chart.destroy()
+  })
+
+  it('pans a manual sub-pane horizontally and vertically without moving the main price range', async () => {
+    const chart = mountChart()
+    chart.setData(makeBars(500))
+    chart.panes.create({ paneId: 'MACD_0', indicatorId: 'MACD', params: {} })
+    chart.resize()
+    chart.draw()
+    chart.setPanePriceAxisRangeMode('MACD_0', PRICE_AXIS_RANGE_MODE.HAND)
+    const pane = chart
+      .getPaneRenderers()
+      .find((renderer) => renderer.getPane().id === 'MACD_0')!
+      .getPane()
+    const before = chart.kernel.mainPriceAxis.readonly.paneRanges.peek()
+    chart.kernel.viewport.actions.scrollTo(
+      chart.kernel.viewport.readonly.leftLoadBufferWidth.peek() + 100,
+    )
+    const dom = chart.getDom()
+    dom.container.hasPointerCapture = () => false
+    const mouse = { pointerType: 'mouse', clientY: pane.top + pane.height / 2 }
+    chart.handlePointerEvent(pointerEvent('pointerdown', dom.container, mouse))
+    chart.handlePointerEvent(
+      pointerEvent('pointermove', dom.container, {
+        ...mouse,
+        clientX: 120,
+        clientY: mouse.clientY + 20,
+      }),
+    )
+    expect(chart.kernel.viewport.readonly.scrollLeftLogical.peek()).toBe(80)
+    expect(chart.kernel.mainPriceAxis.readonly.paneRanges.peek().MACD_0?.handRange).not.toEqual(
+      before.MACD_0?.handRange,
+    )
+    expect(chart.kernel.mainPriceAxis.readonly.paneRanges.peek()[MAIN_PANE_ID]).toEqual(
+      before[MAIN_PANE_ID],
+    )
+    chart.handlePointerEvent(pointerEvent('pointerup', dom.container, mouse))
+    await chart.destroy()
+  })
+
+  it('restores each pane range mode from the persisted snapshot over the settings preference', async () => {
+    const chart = mountChart(1000, 600, {
+      initialSettings: { mainPriceAxisRangeMode: PRICE_AXIS_RANGE_MODE.AUTO },
+      initialPanePriceAxisModes: {
+        [MAIN_PANE_ID]: PRICE_AXIS_RANGE_MODE.HAND,
+        RSI_0: PRICE_AXIS_RANGE_MODE.HAND,
+      },
+      initialViewWorkspaces: {
+        kline: {
+          instances: [
+            {
+              instanceId: 'user:rsi-0',
+              indicatorId: 'RSI',
+              paneId: 'RSI_0',
+              role: 'sub',
+              ordinal: 0,
+              params: {},
+            },
+          ],
+          paneRatios: { main: 0.75, RSI_0: 0.25 },
+          paneSpecs: [
+            { id: 'main', ratio: 0.75, role: 'price' },
+            { id: 'RSI_0', ratio: 0.25, role: 'indicator' },
+          ],
+          paneScaleTypes: {},
+        },
+        timeshare: {
+          instances: [],
+          paneRatios: { main: 1 },
+          paneSpecs: [{ id: 'main', ratio: 1, role: 'price' }],
+          paneScaleTypes: {},
+        },
+      },
+    })
+
+    const ranges = chart.kernel.mainPriceAxis.readonly.paneRanges.peek()
+    expect(ranges[MAIN_PANE_ID]?.rangeMode).toBe(PRICE_AXIS_RANGE_MODE.HAND)
+    expect(ranges.RSI_0?.rangeMode).toBe(PRICE_AXIS_RANGE_MODE.HAND)
+    // 只持久化模式；手动范围值不落盘，恢复后为空，等首个有效帧再初始化。
+    expect(ranges[MAIN_PANE_ID]?.handRange).toBeNull()
+    await chart.destroy()
+  })
+
+  it('persists pane range modes through the injected adapter', async () => {
+    const chart = mountChart()
+    chart.setData(makeBars(10))
+    const schedule = vi.fn()
+    chart.setPanePriceAxisPersistence({ schedule, dispose: vi.fn() })
+
+    expect(chart.panes.create({ paneId: 'MACD_0', indicatorId: 'MACD', params: {} })).toBe(true)
+    chart.setPanePriceAxisRangeMode('MACD_0', PRICE_AXIS_RANGE_MODE.HAND)
+
+    expect(schedule).toHaveBeenCalled()
+    expect(chart.snapshotPanePriceAxisModes().MACD_0).toBe(PRICE_AXIS_RANGE_MODE.HAND)
     await chart.destroy()
   })
 
   it('clears stale canvases and cached geometry when switching data views', async () => {
-    const chart = new Chart(createChartDom(1000, 600), defaultOptions)
-    const renderer = (
-      chart as unknown as {
-        renderer: { clearAllCanvases: () => void; clearCachedFrame: () => void }
-      }
-    ).renderer
+    const chart = mountChart()
+    const renderer = chart['renderer']
     const clearCanvases = vi.spyOn(renderer, 'clearAllCanvases')
     const clearCachedFrame = vi.spyOn(renderer, 'clearCachedFrame')
-    ;(
-      chart as unknown as { _legendTemplateContext: { set: (value: unknown) => void } }
-    )._legendTemplateContext.set({ stale: true })
-    const tsMode = (
-      chart as unknown as { _timeShareMode: import('../modes/types').ChartModeHandler }
-    )._timeShareMode
+    const setLegendContext = vi.spyOn(chart['_legendTemplateContext'], 'set')
 
-    chart.setActiveMode(tsMode)
+    chart.setActiveMode(getModeHandlers(chart).timeShare)
 
     expect(clearCanvases).toHaveBeenCalledOnce()
     expect(clearCachedFrame).toHaveBeenCalledOnce()
+    expect(setLegendContext).toHaveBeenCalledWith(null)
     expect(chart.legendTemplateContext.peek()).toBeNull()
     await chart.destroy()
   })
 
   it('timeshare switching preserves independent indicator workspaces and layouts', async () => {
-    const chart = new Chart(createChartDom(1000, 600), defaultOptions)
+    const chart = mountChart()
     chart.resize()
     expect(chart.indicators.enableMain('MA')).toBe(true)
     expect(chart.panes.create({ paneId: 'MACD_0', indicatorId: 'MACD', params: {} })).toBe(true)
@@ -632,11 +1398,8 @@ describe('Chart pane layout regressions', () => {
       indicatorId: e.indicatorId,
     }))
 
-    const tsMode = (
-      chart as unknown as { _timeShareMode: import('../modes/types').ChartModeHandler }
-    )._timeShareMode
-    const kMode = (chart as unknown as { _kLineMode: import('../modes/types').ChartModeHandler })
-      ._kLineMode
+    const tsMode = getModeHandlers(chart).timeShare
+    const kMode = getModeHandlers(chart).kLine
     chart.setActiveMode(tsMode)
     expect(chart.indicators.subPanes.peek()).toEqual([])
     expect(
@@ -665,15 +1428,12 @@ describe('Chart pane layout regressions', () => {
   })
 
   it('timeshare does not reuse a K-line volume pane', async () => {
-    const chart = new Chart(createChartDom(1000, 600), defaultOptions)
+    const chart = mountChart()
     chart.resize()
     const volumePaneId = chart.indicators.add('VOL', 'sub')
     expect(volumePaneId).not.toBeNull()
-    const tsMode = (
-      chart as unknown as { _timeShareMode: import('../modes/types').ChartModeHandler }
-    )._timeShareMode
-    const kMode = (chart as unknown as { _kLineMode: import('../modes/types').ChartModeHandler })
-      ._kLineMode
+    const tsMode = getModeHandlers(chart).timeShare
+    const kMode = getModeHandlers(chart).kLine
 
     chart.setActiveMode(tsMode)
     expect(chart.indicators.subPanes.peek()).toEqual([])
@@ -696,17 +1456,9 @@ describe('Chart pane layout regressions', () => {
   })
 
   it('removeDrawing drops id from kernel and clears selection', async () => {
-    const chart = new Chart(createChartDom(1000, 600), defaultOptions)
-    const d1 = {
-      id: 'd1',
-      kind: 'trend-line' as const,
-      paneId: 'main',
-      visible: true,
-      anchors: [],
-      params: {},
-      style: { stroke: '#f00' },
-    }
-    const d2 = { ...d1, id: 'd2' }
+    const chart = mountChart()
+    const d1 = createTrendLine('d1', { style: { stroke: '#f00' } })
+    const d2 = createTrendLine('d2', { style: { stroke: '#f00' } })
     chart.drawing.setDrawings([d1, d2])
     chart.drawing.setSelectedIds(['d1'])
     chart.drawing.remove('d1')
@@ -721,18 +1473,9 @@ describe('Chart pane layout regressions', () => {
   })
 
   it('removeDrawing with registered session updates kernel only', async () => {
-    const { DrawingInteractionController } = await import('../drawing/index')
-    const chart = new Chart(createChartDom(1000, 600), defaultOptions)
-    const d1 = {
-      id: 'd1',
-      kind: 'trend-line' as const,
-      paneId: 'main',
-      visible: true,
-      anchors: [],
-      params: {},
-      style: { stroke: '#f00' },
-    }
-    const d2 = { ...d1, id: 'd2' }
+    const chart = mountChart()
+    const d1 = createTrendLine('d1', { style: { stroke: '#f00' } })
+    const d2 = createTrendLine('d2', { style: { stroke: '#f00' } })
     chart.drawing.setDrawings([d1, d2])
     chart.drawing.setSelectedIds(['d1'])
 
@@ -770,7 +1513,7 @@ describe('Chart pane layout regressions', () => {
     await chart.destroy()
   })
   it('setDrawingTool writes DrawingToolId to kernel', async () => {
-    const chart = new Chart(createChartDom(1000, 600), defaultOptions)
+    const chart = mountChart()
     expect(chart.kernel.drawing.readonly.drawingTool.peek()).toBe('cursor')
     chart.drawing.setTool('trend-line')
     expect(chart.kernel.drawing.readonly.drawingTool.peek()).toBe('trend-line')
@@ -779,27 +1522,20 @@ describe('Chart pane layout regressions', () => {
     await chart.destroy()
   })
 
-  it('updateSettings writes kernel settings SSOT for renderer reads', async () => {
-    const chart = new Chart(createChartDom(1000, 600), defaultOptions)
-    chart.updateSettings({ showGridLines: false, mainRightAxisTypeSetting: 'log' })
-    expect(chart.kernel.settings.readonly.settings.peek().showGridLines).toBe(false)
-    expect(chart.kernel.settings.readonly.settings.peek().mainRightAxisTypeSetting).toBe('log')
+  it('merges settings patches, keeps them in kernel SSOT and exposes them to the renderer', async () => {
+    const chart = mountChart()
+    chart.updateSettings({ showGridLines: false })
+    chart.updateSettings({ mainRightAxisTypeSetting: 'log' })
+    const settings = chart.kernel.settings.readonly.settings.peek()
+    expect(settings.showGridLines).toBe(false)
+    expect(settings.mainRightAxisTypeSetting).toBe('log')
     expect(chart['renderer'].getSettings().showGridLines).toBe(false)
     expect(chart['renderer'].getSettings().mainRightAxisTypeSetting).toBe('log')
     await chart.destroy()
   })
 
-  it('updateSettings partial patch preserves prior keys', async () => {
-    const chart = new Chart(createChartDom(1000, 600), defaultOptions)
-    chart.updateSettings({ showGridLines: false })
-    chart.updateSettings({ mainRightAxisTypeSetting: 'log' })
-    expect(chart.kernel.settings.readonly.settings.peek().showGridLines).toBe(false)
-    expect(chart.kernel.settings.readonly.settings.peek().mainRightAxisTypeSetting).toBe('log')
-    await chart.destroy()
-  })
-
   it('normalizes only visible panes in imported layout', async () => {
-    const chart = new Chart(createChartDom(1000, 800), defaultOptions)
+    const chart = mountChart(1000, 800)
     chart.panes.importLayout([
       { id: 'main', ratio: 3, visible: true, role: 'price' },
       { id: 'sub_MACD', ratio: 1, visible: true, role: 'indicator' },

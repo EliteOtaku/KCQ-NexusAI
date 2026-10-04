@@ -1,17 +1,25 @@
 /** 验证最新价标签经轴标签模块注册到右轴 overlay 表面。 */
-import { describe, expect, it, vi } from 'vitest'
-import {
-  createLastPriceLabelRegistrarPlugin,
-  createLastPriceLineRendererPlugin,
-} from '@/core/renderers/lastPrice'
+import { describe, expect, it } from 'vitest'
+import { createLastPriceLabelLayer, createLastPriceLineLayer } from '@/core/renderers/lastPrice'
 import {
   createMockCanvasContext,
   createMockRenderContext,
 } from '@/engine/__tests__/helpers/renderTestKit'
+import type { RenderContext } from '@/foundation/plugin/index'
 import { resolveThemeColors } from '@/foundation/tokens/index'
 import { ChartDataViewId } from '@/foundation/types/chartView'
 
-describe('createLastPriceLabelRegistrarPlugin', () => {
+/** 以主图身份调用最新价标签 Layer.paint。 */
+function paintLabel(context: RenderContext): void {
+  createLastPriceLabelLayer().paint({ ...context, paneId: 'main', clear: false })
+}
+
+/** 以主图身份调用最新价线 Layer.paint。 */
+function paintLine(context: RenderContext): void {
+  createLastPriceLineLayer().paint({ ...context, paneId: 'main', clear: false })
+}
+
+describe('createLastPriceLabelLayer', () => {
   it('registers the last price label on the right overlay surface', () => {
     const context = createMockRenderContext({
       dataView: ChartDataViewId.KLine,
@@ -21,31 +29,45 @@ describe('createLastPriceLabelRegistrarPlugin', () => {
       ],
     })
 
-    createLastPriceLabelRegistrarPlugin().draw(context)
+    paintLabel(context)
 
     expect(context.axisLabels.forSurface('yRightOverlay', 'main').labels).toEqual([
       expect.objectContaining({ kind: 'tag', type: 'lastPrice', text: '95.00' }),
     ])
   })
 
-  it('registers the remaining time for a live supported bar', () => {
-    const now = 1_700_000_000_000
-    vi.setSystemTime(now)
-    try {
-      const context = createMockRenderContext({
-        dataView: ChartDataViewId.KLine,
-        period: '5min',
-        data: [{ timestamp: now, open: 90, high: 96, low: 89, close: 95 }],
-      })
+  it.each(['05:00', undefined])('uses the frame countdown %s without reading time', (countdown) => {
+    const context = createMockRenderContext({
+      dataView: ChartDataViewId.KLine,
+      countdown,
+      data: [{ timestamp: 1_000, open: 90, high: 96, low: 89, close: 95 }],
+    })
 
-      createLastPriceLabelRegistrarPlugin().draw(context)
+    paintLabel(context)
 
-      expect(context.axisLabels.forSurface('yRightOverlay', 'main').labels).toEqual([
-        expect.objectContaining({ type: 'lastPrice', countdown: '05:00' }),
-      ])
-    } finally {
-      vi.useRealTimers()
-    }
+    expect(context.axisLabels.forSurface('yRightOverlay', 'main').labels).toEqual([
+      expect.objectContaining({ type: 'lastPrice', countdown }),
+    ])
+  })
+
+  it('formats the label as a percentage on the percent axis', () => {
+    const context = createMockRenderContext({
+      dataView: ChartDataViewId.KLine,
+      settings: { mainRightAxisTypeSetting: 'percent' },
+      pane: {
+        yAxis: { toPercent: (price: number) => ((price - 100) / 100) * 100 },
+      },
+      data: [
+        { timestamp: 1_000, open: 100, high: 110, low: 90, close: 100 },
+        { timestamp: 2_000, open: 100, high: 110, low: 90, close: 105 },
+      ],
+    })
+
+    paintLabel(context)
+
+    expect(context.axisLabels.forSurface('yRightOverlay', 'main').labels).toEqual([
+      expect.objectContaining({ type: 'lastPrice', text: '+5.00%' }),
+    ])
   })
 
   it('does not register when the last close is outside the display range', () => {
@@ -58,13 +80,13 @@ describe('createLastPriceLabelRegistrarPlugin', () => {
       pane: { yAxis: { getDisplayRange: () => ({ minPrice: 0, maxPrice: 100 }) } },
     })
 
-    createLastPriceLabelRegistrarPlugin().draw(context)
+    paintLabel(context)
 
     expect(context.axisLabels.forSurface('yRightOverlay', 'main').labels).toEqual([])
   })
 })
 
-describe('createLastPriceLineRendererPlugin', () => {
+describe('createLastPriceLineLayer', () => {
   it.each([
     { close: 105, direction: 'up' },
     { close: 95, direction: 'down' },
@@ -79,8 +101,8 @@ describe('createLastPriceLineRendererPlugin', () => {
       overlayCtx: createMockCanvasContext(),
     })
 
-    createLastPriceLabelRegistrarPlugin().draw(context)
-    createLastPriceLineRendererPlugin().draw(context)
+    paintLabel(context)
+    paintLine(context)
 
     const label = context.axisLabels.forSurface('yRightOverlay', 'main').labels[0]
     const colors = resolveThemeColors(

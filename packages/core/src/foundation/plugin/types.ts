@@ -334,6 +334,8 @@ export interface IndicatorRenderStateReader {
 
 /** 渲染数据子契约：序列数据、数据视图与时间解析。 */
 export interface RenderDataContext {
+  /** 主序列提交版本；直接绘制的调用方缺省时不保留跨帧几何。 */
+  dataRevision?: number
   /** 当前帧的序列数据：K 线视图为 KLineData，分时视图为 TimeShareData。 */
   data: ReadonlyArray<ChartSeriesDatum>
   /** K线级别，如 'daily'、'5min'、'15min' */
@@ -349,6 +351,10 @@ export interface RenderDataContext {
   comparisonData?: ReadonlyMap<string, ReadonlyArray<KLineData>>
   comparisonSymbols?: ReadonlyArray<import('../../controllers/types.js').SymbolSpec>
   comparisonColors?: ReadonlyMap<string, string>
+  /** 比较品种的隐藏状态，图例保留名称供恢复显示。 */
+  comparisonHidden?: ReadonlyMap<string, boolean>
+  /** K 线原生比较单帧投影，蜡烛、折线与坐标轴共享同一基准。 */
+  comparisonProjection?: import('../../engine/chartModel/index.js').ComparisonProjection
   /** 由活动数据 Buffer 提供的唯一时间戳到逻辑索引解析。 */
   getLogicalIndexAtTimestamp: (timestamp: number) => number | null
   /** 逻辑索引 → X 轴时间戳；未来槽位仅由数据源交易日历提供，无对应值时为 null。 */
@@ -375,7 +381,7 @@ export interface RenderGeometryContext {
   kWidthPx: number
   /** K 线真正可视区的 high/low 及其索引；由帧准备阶段计算，供多个 renderer 共享。 */
   visiblePriceExtrema?:
-    | import('../../engine/utils/visiblePriceExtrema.js').VisiblePriceExtrema
+    | import('../../engine/viewport/visiblePriceExtrema.js').VisiblePriceExtrema
     | null
   /** 本帧可视极值跨越右轴文字数量级边界，允许低频实测并调整宽度。 */
   requiresRightAxisWidthMeasurement?: boolean
@@ -407,11 +413,15 @@ export interface RenderAxisContext {
 
 /** 覆盖层子契约：十字线、标记器与绘图帧投影。 */
 export interface RenderOverlayContext {
+  /** 帧准备阶段派生的最新价倒计时；不存在时使用单行价签。 */
+  countdown?: string
   /** 十字线指向的 K 线索引（无十字线时为 null） */
   crosshairIndex?: number | null
   markerManager?: MarkerManagerLike
   /** 绘图系统预先生成的当前 Pane 帧投影。 */
   drawingProjection?: DrawingFrameProjection
+  /** 会话图元（拖拽覆盖、预览和框选）的独立投影。 */
+  sessionDrawingProjection?: DrawingFrameProjection
 }
 
 /** 指标子契约：指标帧快照与 GPU Scene 渲染器。 */
@@ -419,7 +429,7 @@ export interface RenderIndicatorContext {
   /** 当前帧绑定的指标渲染快照，所有指标 renderer 共用同一版本。 */
   indicatorStateReader?: IndicatorRenderStateReader
   /**
-   * Scene 本帧 Renderer（createLayerFromPlugin 注入）。
+   * Scene 本帧 Renderer（Scene.paint 注入）。
    * 业务绘制经 drawInstances / drawLines；失败 fail-closed 走 2D。
    */
   sceneRenderer?: import('../../rendering/render/Renderer.js').Renderer
@@ -430,6 +440,8 @@ export interface RenderSurfaceContext {
   ctx: CanvasRenderingContext2D
   /** 覆盖层 Canvas 上下文（用于十字线、Tooltip 等动态内容） */
   overlayCtx?: CanvasRenderingContext2D
+  /** 正式图元的独立画布，不随动态覆盖层清屏。 */
+  drawingCtx?: CanvasRenderingContext2D
   yAxisCtx?: CanvasRenderingContext2D
   /** 轴区动态层（最新价标签、十字线价签） */
   yAxisOverlayCtx?: CanvasRenderingContext2D
@@ -452,6 +464,28 @@ export interface RenderThemeContext {
 }
 
 /**
+ * 帧级绘制上下文：Scene 在分发每个 Layer 前注入的帧字段。
+ * 与业务 `RenderContext` 是**组装关系而非继承关系**——业务帧即 RenderContext，
+ * 泛型 `TFrame` 由使用方实例化，Scene 只透传。
+ */
+export interface FrameDrawContext {
+  /** 本帧渲染后端；Scene 注入，直接绘制（测试）时可缺省。 */
+  sceneRenderer?: RendererLike
+}
+
+/** 渲染器插件可用的最小渲染后端契约（避免 foundation 依赖 rendering 层）。 */
+export interface RendererLike {
+  readonly caps: { readonly name: string }
+}
+
+/**
+ * Layer.paint 收到的完整上下文：业务帧 `TFrame` + 帧字段。
+ * 泛型实例化后（图表侧 `TFrame = RenderContext`）等价于旧的 RenderContext 形状。
+ */
+export type DrawContext<TFrame = RenderContext, TSceneRenderer = RendererLike> = TFrame &
+  FrameDrawContext & { sceneRenderer?: TSceneRenderer }
+
+/**
  * 渲染上下文：由各职责子契约组合而成。
  * 渲染器只需其中部分能力时，参数应声明对应子契约而非本组合类型。
  */
@@ -462,7 +496,13 @@ export interface RenderContext
     RenderIndicatorContext,
     RenderOverlayContext,
     RenderSurfaceContext,
-    RenderThemeContext {}
+    RenderThemeContext {
+  /** 发布标题展示行给独立 DOM renderer，不参与指标计算。 */
+  publishLegendRows?: (
+    paneId: string,
+    rows: ReadonlyArray<import('../../engine/renderers/legend/types.js').LegendRow>,
+  ) => void
+}
 
 /** 绘图渲染 primitive 契约：仅保留 `RenderContext`/`DrawingFrameProjection` 依赖的屏幕原语。 */
 
@@ -559,67 +599,6 @@ export type DrawingPrimitive =
   | AreaPrimitive
   | TextPrimitive
   | ArrowPrimitive
-
-/** 渲染器插件接口（独立定义，不继承 Plugin） */
-export interface RendererPlugin {
-  /** 唯一标识 */
-  readonly name: string
-
-  /** 版本号 */
-  readonly version?: string
-
-  /** 描述 */
-  readonly description?: string
-
-  /** 调试用显示名称 */
-  readonly debugName?: string
-
-  /** 渲染目标 pane（'main' | 'sub' | GLOBAL_PANE_ID 表示所有） */
-  paneId: string | symbol
-
-  /** 渲染优先级（数字越大越后渲染） */
-  priority: number
-
-  /** 是否启用（仅作为初始值，运行时状态由 Manager 管理） */
-  enabled?: boolean
-
-  /**
-   * 是否为系统渲染器（时间轴等）。
-   * 调度由 Scene Layer 负责；Manager 仅作注册表。
-   */
-  isSystem?: boolean
-
-  /**
-   * 渲染器所属层，供 Scene role 过滤
-   * - 'main': 低频/静态内容
-   * - 'overlay': 高频/动态内容
-   * 未指定时默认为 'main'
-   */
-  layer?: 'main' | 'overlay'
-
-  /** 渲染方法 */
-  draw(context: RenderContext): void
-
-  /** 容器尺寸变化时回调 */
-  onResize?(pane: PaneInfo): void
-
-  /** 获取配置 */
-  getConfig?(): Record<string, unknown>
-
-  /** 设置配置 */
-  setConfig?(config: Record<string, unknown>): void
-
-  /** 卸载时清理资源 */
-  onUninstall?(): void
-}
-
-/** 带插件系统能力的渲染器（可选） */
-export interface RendererPluginWithHost extends RendererPlugin {
-  /** 安装时获取 PluginHost 访问权限 */
-  onInstall?(host: PluginHost): void
-  /** 声明该渲染器所拥有的状态命名空间，卸载时框架会自动清理 */
-  getDeclaredNamespaces?(): string[]
-}
 
 // ============ 状态存储类型 ============
 
