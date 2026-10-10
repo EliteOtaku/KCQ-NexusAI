@@ -3,7 +3,7 @@ import { RENDERER_PRIORITY } from '@/foundation/plugin/index.js'
 import { resolveThemeColors } from '@/foundation/tokens/index.js'
 import type { Layer } from '@/rendering/scene/types.js'
 import { calcDMAData } from '../../indicators/calculators/index.js'
-import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { Indicator } from '../../indicators/indicatorDecorator.js'
 import type { GetTitleInfoFn } from '../../indicators/indicatorMetadata.js'
 import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
 import type { DMARenderState } from '../../indicators/state/dmaState.js'
@@ -23,7 +23,7 @@ interface DMARendererOptions {
 function createDMALayer(options: DMARendererOptions = {}): Layer<RenderContext> {
   const { paneId = 'main', instanceId } = options
   return createIndicatorRendererLayer({
-    name: `dma_${paneId}`,
+    definitionId: 'dma',
     paneId,
     z: RENDERER_PRIORITY.INDICATOR,
     draw(context) {

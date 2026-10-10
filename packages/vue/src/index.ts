@@ -53,6 +53,8 @@ export type {
   LegendTemplateContext,
   LegendTimeshareRow,
 } from '@363045841yyt/klinechart-core/controllers'
+export { default as ColorPicker } from './components/ColorPicker.vue'
+export type { ColorPickerProps } from './components/color-picker/types.js'
 
 export type {
   KlineTooltipSlotProps,
@@ -77,13 +79,14 @@ export { default as AgentWorkbenchShell } from './features/agent/AgentWorkbenchS
 export * from './features/agent/agent-contracts.js'
 export { default as AgentWorkspace } from './features/agent/components/AgentWorkspace.vue'
 export { createAgentPanelWidthStorage } from './features/agent/workspace/impl/agent-panel-width-storage.js'
-export {
-  createInitialAgentState,
-  reduceAgentUiEvent,
-} from './features/agent/workspace/impl/agent-reducer.js'
 export { useAgentWorkspace } from './features/agent/workspace/impl/use-agent-workspace.js'
+export {
+  createWorkspaceState,
+  displayConversation,
+} from './features/agent/workspace/impl/workspace-state.js'
 export type {
   AgentPanelWidthStorage,
+  AgentWorkspaceAvailability,
   AgentWorkspaceState,
 } from './features/agent/workspace/types.js'
 
@@ -265,7 +268,7 @@ export function useIndicatorSelector(controller: ChartController): {
   filteredSub: ComputedRef<ReadonlyArray<IndicatorDefinition>>
   menuOpen: ComputedRef<boolean>
   searchQuery: ComputedRef<string>
-  add: (definitionId: string) => string | null
+  add: (definitionId: string) => Promise<string | null>
   remove: (instanceId: string) => boolean
   openMenu: () => void
   closeMenu: () => void
@@ -284,9 +287,11 @@ export function useIndicatorSelector(controller: ChartController): {
   const menuOpen = coreSignalToVueRef(selector.menuOpen)
   const searchQuery = coreSignalToVueRef(selector.searchQuery)
 
-  function add(definitionId: string): string | null {
+  /** 先按需加载指标实现，再添加到对应位置。 */
+  async function add(definitionId: string): Promise<string | null> {
     const def = controller.catalog.find((d) => d.id === definitionId)
     if (def === undefined) return null
+    await controller.loadIndicators([definitionId])
     return controller.addIndicator(definitionId, def.role)
   }
 

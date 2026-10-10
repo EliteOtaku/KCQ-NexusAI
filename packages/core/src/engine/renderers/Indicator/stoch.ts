@@ -6,7 +6,7 @@ import type { KLineData } from '@/foundation/types/price.js'
 import type { Layer } from '@/rendering/scene/types.js'
 import { ChartDataViewId } from '../../chartModel/index.js'
 import { calcSTOCHData } from '../../indicators/calculators/index.js'
-import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { Indicator } from '../../indicators/indicatorDecorator.js'
 import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
 import type { STOCHRenderState } from '../../indicators/state/stochState.js'
 import { EMPTY_STOCH_STATE } from '../../indicators/state/stochState.js'
@@ -75,7 +75,7 @@ function createSTOCHLayer(options: STOCHRendererOptions = {}): Layer<RenderConte
   }
 
   return createIndicatorRendererLayer({
-    name: `stoch_${paneId}`,
+    definitionId: 'stoch',
     paneId,
     z: RENDERER_PRIORITY.INDICATOR,
     draw(context) {

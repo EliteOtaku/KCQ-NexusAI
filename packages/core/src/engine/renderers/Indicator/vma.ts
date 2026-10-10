@@ -3,7 +3,7 @@ import { RENDERER_PRIORITY } from '@/foundation/plugin/index.js'
 import { resolveThemeColors } from '@/foundation/tokens/index.js'
 import type { Layer } from '@/rendering/scene/types.js'
 import { calcVMAData } from '../../indicators/calculators/index.js'
-import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { Indicator } from '../../indicators/indicatorDecorator.js'
 import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
 import type { VMARenderState } from '../../indicators/state/vmaState.js'
 import { EMPTY_VMA_STATE } from '../../indicators/state/vmaState.js'
@@ -20,7 +20,7 @@ function createVMALayer(
 ): Layer<RenderContext> {
   const { paneId = 'sub_VMA', instanceId } = options
   return createIndicatorRendererLayer({
-    name: `vma_${paneId}`,
+    definitionId: 'vma',
     paneId,
     z: RENDERER_PRIORITY.INDICATOR,
     draw(context) {

@@ -9,7 +9,7 @@ import { resolveThemeColors } from '@/foundation/tokens/index.js'
 import type { KLineData } from '@/foundation/types/price.js'
 import type { Layer } from '@/rendering/scene/types.js'
 import { calcStochRSIData } from '../../indicators/calculators/stochRSI.js'
-import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { Indicator } from '../../indicators/indicatorDecorator.js'
 import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
 import type { StochRSIRenderState } from '../../indicators/state/stochRSIState.js'
 import { EMPTY_STOCH_RSI_STATE } from '../../indicators/state/stochRSIState.js'
@@ -83,7 +83,7 @@ function createStochRSILayer(options: StochRSIRendererOptions = {}): Layer<Rende
   }
 
   return createIndicatorRendererLayer({
-    name: `stochRSI_${paneId}`,
+    definitionId: 'stochRSI',
     paneId,
     z: RENDERER_PRIORITY.INDICATOR,
     draw(context) {

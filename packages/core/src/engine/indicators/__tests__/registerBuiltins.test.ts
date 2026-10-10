@@ -1,18 +1,21 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 
 import { makePluginLayerId } from '@/foundation/plugin/impl/rendererLayerId'
-import { getRegisteredIndicatorDefinition } from '../indicatorDefinitionRegistry'
-import { getBuiltinIndicatorDefinitions, loadBuiltinIndicators } from '../registerBuiltins'
+import {
+  getRegisteredIndicatorDefinition,
+  getRegisteredIndicatorDefinitions,
+} from '../indicatorDefinitionRegistry'
+import { loadBuiltinIndicators } from '../registerBuiltins'
 
 beforeAll(async () => {
   await loadBuiltinIndicators()
 })
 
 describe('builtin indicator registration', () => {
-  it('loads all builtin indicator definitions through decorators', () => {
-    const definitions = getBuiltinIndicatorDefinitions()
+  it('explicitly registers all builtin definitions with decorator metadata', () => {
+    const definitions = getRegisteredIndicatorDefinitions()
 
-    expect(definitions).toHaveLength(60)
+    expect(new Set(definitions.map((definition) => definition.name)).size).toBe(definitions.length)
     expect(definitions.map((definition) => definition.name)).toEqual(
       expect.arrayContaining([
         'ma',
@@ -23,6 +26,8 @@ describe('builtin indicator registration', () => {
         'volumeProfile',
         'zones',
         'extremaMarkers',
+        'lastPriceLine',
+        'lastPriceLabelRegistrar',
         't3',
         'vidya',
         'frama',
@@ -38,6 +43,16 @@ describe('builtin indicator registration', () => {
     )
   })
 
+  it('shares concurrent initialization without replacing registered definitions', async () => {
+    const definitions = getRegisteredIndicatorDefinitions()
+    await Promise.all([loadBuiltinIndicators(), loadBuiltinIndicators()])
+    const reloaded = getRegisteredIndicatorDefinitions()
+    expect(reloaded).toHaveLength(definitions.length)
+    for (const definition of definitions) {
+      expect(getRegisteredIndicatorDefinition(definition.name)).toBe(definition)
+    }
+  })
+
   it('allows builtin definitions to be queried by display name', () => {
     expect(getRegisteredIndicatorDefinition('RSI')?.name).toBe('rsi')
     expect(getRegisteredIndicatorDefinition('MACD')?.name).toBe('macd')
@@ -45,7 +60,7 @@ describe('builtin indicator registration', () => {
   })
 
   it('keeps calculator params and presentation options disjoint', () => {
-    for (const definition of getBuiltinIndicatorDefinitions()) {
+    for (const definition of getRegisteredIndicatorDefinitions()) {
       const runtime = definition.runtime
       const presentation = definition.presentation
       if (!runtime) continue
@@ -162,7 +177,9 @@ describe('builtin indicator registration', () => {
     }
 
     for (const [id, rendererName] of Object.entries(expected)) {
-      expect(getRegisteredIndicatorDefinition(id)?.mainPane?.rendererName).toBe(rendererName)
+      expect(
+        getRegisteredIndicatorDefinition(id)?.getRendererName({ paneId: 'main', indicatorId: id }),
+      ).toBe(rendererName)
     }
   })
 
@@ -183,17 +200,22 @@ describe('builtin indicator registration', () => {
   })
 
   it('resolves renderer names without creating renderer instances', () => {
-    for (const definition of getBuiltinIndicatorDefinitions()) {
-      const paneId = definition.category === 'main' ? 'main' : `sub_${definition.name}`
-      const options = {
-        paneId,
-        indicatorId: definition.name,
-        instanceId: `${definition.name}-instance`,
+    for (const definition of getRegisteredIndicatorDefinitions()) {
+      const panes = definition.allowMainPane
+        ? ['main', `sub_${definition.name}`]
+        : [definition.category === 'main' ? 'main' : `sub_${definition.name}`]
+      const ids = new Set<string>()
+      for (const paneId of panes) {
+        const options = {
+          paneId,
+          indicatorId: definition.name,
+          instanceId: `${definition.name}-instance`,
+        }
+        const layer = definition.rendererFactory(options)
+        expect(makePluginLayerId(definition.getRendererName(options))).toBe(layer.id)
+        ids.add(layer.id)
       }
-
-      expect(makePluginLayerId(definition.getRendererName(options))).toBe(
-        definition.rendererFactory(options).id,
-      )
+      expect(ids.size, definition.name).toBe(panes.length)
     }
   })
 
@@ -216,7 +238,9 @@ describe('builtin indicator registration', () => {
     }
 
     for (const [id, rendererName] of Object.entries(expected)) {
-      expect(getRegisteredIndicatorDefinition(id)?.mainPane?.rendererName).toBe(rendererName)
+      expect(
+        getRegisteredIndicatorDefinition(id)?.getRendererName({ paneId: 'main', indicatorId: id }),
+      ).toBe(rendererName)
     }
   })
 

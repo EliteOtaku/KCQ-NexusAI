@@ -5,7 +5,7 @@ import { resolveThemeColors } from '@/foundation/tokens/index.js'
 import type { KLineData } from '@/foundation/types/price.js'
 import type { Layer } from '@/rendering/scene/types.js'
 import { calcGMMAData } from '../../indicators/calculators/index.js'
-import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { Indicator } from '../../indicators/indicatorDecorator.js'
 import type { TitleInfo, TitleValueItem } from '../../indicators/indicatorMetadata.js'
 import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
 import {
@@ -111,7 +111,6 @@ function getGMMATitleInfo(
   defaultPaneId: 'main',
   allowMainPane: true,
   mainPane: {
-    rendererName: 'gmma_main',
     toActiveConfig: (params, active) => ({ ...params, showGMMA: active }),
   },
   visibleState: {
@@ -130,7 +129,7 @@ export class GMMADefinition {
 }
 
 /** 创建 GMMA 多线渲染器插件（WebGL 优先，失败回退 Canvas2D） */
-export function createGMMALayer(
+function createGMMALayer(
   options: { paneId?: string; instanceId?: string } = {},
 ): Layer<RenderContext> {
   const { paneId = 'main', instanceId } = options
@@ -143,7 +142,7 @@ export function createGMMALayer(
   }
 
   return createIndicatorRendererLayer({
-    name: `gmma_${paneId}`,
+    definitionId: 'gmma',
     paneId,
     z: RENDERER_PRIORITY.INDICATOR,
     draw(context) {

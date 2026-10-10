@@ -3,7 +3,7 @@ import { RENDERER_PRIORITY } from '@/foundation/plugin/index.js'
 import { resolveThemeColors } from '@/foundation/tokens/index.js'
 import type { Layer } from '@/rendering/scene/types.js'
 import { calcTEMAData } from '../../indicators/calculators/index.js'
-import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { Indicator } from '../../indicators/indicatorDecorator.js'
 import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
 import type { TEMARenderState } from '../../indicators/state/temaState.js'
 import { EMPTY_TEMA_STATE } from '../../indicators/state/temaState.js'
@@ -24,7 +24,7 @@ interface TEMARendererOptions {
 function createTEMALayer(options: TEMARendererOptions = {}): Layer<RenderContext> {
   const { paneId = 'main', instanceId } = options
   return createIndicatorRendererLayer({
-    name: `tema_${paneId}`,
+    definitionId: 'tema',
     paneId,
     z: RENDERER_PRIORITY.INDICATOR,
     draw(context) {
@@ -90,7 +90,6 @@ const getTEMATitleInfo = createSingleLineTitleInfo({
   defaultPaneId: 'main',
   allowMainPane: true,
   mainPane: {
-    rendererName: 'tema_main',
     toActiveConfig: (params, active) => ({ ...params, showTEMA: active }),
   },
   visibleState: { compose: createSparseVisibleStateComposer('tema', EMPTY_TEMA_STATE) },

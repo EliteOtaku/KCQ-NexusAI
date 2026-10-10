@@ -146,10 +146,10 @@ async function cleanup() {
 }
 ```
 
-指标型 Layer 通过正式入口的 `@Indicator` 注册，名称可为第三方字符串；
+指标型 Layer 通过正式入口的 `@Indicator` 声明，再由 `registerIndicatorDefinition` 注册，名称可为第三方字符串；
 内置指标状态契约仍保持闭集。先注册定义，再调用 `addIndicator(name, role)`，
 Layer 的创建、参数更新和移除由指标状态驱动。指标工厂应使 Layer.id 与定义的
-渲染名称一致：`makePluginLayerId(definition.getRendererName(options))`。
+渲染名称一致：`resolveIndicatorLayerId(definitionId, paneId)`。定义的名称规则是唯一来源，工厂不得重复拼接名称。
 主图定义需声明 `mainPane`，副图定义需声明坐标轴元数据。
 第三方纯 overlay 可直接挂载，无需声明指标定义。
 
@@ -157,7 +157,7 @@ Layer 的创建、参数更新和移除由指标状态驱动。指标工厂应�
 第三方构建配置需要支持标准 class decorators：
 
 ```ts
-import { Indicator, IndicatorKind, makePluginLayerId } from '@363045841yyt/klinechart-core'
+import { Indicator, IndicatorKind, registerIndicatorDefinition, resolveIndicatorLayerId } from '@363045841yyt/klinechart-core'
 
 const indicatorName = 'vendorStatus'
 @Indicator({
@@ -167,13 +167,15 @@ const indicatorName = 'vendorStatus'
   category: 'main',
   indicatorType: 'other',
   defaultPaneId: 'main',
-  mainPane: { rendererName: indicatorName },
+  mainPane: {},
 })
 class StatusIndicator {
   static rendererFactory() {
-    return createStatusLayer(makePluginLayerId(indicatorName))
+    return createStatusLayer(resolveIndicatorLayerId(indicatorName, 'main'))
   }
 }
+
+registerIndicatorDefinition(StatusIndicator)
 
 // 创建图表后，由状态挂载或移除指标实例。
 const instanceId = chart.addIndicator(indicatorName, 'main')
@@ -406,7 +408,7 @@ Main 或 Overlay 分支是否执行由 `UpdateLevel` 和十字线状态决定，
 | ------------------------ | -------------------------------------------------- | ------------- |
 | `mainCanvas`             | background、primary、indicator、component          | Main / All    |
 | `drawingCanvas`          | 正式图元，排除当前拖拽覆盖的成员                    | 投影输入变化  |
-| `overlayCanvas`          | 拖拽覆盖、绘图预览、框选、crosshair、hover           | Overlay / All |
+| `overlayCanvas`          | 拖拽覆盖、绘图预览、框选、hover                      | Overlay / All |
 | `yAxisCanvas`            | 右轴静态刻度和标签                                 | Main / All    |
 | `yAxisOverlayCanvas`     | 右轴动态价签                                       | Overlay / All |
 | `leftYAxisCanvas`        | 左轴静态内容                                       | Main / All    |
@@ -421,9 +423,15 @@ z-index 0  pane mainCanvas
 z-index 1  chart 级 gpu-scene-canvas（仅 WebGPU）
 z-index 2  pane drawingCanvas（DOM 顺序在 overlayCanvas 前）
 z-index 2  pane overlayCanvas
+z-index 3  chart 级 crosshair-canvas
 ```
 
 全图另有一张 `xAxisCanvas`。时间轴是独立 Layer，不注册进主 Scene。
+
+十字线由 `CrosshairOverlay` 在整张绘图区的独立 Canvas2D 上绘制，不进入 pane Scene。
+`ChartRenderer` 在 pane 绘制后提交一次全局交点，纵线贯穿整个 plot，水平线裁剪到活跃 pane。
+该表面沿用引擎 viewport 的尺寸和 DPR，每个绘制帧清理并更新，截图通过现有 canvas 层叠合成收集。
+设计决策见 [图表级十字线覆盖层](../design/rendering/crosshair-dash-origin.md)。
 
 正式图元与会话图元分别由 Drawing Layer 和 Drawing Session Layer 绘制。帧去重包含会话图元引用；
 正式层版本只包含文档、选中集合和覆盖成员，连续拖动复用其投影与像素。拖拽首次覆盖时清除正式层中的原图元，

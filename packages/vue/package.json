@@ -1,6 +1,6 @@
 {
   "name": "@363045841yyt/klinechart",
-  "version": "0.11.0-alpha.8",
+  "version": "0.11.0-alpha.9",
   "description": "Vue 3 bindings for @363045841yyt/klinechart-core. Idiomatic composables, SFC components.",
   "license": "Apache-2.0",
   "repository": {
@@ -76,7 +76,6 @@
   "devDependencies": {
     "@363045841yyt/klinechart-agent-runtime": "workspace:*",
     "@arethetypeswrong/cli": "^0.18.5",
-    "@fontsource/jetbrains-mono": "^5.3.0",
     "@size-limit/preset-small-lib": "^13.1.1",
     "@vitejs/plugin-vue": "^6.0.9",
     "@vue/test-utils": "^2.5.0",
@@ -96,6 +95,7 @@
     "vue": "^3.5.42"
   },
   "dependencies": {
+    "@fontsource/jetbrains-mono": "^5.3.0",
     "@fontsource/outfit": "^5.3.0",
     "dompurify": "^3.4.15",
     "html-to-image": "^1.11.13",

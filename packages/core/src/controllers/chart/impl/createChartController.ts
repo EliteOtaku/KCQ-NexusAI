@@ -1,37 +1,32 @@
 import { marketDataProviderRegistry } from '@/data/provider/impl/registry.js'
-import type {
-  ChartOptions,
-  IndicatorInstance as EngineIndicatorInstance,
-  SubPaneInfo as EngineSubPaneInfo,
-  ViewportState as EngineViewportState,
-} from '@/engine/chart/index.js'
+import type { ChartOptions, ViewportState as EngineViewportState } from '@/engine/chart/index.js'
 import { Chart } from '@/engine/chart/index.js'
-import { getRegisteredIndicatorDefinition } from '@/engine/indicators/indicatorDefinitionRegistry.js'
-import { loadBuiltinIndicators } from '@/engine/indicators/registerBuiltins.js'
+import {
+  getRegisteredIndicatorDefinition,
+  loadIndicatorDefinitions,
+} from '@/engine/indicators/indicatorDefinitionRegistry.js'
+import {
+  loadBuiltinIndicators,
+  loadSystemIndicators,
+} from '@/engine/indicators/registerBuiltins.js'
+import { collectLayoutIndicatorIds } from '@/engine/layout/impl/layoutIndicators.js'
+import { LayoutManager } from '@/engine/layout/impl/layoutManager.js'
 import { hasSubPaneRendererMetadata } from '@/engine/pane/index.js'
 import { MAIN_PANE_ID } from '@/engine/pane/types.js'
 import { CONTROLLER_ERROR_CODES, KLineChartError } from '@/errors.js'
 import { createChartAgentController } from '@/features/agent/impl/chartAgentController.js'
 import { createIndicatorQuery } from '@/features/agent/impl/indicator/indicatorQuery.js'
-import { resolveSettings } from '@/foundation/config/chartSettings.js'
-import { computed, type ReadonlySignal } from '@/foundation/reactivity/index.js'
+import { normalizeSettings } from '@/foundation/config/chartSettings.js'
+import { batch, computed, type ReadonlySignal } from '@/foundation/reactivity/index.js'
 import { generateUUID } from '@/foundation/utils/uuid.js'
 import { createDefaultRendererHost, type RendererBackend } from '@/rendering/render/index.js'
 import { allIndicatorDefinitions } from '../../indicatorDefinitionCatalog.js'
-import {
-  createPanePriceAxisPersistence,
-  createViewWorkspacePersistence,
-  loadStoredPanePriceAxisModes,
-  loadStoredViewWorkspaces,
-} from '../../persistence/index.js'
 import type {
   ChartController,
   ChartMountOptions,
   ChartViewport,
-  IndicatorInstance,
   InteractionSnapshot,
   PaneSpec,
-  SubPaneInfo,
   SymbolInfo,
 } from '../types.js'
 import { DEFAULT_OPTS } from './controllerDefaults.js'
@@ -40,8 +35,7 @@ import { createDataMethods } from './createDataMethods.js'
 import { createDrawingMethods } from './createDrawingMethods.js'
 import { mountChartDom } from './mountChartDom.js'
 
-// engine 侧模型 → controller 公开模型的字段投影：engine 的指标实例带 internal ordinal，
-// 公开实例不含，故在此收窄为面向前端的快照。
+// engine 侧视口模型 → controller 公开模型的字段投影。
 function mapViewportState(vp: EngineViewportState): ChartViewport {
   return {
     zoomLevel: vp.zoomLevel,
@@ -52,29 +46,6 @@ function mapViewportState(vp: EngineViewportState): ChartViewport {
     visibleTo: vp.visibleTo,
     kWidth: vp.kWidth,
     kGap: vp.kGap,
-  }
-}
-
-function mapIndicatorInstance(indicator: EngineIndicatorInstance): IndicatorInstance {
-  return {
-    id: indicator.id,
-    definitionId: indicator.definitionId,
-    label: indicator.label,
-    name: indicator.name,
-    role: indicator.role,
-    paneId: indicator.paneId,
-    params: { ...indicator.params },
-  }
-}
-
-function mapSubPaneInfo(subPane: EngineSubPaneInfo): SubPaneInfo {
-  return {
-    instanceId: subPane.instanceId,
-    paneId: subPane.paneId,
-    indicatorId: subPane.indicatorId,
-    ordinal: subPane.ordinal,
-    params: { ...subPane.params },
-    ratio: subPane.ratio,
   }
 }
 
@@ -92,9 +63,8 @@ export async function createChartController(opts: ChartMountOptions): Promise<Ch
     )
   }
 
-  await loadBuiltinIndicators()
-  const initialViewWorkspaces = loadStoredViewWorkspaces()
-  const initialPanePriceAxisModes = loadStoredPanePriceAxisModes()
+  // 视图系统定义随图表创建；用户指标按需加载，布局恢复前再加载其引用的指标。
+  await (opts.indicatorLoading === 'all' ? loadBuiltinIndicators() : loadSystemIndicators())
   const mounted = mountChartDom(opts)
 
   const initialZoomLevel = opts.initialZoomLevel ?? DEFAULT_OPTS.initialZoomLevel
@@ -113,7 +83,7 @@ export async function createChartController(opts: ChartMountOptions): Promise<Ch
     initialZoomLevel,
   }
 
-  const initialSettings = resolveSettings(opts.settings)
+  const initialSettings = normalizeSettings(opts.settings)
   const rendererHost = await createDefaultRendererHost(
     initialSettings.rendererBackend as RendererBackend,
   )
@@ -130,16 +100,8 @@ export async function createChartController(opts: ChartMountOptions): Promise<Ch
     {
       rendererHost,
       initialSettings,
-      initialViewWorkspaces: initialViewWorkspaces ?? undefined,
-      initialPanePriceAxisModes: initialPanePriceAxisModes ?? undefined,
       marketSessions: opts.marketSessions,
     },
-  )
-  chart.setViewWorkspacePersistence(
-    createViewWorkspacePersistence(() => chart.kernel.snapshotViewWorkspaces()),
-  )
-  chart.setPanePriceAxisPersistence(
-    createPanePriceAxisPersistence(() => chart.snapshotPanePriceAxisModes()),
   )
 
   if (import.meta.env?.MODE !== 'production' && typeof window !== 'undefined') {
@@ -147,8 +109,8 @@ export async function createChartController(opts: ChartMountOptions): Promise<Ch
   }
 
   const viewport = computed(() => mapViewportState(chart.viewport()))
-  const indicators = computed(() => chart.indicators.instances().map(mapIndicatorInstance))
-  const subPanes = computed(() => chart.indicators.subPanes().map(mapSubPaneInfo))
+  const indicators = computed(() => chart.indicators.instances())
+  const subPanes = computed(() => chart.indicators.subPanes())
   const themeSignal: ReadonlySignal<'light' | 'dark'> = chart.theme.effective
   const selectedDrawingIds: ReadonlySignal<ReadonlyArray<string>> = chart.drawing.selectedIds
   const globalDrawingLock: ReadonlySignal<boolean> = chart.drawing.globalLock
@@ -190,6 +152,42 @@ export async function createChartController(opts: ChartMountOptions): Promise<Ch
   // 供外部宿主（插件等）把 @Tool 标注的领域方法暴露给 Agent runtime
   const extraToolHosts: object[] = []
 
+  const layoutManager = new LayoutManager({
+    // 导出前先捕获当前视口，使活动布局的滚动/缩放位置一并落盘。
+    exportLayout: () => {
+      chart.captureViewportSnapshot()
+      return chart.kernel.exportLayout()
+    },
+    createLayout: () => chart.kernel.createLayout(),
+    prepareLayout: (document) => loadIndicatorDefinitions(collectLayoutIndicatorIds(document)),
+    applyLayout: (document) => {
+      if (isDisposed()) throw new Error('图表已销毁')
+      batch(() => {
+        chart.kernel.applyLayout(document)
+        if (document.currentSymbol !== undefined) {
+          dataMethods.methods.setSymbols(document.currentSymbol ? [document.currentSymbol] : [])
+        }
+      })
+      chart.drawingCommands.history.reset()
+      chart.scheduleDraw()
+    },
+  })
+  await layoutManager.initialize()
+  const layoutSubscriptions = [
+    ...[
+      chart.kernel.dataManager.readonly.currentSpec,
+      chart.kernel.indicator.readonly.workspaces,
+      chart.kernel.pane.readonly.workspaces,
+      chart.kernel.settings.readonly.settings,
+      chart.kernel.drawing.readonly.drawings,
+      chart.kernel.mainPriceAxis.readonly.paneRanges,
+    ].map((signal) => signal.subscribe(() => layoutManager.scheduleAutoSave())),
+    // 滚动与缩放逐帧变化：静止后再比较一次，避免每帧导出并序列化布局。
+    ...[chart.kernel.viewport.readonly.scrollLeft, chart.kernel.zoom.readonly.zoomLevel].map(
+      (signal) => signal.subscribe(() => layoutManager.scheduleCoalescedAutoSave()),
+    ),
+  ]
+
   const agent = createChartAgentController({
     chartId: generateUUID(),
     dataState: chart.kernel.data,
@@ -209,6 +207,7 @@ export async function createChartController(opts: ChartMountOptions): Promise<Ch
     paneManager: chart.kernel.paneManager,
     comparisonCommands: chart.comparisonCommands,
     extraToolHosts: () => extraToolHosts,
+    loadIndicators: (indicatorIds) => loadIndicatorDefinitions(indicatorIds),
     resolveSubPaneIndicatorId: (indicatorId) =>
       getRegisteredIndicatorDefinition(indicatorId)?.displayName ?? null,
     isSubPaneRendererAvailable: (indicatorId, paneId) => {
@@ -222,8 +221,8 @@ export async function createChartController(opts: ChartMountOptions): Promise<Ch
   function dispose(): Promise<void> {
     if (disposal) return disposal
     disposed = true
-    dataMethods.dispose()
-    disposal = chart.destroy()
+    for (const unsubscribe of layoutSubscriptions) unsubscribe()
+    disposal = layoutManager.dispose().finally(() => chart.destroy())
     try {
       mounted.cleanup()
     } catch {
@@ -233,6 +232,22 @@ export async function createChartController(opts: ChartMountOptions): Promise<Ch
   }
 
   return {
+    layouts: layoutManager.layouts,
+    activeLayoutId: layoutManager.activeLayoutId,
+    layoutAutoSave: layoutManager.layoutAutoSave,
+    layoutDirty: layoutManager.layoutDirty,
+    layoutSaveError: layoutManager.layoutSaveError,
+    createLayout: (input) => layoutManager.createLayout(input),
+    setLayoutAutoSave: (input) => layoutManager.setLayoutAutoSave(input),
+    exportLayout: () => layoutManager.exportLayout(),
+    applyLayout: (document) => layoutManager.applyLayout(document),
+    loadIndicators: (definitionIds) => loadIndicatorDefinitions(definitionIds),
+    listLayouts: () => layoutManager.listLayouts(),
+    saveLayout: (input) => layoutManager.saveLayout(input),
+    switchLayout: (input) => layoutManager.switchLayout(input),
+    renameLayout: (input) => layoutManager.renameLayout(input),
+    duplicateLayout: (input) => layoutManager.duplicateLayout(input),
+    deleteLayout: (input) => layoutManager.deleteLayout(input),
     agent,
     viewport,
     rightAxisEffectiveWidth: chart.rightAxisEffectiveWidth,
@@ -261,7 +276,7 @@ export async function createChartController(opts: ChartMountOptions): Promise<Ch
     interactionState,
     selectedRange: chart.selectedRange,
     rangeSelection: chart.rangeSelection,
-    legendTemplateContext: chart.legendTemplateContext,
+    legend: chart.legend,
     comparisonColors: chart.comparisonColors,
     comparisonLoading: chart.comparisonLoading,
     comparisonSpecs: chart.comparisonSpecs,

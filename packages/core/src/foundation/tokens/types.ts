@@ -248,6 +248,20 @@ export interface VolumePriceColors {
   readonly fallWithout: ColorValue
 }
 
+/**
+ * 足迹图横条与叠印数字的专用配色。
+ * 使用独立红/灰约定（Bid 红、Ask 中性灰），不随 K 线涨跌方向翻转。
+ * 命名为 footprintCell 以区别于既有的涨跌方向 token（footprintBid / footprintAsk）。
+ */
+export interface FootprintCellColors {
+  /** 主动卖（Bid）横条颜色。 */
+  readonly bid: ColorValue
+  /** 主动买（Ask）横条颜色。 */
+  readonly ask: ColorValue
+  /** 横条内叠印数字的可读文字颜色。 */
+  readonly text: ColorValue
+}
+
 /** Structure (SMC) indicator — HH/HL/LH/LL/CHoCH/BOS. */
 export interface StructureColors {
   readonly hh: ColorValue
@@ -275,6 +289,8 @@ export interface UiColors {
   readonly card: ColorValue
   readonly input: ColorValue
   readonly hover: ColorValue
+  /** 选中项常驻底色（列表项、菜单项）；比 hover 更轻，避免整行过重。 */
+  readonly selected: ColorValue
   readonly border: ColorValue
   readonly borderStrong: ColorValue
   readonly text: ColorValue
@@ -301,8 +317,13 @@ export interface UiColors {
   readonly controlBackground: ColorValue
 }
 
-/** Agent 专属颜色：对话气泡、遮罩与面板阴影。 */
+/** Agent 专属颜色仅定义输入、消息与遮罩；通用界面角色统一消费 UiColors。 */
 export interface AgentColors {
+  /** Composer 输入框背景，独立于通用表单输入框。 */
+  readonly composerInputBackground: ColorValue
+  /** Composer 内模型和思考力度选择器共用的底色与交互底色。 */
+  readonly composerControlBackground: ColorValue
+  readonly composerControlHover: ColorValue
   readonly userMessage: ColorValue
   readonly backdrop: ColorValue
   readonly panelShadow: ColorValue
@@ -364,9 +385,8 @@ export interface ColorTokens {
   readonly volumeProfileFill: ColorValue
   readonly volumeProfilePoc: ColorValue
   readonly volumeProfileValueArea: ColorValue
-  readonly footprintAsk: ColorValue
-  readonly footprintBid: ColorValue
-  readonly footprintImbalance: ColorValue
+  /** 足迹图横条与数字的专用配色；使用独立红/灰约定，不随涨跌方向翻转。 */
+  readonly footprintCell: FootprintCellColors
 
   // Alerts
   readonly alertActive: ColorValue

@@ -14,7 +14,12 @@ import type {
   InstrumentCapabilities,
   InstrumentDescriptor,
 } from '../data/provider/types.js'
-import type { InteractionSnapshot } from '../engine/chart/index.js'
+import type {
+  IndicatorInstance,
+  IndicatorRole,
+  InteractionSnapshot,
+  SubPaneInfo,
+} from '../engine/chart/index.js'
 import type {
   BatchDrawingPatch,
   CreateDrawingInput,
@@ -27,6 +32,7 @@ import type {
   DrawingObject as PluginDrawingObject,
   UpdateDrawingPatch,
 } from '../engine/drawing/index.js'
+import type { LayoutApi } from '../engine/layout/types.js'
 import type { CustomMarkerEntity } from '../engine/marker/registry.js'
 import type { CreatePaneInput, PanePatch, PaneSpec } from '../engine/pane/types.js'
 import type { ChartAgentController } from '../features/agent/types.js'
@@ -60,13 +66,14 @@ export interface ChartViewport {
   kGap: number
 }
 
-/** 指标角色运行时取值，作为 IndicatorRole 的单一事实来源。 */
+/** 指标角色运行时取值，供适配器判断主/副图。 */
 export const INDICATOR_ROLE = {
   MAIN: 'main',
   SUB: 'sub',
 } as const
 
-export type IndicatorRole = (typeof INDICATOR_ROLE)[keyof typeof INDICATOR_ROLE]
+/** 指标实例与副图信息沿用引擎投影，避免控制器层重复定义。 */
+export type { IndicatorInstance, IndicatorRole, SubPaneInfo }
 
 /** 组件受控指标实例配置。 */
 export interface ChartIndicatorConfig {
@@ -74,25 +81,6 @@ export interface ChartIndicatorConfig {
   role: IndicatorRole
   enabled: boolean
   params?: Record<string, unknown>
-}
-
-export interface IndicatorInstance {
-  id: string
-  definitionId: string
-  label: string
-  name: string
-  role: IndicatorRole
-  paneId?: string
-  params: Record<string, unknown>
-}
-
-export interface SubPaneInfo {
-  instanceId: string
-  paneId: string
-  indicatorId: string
-  ordinal: number
-  params: Record<string, unknown>
-  ratio: number
 }
 
 export type DrawingObject = PluginDrawingObject
@@ -151,6 +139,9 @@ export interface SymbolInfo {
   assetClass?: AssetClass
   sessionId?: string
   capabilities?: InstrumentCapabilities
+  tickSize?: number
+  lotSize?: number
+  currency?: string
   symbol: string
   market: string
   description?: string
@@ -216,6 +207,7 @@ export interface IndicatorParamDef {
   max?: number
   step?: number
   options?: ReadonlyArray<{ value: string; label: string }>
+  visibleWhen?: import('../engine/renderers/Indicator/indicatorCatalog.js').ParamConfig['visibleWhen']
 }
 
 export interface IndicatorDefinition {
@@ -319,7 +311,7 @@ export interface DrawingViewportPort {
   /** screen-x → logical bar index */
   getLogicalIndexAtX(mouseX: number): number | null
   /** logical bar index → current-frame screen x */
-  getScreenXAtLogicalIndex(index: number): number | null
+  getXAtLogicalIndex(index: number): number | null
   /** 逻辑索引对应当前绘制数据点的时间戳（ms）。 */
   getDrawingTimestampAtLogicalIndex(index: number): number | null
   /** unix timestamp (ms) → current logical index */
@@ -395,9 +387,21 @@ export interface ChartMountOptions {
 
   // Initial chart settings (overrides > stored preferences > DEFAULT_SETTINGS)
   settings?: Partial<ChartSettings>
+
+  /**
+   * 指标实现的加载策略。
+   * - `'on-demand'`（默认）：创建时只加载系统定义与已保存布局用到的指标，其余指标在
+   *   `loadIndicators` / 布局切换 / Agent 工具时按需加载；同步的 `addIndicator` 等方法
+   *   只接受已加载的定义。
+   * - `'all'`：创建时加载全部内置指标，适合直接同步调用指标方法的宿主。
+   */
+  indicatorLoading?: IndicatorLoadingMode
 }
 
-export interface ChartController extends DrawingChartAdapter, ChartRendererAccess {
+/** 指标实现的加载策略，见 {@link ChartMountOptions.indicatorLoading}。 */
+export type IndicatorLoadingMode = 'on-demand' | 'all'
+
+export interface ChartController extends DrawingChartAdapter, ChartRendererAccess, LayoutApi {
   /** 在完整绘制帧结束时同步调用捕获函数，返回其异步合成结果。 */
   captureFrame<T>(
     capture: (frame: import('./screenshot/types.js').ChartFrameCaptureContext) => T | Promise<T>,
@@ -480,10 +484,7 @@ export interface ChartController extends DrawingChartAdapter, ChartRendererAcces
    * 主图左上角图例模板上下文。
    * Vue `#legend` slot 等外部模板消费；null 表示当前帧无图例数据。
    */
-  readonly legendTemplateContext: ReadonlySignal<
-    | import('../engine/renderers/Indicator/mainIndicatorLegend/types.js').LegendTemplateContext
-    | null
-  >
+  readonly legend: import('../engine/legend/types.js').LegendApi
   readonly comparisonColors: ReadonlySignal<ReadonlyMap<string, string>>
   readonly comparisonLoading: ReadonlySignal<boolean>
   /** 当前对比品种集合（唯一业务状态）。 */
@@ -586,6 +587,11 @@ export interface ChartController extends DrawingChartAdapter, ChartRendererAcces
   clearRangeSelection(): void
 
   // ---- Indicators ----
+  /**
+   * 按需加载指标实现（名称、展示名或别名）；已加载与未知 ID 直接跳过。
+   * 同步指标方法只接受已加载的定义，调用前先 await 本方法。
+   */
+  loadIndicators(definitionIds: ReadonlyArray<string>): Promise<void>
   addIndicator(
     definitionId: string,
     role: IndicatorRole,
@@ -679,5 +685,4 @@ export type ChartControllerFactory = (
 // ---------------------------------------------------------------------------
 
 export type { DrawingController, DrawingState } from './drawing/types.js'
-export type { ActiveIndicator, IndicatorSelectorController } from './indicatorSelector/types.js'
 export type { ToolbarController, ToolDefinition, ToolId } from './toolbar/types.js'

@@ -3,7 +3,7 @@ import { RENDERER_PRIORITY } from '@/foundation/plugin/index.js'
 import { resolveThemeColors } from '@/foundation/tokens/index.js'
 import type { Layer } from '@/rendering/scene/types.js'
 import { calcCMFData } from '../../indicators/calculators/index.js'
-import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { Indicator } from '../../indicators/indicatorDecorator.js'
 import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
 import type { CMFRenderState } from '../../indicators/state/cmfState.js'
 import { EMPTY_CMF_STATE } from '../../indicators/state/cmfState.js'
@@ -24,7 +24,7 @@ function createCMFLayer(
 ): Layer<RenderContext> {
   const { paneId = 'sub_CMF', instanceId } = options
   return createIndicatorRendererLayer({
-    name: `cmf_${paneId}`,
+    definitionId: 'cmf',
     paneId,
     z: RENDERER_PRIORITY.INDICATOR,
     draw(context) {

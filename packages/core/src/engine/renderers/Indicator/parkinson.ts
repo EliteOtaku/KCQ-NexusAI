@@ -3,7 +3,7 @@ import { RENDERER_PRIORITY } from '@/foundation/plugin/index.js'
 import { resolveThemeColors } from '@/foundation/tokens/index.js'
 import type { Layer } from '@/rendering/scene/types.js'
 import { calcParkinsonData } from '../../indicators/calculators/index.js'
-import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { Indicator } from '../../indicators/indicatorDecorator.js'
 import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
 import type { ParkinsonRenderState } from '../../indicators/state/parkinsonState.js'
 import { EMPTY_PARKINSON_STATE } from '../../indicators/state/parkinsonState.js'
@@ -20,7 +20,7 @@ function createParkinsonLayer(
 ): Layer<RenderContext> {
   const { paneId = 'sub_Parkinson', instanceId } = options
   return createIndicatorRendererLayer({
-    name: `parkinson_${paneId}`,
+    definitionId: 'parkinson',
     paneId,
     z: RENDERER_PRIORITY.INDICATOR,
     draw(context) {

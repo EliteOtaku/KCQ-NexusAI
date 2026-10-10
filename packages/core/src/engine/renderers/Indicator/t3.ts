@@ -8,7 +8,7 @@ import { resolveThemeColors } from '@/foundation/tokens/index.js'
 import type { KLineData } from '@/foundation/types/price.js'
 import type { Layer } from '@/rendering/scene/types.js'
 import { calcT3Data } from '../../indicators/calculators/t3.js'
-import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { Indicator } from '../../indicators/indicatorDecorator.js'
 import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
 import type { T3RenderState } from '../../indicators/state/t3State.js'
 import { EMPTY_T3_STATE } from '../../indicators/state/t3State.js'
@@ -30,7 +30,7 @@ interface T3RendererOptions {
 function createT3Layer(options: T3RendererOptions = {}): Layer<RenderContext> {
   const { paneId = 'main', instanceId } = options
   return createIndicatorRendererLayer({
-    name: `t3_${paneId}`,
+    definitionId: 't3',
     paneId,
     z: RENDERER_PRIORITY.INDICATOR,
     draw(context) {
@@ -96,7 +96,6 @@ const getT3TitleInfo = createSingleLineTitleInfo({
   defaultPaneId: 'main',
   allowMainPane: true,
   mainPane: {
-    rendererName: 't3_main',
     toActiveConfig: (params, active) => ({ ...params, showT3: active }),
   },
   visibleState: { compose: createSparseVisibleStateComposer('t3', EMPTY_T3_STATE) },

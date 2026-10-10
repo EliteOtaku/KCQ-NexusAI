@@ -1,10 +1,34 @@
 import { describe, expect, it, vi } from 'vitest'
 import { getRegisteredIndicatorDefinition } from '../../indicators/indicatorDefinitionRegistry'
 import { loadBuiltinIndicators } from '../../indicators/registerBuiltins'
+import { LAYOUT_DOCUMENT_VERSION } from '../../layout/types'
 import { createTestChartStateKernel } from '../../state/__tests__/helpers/createTestChartStateKernel'
 import { ChartDataViewId, createChartModel } from '../index'
 
 describe('chartModel', () => {
+  it('keeps the kline primary renderer at the view default while persisting the candle shape setting', () => {
+    const kernel = createTestChartStateKernel()
+    const restored = createTestChartStateKernel()
+    try {
+      kernel.settings.actions.patch({ klineShape: 'hollow-candlestick' })
+      // 形态由 settings 派生，mode 的 kline 主序列画法保持视图默认值。
+      expect(kernel.mode.readonly.effectivePrimaryRenderer.peek()).toBe('candlestick')
+      kernel.actions.setDataView('timeshare')
+      expect(kernel.mode.readonly.effectivePrimaryRenderer.peek()).toBe('line')
+      kernel.actions.setDataView('kline')
+      expect(kernel.mode.readonly.effectivePrimaryRenderer.peek()).toBe('candlestick')
+      const layout = kernel.exportLayout()
+      expect(layout.settings?.klineShape).toBe('hollow-candlestick')
+      restored.applyLayout(layout)
+      expect(restored.settings.readonly.settings.peek().klineShape).toBe('hollow-candlestick')
+      expect(restored.mode.readonly.effectivePrimaryRenderer.peek()).toBe('candlestick')
+      restored.settings.actions.patch({ klineShape: 'candlestick' })
+      expect(restored.mode.readonly.effectivePrimaryRenderer.peek()).toBe('candlestick')
+    } finally {
+      kernel.dispose()
+      restored.dispose()
+    }
+  })
   it('defaults to kline', () => {
     const m = createChartModel()
     expect(m.readonly.chartMode.peek()).toBe('kline')
@@ -51,17 +75,16 @@ describe('chartModel', () => {
     expect(m.readonly.interactionCapabilities.peek().allowZoom).toBe(true)
   })
 
-  it('stores renderer preferences per view and falls back for unsupported combinations', () => {
+  it('derives the primary renderer from the active view declaration', () => {
     const m = createChartModel()
-    m.actions.setPrimaryRenderer('kline', 'ohlc-bar')
-    m.actions.setPrimaryRenderer('timeshare', 'candlestick')
 
+    // 主序列画法只由 CHART_VIEW_DEFINITIONS 决定；K 线形态另由 settings.klineShape 表达。
     expect(m.readonly.primaryRendererByView.peek()).toEqual({
-      kline: 'ohlc-bar',
-      timeshare: 'candlestick',
+      kline: 'candlestick',
+      timeshare: 'line',
       fiveDayTimeShare: 'line',
     })
-    expect(m.readonly.effectivePrimaryRenderer.peek()).toBe('ohlc-bar')
+    expect(m.readonly.effectivePrimaryRenderer.peek()).toBe('candlestick')
 
     m.actions.setDataView('timeshare')
     expect(m.readonly.effectivePrimaryRenderer.peek()).toBe('line')
@@ -130,7 +153,7 @@ describe('chartModel', () => {
 
   it('restores and snapshots independent view workspaces without mode instances', async () => {
     await loadBuiltinIndicators()
-    const initialViewWorkspaces = {
+    const workspaces = {
       kline: {
         instances: [
           {
@@ -156,12 +179,17 @@ describe('chartModel', () => {
         paneScaleTypes: { main: 'percent' as const },
       },
     }
-    const kernel = createTestChartStateKernel({ initialViewWorkspaces })
+    const kernel = createTestChartStateKernel()
+    kernel.applyLayout({
+      version: LAYOUT_DOCUMENT_VERSION,
+      workspaces,
+      panePriceAxisModes: {},
+    })
 
-    expect(kernel.snapshotViewWorkspaces()).toEqual(initialViewWorkspaces)
+    expect(kernel.snapshotViewWorkspaces()).toEqual(workspaces)
     kernel.actions.setDataView(ChartDataViewId.TimeShare)
     expect(kernel.pane.readonly.paneSpecs.peek().map((pane) => pane.id)).toEqual(['main', 'RSI_0'])
-    expect(kernel.snapshotViewWorkspaces()).toEqual(initialViewWorkspaces)
+    expect(kernel.snapshotViewWorkspaces()).toEqual(workspaces)
   })
 
   it('uses an independent indicator workspace for timeshare', async () => {
@@ -186,10 +214,8 @@ describe('chartModel', () => {
       { name: 'lastPriceLabelRegistrar', layerId: 'plugin:lastPriceLabelRegistrar' },
       { name: 'ma', layerId: 'plugin:ma' },
       { name: 'boll', layerId: 'plugin:boll' },
-      { name: 'mainIndicatorLegend', layerId: 'plugin:mainIndicatorLegend' },
       { name: 'rsi_sub_RSI', layerId: 'plugin:rsi_sub_RSI' },
       { name: 'rsiScale_sub_RSI', layerId: 'plugin:rsiScale_sub_RSI' },
-      { name: 'paneTitle_sub_RSI', layerId: 'plugin:paneTitle_sub_RSI' },
     ])
 
     kernel.actions.setDataView('timeshare')

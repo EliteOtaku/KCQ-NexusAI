@@ -3,7 +3,7 @@ import { RENDERER_PRIORITY } from '@/foundation/plugin/index.js'
 import { resolveThemeColors } from '@/foundation/tokens/index.js'
 import type { Layer } from '@/rendering/scene/types.js'
 import { calcLSMAData } from '../../indicators/calculators/index.js'
-import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { Indicator } from '../../indicators/indicatorDecorator.js'
 import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
 import type { LSMARenderState } from '../../indicators/state/lsmaState.js'
 import { EMPTY_LSMA_STATE } from '../../indicators/state/lsmaState.js'
@@ -24,7 +24,7 @@ interface LSMARendererOptions {
 function createLSMALayer(options: LSMARendererOptions = {}): Layer<RenderContext> {
   const { paneId = 'main', instanceId } = options
   return createIndicatorRendererLayer({
-    name: `lsma_${paneId}`,
+    definitionId: 'lsma',
     paneId,
     z: RENDERER_PRIORITY.INDICATOR,
     draw(context) {
@@ -90,7 +90,6 @@ const getLSMATitleInfo = createSingleLineTitleInfo({
   defaultPaneId: 'main',
   allowMainPane: true,
   mainPane: {
-    rendererName: 'lsma_main',
     toActiveConfig: (params, active) => ({ ...params, showLSMA: active }),
   },
   visibleState: { compose: createSparseVisibleStateComposer('lsma', EMPTY_LSMA_STATE) },

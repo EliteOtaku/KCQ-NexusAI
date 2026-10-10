@@ -3,7 +3,7 @@ import { RENDERER_PRIORITY } from '@/foundation/plugin/index.js'
 import { resolveThemeColors } from '@/foundation/tokens/index.js'
 import type { Layer } from '@/rendering/scene/types.js'
 import { calcKAMAData } from '../../indicators/calculators/index.js'
-import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { Indicator } from '../../indicators/indicatorDecorator.js'
 import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
 import type { KAMARenderState } from '../../indicators/state/kamaState.js'
 import { EMPTY_KAMA_STATE } from '../../indicators/state/kamaState.js'
@@ -24,7 +24,7 @@ interface KAMARendererOptions {
 function createKAMALayer(options: KAMARendererOptions = {}): Layer<RenderContext> {
   const { paneId = 'main', instanceId } = options
   return createIndicatorRendererLayer({
-    name: `kama_${paneId}`,
+    definitionId: 'kama',
     paneId,
     z: RENDERER_PRIORITY.INDICATOR,
     draw(context) {
@@ -90,7 +90,6 @@ const getKAMATitleInfo = createSingleLineTitleInfo({
   defaultPaneId: 'main',
   allowMainPane: true,
   mainPane: {
-    rendererName: 'kama_main',
     toActiveConfig: (params, active) => ({ ...params, showKAMA: active }),
   },
   visibleState: { compose: createSparseVisibleStateComposer('kama', EMPTY_KAMA_STATE) },

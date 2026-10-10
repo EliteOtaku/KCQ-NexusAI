@@ -5,7 +5,7 @@ import { resolveThemeColors } from '@/foundation/tokens/index.js'
 import type { KLineData } from '@/foundation/types/price.js'
 import type { Layer } from '@/rendering/scene/types.js'
 import { calcStructureData } from '../../indicators/calculators/index.js'
-import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { Indicator } from '../../indicators/indicatorDecorator.js'
 import type { TitleInfo } from '../../indicators/indicatorMetadata.js'
 import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
 import type { StructureRenderState } from '../../indicators/state/structureState.js'
@@ -20,7 +20,7 @@ function createStructureLayer(
 ): Layer<RenderContext> {
   const { paneId = 'sub_Structure', instanceId } = options
   return createIndicatorRendererLayer({
-    name: `structure_${paneId}`,
+    definitionId: 'structure',
     paneId,
     z: RENDERER_PRIORITY.INDICATOR,
     draw(context) {
@@ -136,7 +136,6 @@ function getStructureTitleInfo(
   defaultPaneId: 'sub_Structure',
   allowMainPane: true,
   mainPane: {
-    rendererName: 'structure_main',
     toActiveConfig: (params, active) => ({
       ...params,
       showSwingLabels: active,

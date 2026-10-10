@@ -3,7 +3,7 @@ import { RENDERER_PRIORITY } from '@/foundation/plugin/index.js'
 import { resolveThemeColors } from '@/foundation/tokens/index.js'
 import type { Layer } from '@/rendering/scene/types.js'
 import { calcPVTData } from '../../indicators/calculators/index.js'
-import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { Indicator } from '../../indicators/indicatorDecorator.js'
 import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
 import type { PVTRenderState } from '../../indicators/state/pvtState.js'
 import { EMPTY_PVT_STATE } from '../../indicators/state/pvtState.js'
@@ -20,7 +20,7 @@ function createPVTLayer(
 ): Layer<RenderContext> {
   const { paneId = 'sub_PVT', instanceId } = options
   return createIndicatorRendererLayer({
-    name: `pvt_${paneId}`,
+    definitionId: 'pvt',
     paneId,
     z: RENDERER_PRIORITY.INDICATOR,
     draw(context) {

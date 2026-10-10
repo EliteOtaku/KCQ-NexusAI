@@ -4,7 +4,7 @@ import { resolveThemeColors } from '@/foundation/tokens/index.js'
 import { alignToPhysicalPixelCenter } from '@/foundation/utils/pixelAlign.js'
 import type { Layer } from '@/rendering/scene/types.js'
 import { calcMOMData } from '../../indicators/calculators/index.js'
-import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { Indicator } from '../../indicators/indicatorDecorator.js'
 import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
 import type { MOMRenderState } from '../../indicators/state/momState.js'
 import { EMPTY_MOM_STATE } from '../../indicators/state/momState.js'
@@ -119,7 +119,7 @@ function createMOMLayer(options: MOMRendererOptions = {}): Layer<RenderContext> 
   }
 
   return createIndicatorRendererLayer({
-    name: `mom_${paneId}`,
+    definitionId: 'mom',
     paneId,
     z: RENDERER_PRIORITY.INDICATOR,
     draw(context) {

@@ -225,6 +225,8 @@ export interface ChartAgentControllerDependencies {
    * ChartController.registerToolHost 动态注册，缺省无。
    */
   readonly extraToolHosts?: () => ReadonlyArray<object>
+  /** 按需加载指标实现；解析与可用性判断只针对已加载的定义。 */
+  readonly loadIndicators: (indicatorIds: ReadonlyArray<string>) => Promise<void>
   /** 将 UI 或 Agent 传入的指标别名解析为注册表中的规范 ID。 */
   readonly resolveSubPaneIndicatorId: (indicatorId: string) => string | null
   readonly isSubPaneRendererAvailable: (indicatorId: string, paneId: string) => boolean

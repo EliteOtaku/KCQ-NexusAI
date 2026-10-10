@@ -4,7 +4,7 @@ import { type ColorTokens, resolveThemeColors } from '@/foundation/tokens/index.
 import type { KLineData } from '@/foundation/types/price.js'
 import type { Layer } from '@/rendering/scene/types.js'
 import { calcSuperTrendData } from '../../indicators/calculators/index.js'
-import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { Indicator } from '../../indicators/indicatorDecorator.js'
 import {
   type GetTitleInfoFn,
   IndicatorKind,
@@ -24,7 +24,7 @@ interface SuperTrendRendererOptions {
 function createSuperTrendLayer(options: SuperTrendRendererOptions = {}): Layer<RenderContext> {
   const { paneId = 'sub_SuperTrend', instanceId } = options
   return createIndicatorRendererLayer({
-    name: `supertrend_${paneId}`,
+    definitionId: 'supertrend',
     paneId,
     z: RENDERER_PRIORITY.INDICATOR,
     draw(context) {
@@ -112,7 +112,6 @@ function getSuperTrendTitleInfo(
   defaultPaneId: 'sub_SuperTrend',
   allowMainPane: true,
   mainPane: {
-    rendererName: 'supertrend_main',
     toActiveConfig: (params, active) => ({ ...params, showSuperTrend: active }),
   },
   scale: { indicatorKey: 'supertrend', label: 'SuperTrend', decimals: 2 },

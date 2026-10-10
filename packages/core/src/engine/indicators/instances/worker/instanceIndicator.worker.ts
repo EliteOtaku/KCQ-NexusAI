@@ -21,8 +21,10 @@ function createDefinition(
 ): IndicatorCalculationDefinition {
   return Object.freeze({
     definitionId: descriptor.definitionId,
+    inputs: descriptor.inputs,
     outputAlignment: descriptor.outputAlignment,
     compute: createWorkerCompute(descriptor),
+    createCompute: () => createWorkerCompute(descriptor),
   })
 }
 
@@ -34,9 +36,15 @@ worker.onmessage = (event: MessageEvent<InstanceWorkerRequest>): void => {
         runtime = new IndicatorInstanceExecutionRuntime(message.definitions.map(createDefinition))
         respond({ type: 'ready', protocolVersion: INSTANCE_WORKER_PROTOCOL_VERSION })
         return
+      case 'define':
+        if (!runtime) throw new TypeError('Runtime not initialized')
+        for (const descriptor of message.definitions) {
+          runtime.addDefinition(createDefinition(descriptor))
+        }
+        return
       case 'setData':
         if (!runtime) throw new TypeError('Runtime not initialized')
-        runtime.setData(message.data, message.dataRevision)
+        runtime.setData(message.data, message.dataRevision, message.tradesDiff)
         return
       case 'execute': {
         if (!runtime) throw new TypeError('Runtime not initialized')

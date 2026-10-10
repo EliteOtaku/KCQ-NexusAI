@@ -7,7 +7,7 @@ import { RENDERER_PRIORITY } from '@/foundation/plugin/index.js'
 import { resolveThemeColors } from '@/foundation/tokens/index.js'
 import type { Layer } from '@/rendering/scene/types.js'
 import { calcZLEMAData } from '../../indicators/calculators/index.js'
-import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { Indicator } from '../../indicators/indicatorDecorator.js'
 import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
 import type { ZLEMARenderState } from '../../indicators/state/zlemaState.js'
 import { EMPTY_ZLEMA_STATE } from '../../indicators/state/zlemaState.js'
@@ -29,7 +29,7 @@ interface ZLEMARendererOptions {
 function createZLEMALayer(options: ZLEMARendererOptions = {}): Layer<RenderContext> {
   const { paneId = 'main', instanceId } = options
   return createIndicatorRendererLayer({
-    name: `zlema_${paneId}`,
+    definitionId: 'zlema',
     paneId,
     z: RENDERER_PRIORITY.INDICATOR,
     draw(context) {
@@ -95,7 +95,6 @@ const getZLEMATitleInfo = createSingleLineTitleInfo({
   defaultPaneId: 'main',
   allowMainPane: true,
   mainPane: {
-    rendererName: 'zlema_main',
     toActiveConfig: (params, active) => ({ ...params, showZLEMA: active }),
   },
   visibleState: { compose: createSparseVisibleStateComposer('zlema', EMPTY_ZLEMA_STATE) },

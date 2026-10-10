@@ -3,7 +3,7 @@ import { RENDERER_PRIORITY } from '@/foundation/plugin/index.js'
 import { resolveThemeColors } from '@/foundation/tokens/index.js'
 import type { Layer } from '@/rendering/scene/types.js'
 import { calcHVData } from '../../indicators/calculators/index.js'
-import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { Indicator } from '../../indicators/indicatorDecorator.js'
 import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
 import type { HVRenderState } from '../../indicators/state/hvState.js'
 import { EMPTY_HV_STATE } from '../../indicators/state/hvState.js'
@@ -24,7 +24,7 @@ function createHVLayer(
 ): Layer<RenderContext> {
   const { paneId = 'sub_HV', instanceId } = options
   return createIndicatorRendererLayer({
-    name: `hv_${paneId}`,
+    definitionId: 'hv',
     paneId,
     z: RENDERER_PRIORITY.INDICATOR,
     draw(context) {

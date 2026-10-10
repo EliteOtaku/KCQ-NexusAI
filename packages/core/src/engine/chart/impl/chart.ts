@@ -14,6 +14,7 @@ import {
   CHART_RENDERERS_SERVICE,
   type ChartRendererAccess,
 } from '../../../controllers/renderers/index.js'
+import type { ChartFrameCaptureContext } from '../../../controllers/screenshot/types.js'
 import {
   type CustomDataSource,
   isTimeSharePeriod,
@@ -28,6 +29,7 @@ import type { BarAggregation } from '../../../data/provider/types.js'
 import { lookupInstrumentsBySymbol } from '../../../data/provider/impl/instrumentSearch.js'
 import { marketDataProviderRegistry } from '../../../data/provider/impl/registry.js'
 import { AUTO_SOURCE_ID } from '../../../data/provider/types.js'
+import { GENERIC_ERROR_CODES, KLineChartError } from '../../../errors.js'
 import { createAlertController } from '../../../features/alerts/impl/createAlertController.js'
 import {
   createVolumeLookbacks,
@@ -71,8 +73,6 @@ import {
   type RendererHost,
 } from '../../../rendering/render/index.js'
 import type { Layer } from '../../../rendering/scene/types.js'
-import { GENERIC_ERROR_CODES, KLineChartError } from '../../../errors.js'
-import type { ChartFrameCaptureContext } from '../../../controllers/screenshot/types.js'
 import {
   type ChartDataView,
   ChartDataViewId,
@@ -97,19 +97,15 @@ import {
 import { ChartRenderer, mergeUpdateLevel } from '../../frame/index.js'
 import { ChartIndicatorManager } from '../../indicators/chartIndicatorManager.js'
 import { getRegisteredIndicatorDefinition } from '../../indicators/indicatorDefinitionRegistry.js'
+import { LegendManager } from '../../legend/impl/LegendManager.js'
 import type { CustomMarkerEntity, MarkerManager } from '../../marker/registry.js'
 import { ChartPaneLayout, type PaneRenderer, UpdateLevel } from '../../pane/index.js'
 import { DEFAULT_PRICE_LABEL_WIDTH, MAIN_PANE_ID, type PaneSpec } from '../../pane/types.js'
-import type { LegendTemplateContext } from '../../renderers/Indicator/mainIndicatorLegend/types.js'
 import { createLegendDomRenderer } from '../../renderers/legend/impl/createLegendDomRenderer.js'
 import { ChartStateKernel } from '../../state/chartStateKernel.js'
 import type { RangeSelectionState } from '../../state/interactionState.js'
-import type {
-  PanePriceAxisModePersistence,
-  PanePriceAxisModesSnapshot,
-} from '../../state/mainPriceAxisState.js'
-import type { ViewWorkspacePersistence, ViewWorkspacesSnapshot } from '../../state/viewWorkspace.js'
 import { ChartViewportManager } from '../../viewport/chartViewportManager.js'
+import { ChartZoomController } from '../../viewport/chartZoomController.js'
 import { ViewportScrollBridge } from '../../viewport/viewportScrollBridge.js'
 import type {
   ChartDom,
@@ -119,7 +115,6 @@ import type {
   Viewport,
   ViewportState,
 } from '../types.js'
-import { ChartZoomController } from '../../viewport/chartZoomController.js'
 import { ChartDrawingFacade } from './facade/chartDrawingFacade.js'
 import { ChartIndicatorFacade } from './facade/chartIndicatorFacade.js'
 import { ChartMarkerFacade } from './facade/chartMarkerFacade.js'
@@ -218,9 +213,11 @@ export class Chart {
   private pendingProjectionLevel: UpdateLevel | null = null
   /** activeRenderers 到 Scene 可见性的唯一投影。 */
   private disposeActiveRendererProjection: (() => void) | null = null
-  /** 主图图例模板上下文（每帧由 mainIndicatorLegend 发布） */
-  private readonly _legendTemplateContext: WritableSignal<LegendTemplateContext | null> =
-    createSignal<LegendTemplateContext | null>(null)
+  private disposeLeftAxisProjection: (() => void) | null = null
+  private disposeTradeDemand: (() => void) | null = null
+  private disposeSettingsProjection: (() => void) | null = null
+  /** 图例领域操作与展示投影的唯一入口。 */
+  readonly legend: LegendManager
   /** 图表拥有的 DOM Legend renderer，数据不进入框架响应式状态。 */
   private readonly legendDom: import('../../renderers/legend/types.js').LegendDomRenderer
 
@@ -241,10 +238,6 @@ export class Chart {
 
   /** 滚动成交量窗口（惰性初始化） */
   private _volumeLookbacks: VolumeLookbacks | null = null
-  /** 仅由 controller 注入的工作区持久化适配器。 */
-  private workspacePersistence: ViewWorkspacePersistence | null = null
-  /** 仅由 controller 注入的各 Pane 范围模式持久化适配器。 */
-  private panePriceAxisPersistence: PanePriceAxisModePersistence | null = null
 
   /**
    * 创建图表实例
@@ -257,9 +250,6 @@ export class Chart {
     runtime?: {
       rendererHost?: RendererHost
       initialSettings?: Partial<ChartSettings>
-      initialViewWorkspaces?: ViewWorkspacesSnapshot
-      /** 已持久化的各 Pane 价格轴范围模式。 */
-      initialPanePriceAxisModes?: PanePriceAxisModesSnapshot
       marketSessions?: Readonly<Record<string, MarketSessionConfig>>
       /** 帧时间源，测试或宿主可注入 Unix 毫秒时钟。 */
       clock?: import('../../../foundation/utils/clock.js').Clock
@@ -269,6 +259,7 @@ export class Chart {
     this.legendDom = createLegendDomRenderer(
       dom.canvasLayer,
       () => this.dataManager.symbols.peek().length > 0,
+      (id, action) => this.legend.execute(id, action),
     )
     this.viewportScrollBridge = new ViewportScrollBridge(() => this.dom.container)
     const { kWidth: _kWidth, kGap: _kGap, ...restOpt } = opt
@@ -288,8 +279,6 @@ export class Chart {
       initialZoomLevel,
       initialSettings: runtime?.initialSettings,
       initialRendererRuntime: this.rendererHost.runtime,
-      initialViewWorkspaces: runtime?.initialViewWorkspaces,
-      initialPanePriceAxisModes: runtime?.initialPanePriceAxisModes,
       marketSessions: this.marketSessions,
       scheduleDraw: (level) => this.scheduleDraw(level as UpdateLevel | undefined),
     })
@@ -343,18 +332,12 @@ export class Chart {
       pane: this.kernel.pane,
       afterCommitLayout: () => {
         this.ensurePaneScaleTypesFromSettings()
-        this.scheduleWorkspacePersistence()
-        this.schedulePanePriceAxisPersistence()
       },
     })
     this.panes = new ChartPaneFacade({
       kernel: this.kernel,
       layoutManager: this.layoutManager,
       ensureScaleTypes: () => this.ensurePaneScaleTypesFromSettings(),
-      schedulePersistence: () => {
-        this.scheduleWorkspacePersistence()
-        this.schedulePanePriceAxisPersistence()
-      },
       invalidateDrawingHistory: () => this.drawingCommands.history.reset(),
     })
 
@@ -368,6 +351,15 @@ export class Chart {
         getDom: () => this.dom,
         viewport: this.kernel.viewport,
         comparison: this.kernel.comparison,
+        needsTrades: () =>
+          this.kernel.indicator.readonly.instances
+            .peek()
+            .some((instance) =>
+              getRegisteredIndicatorDefinition(instance.indicatorId)?.runtime?.inputs?.includes(
+                'trades',
+              ),
+            ),
+        updateTradeInput: (input) => this.indicatorManager.updateTradeInput(input),
         scheduleDraw: (level) => this.scheduleDraw(level),
         onBarsReady: () => this.checkVisibleRangeGapWhenIdle(),
         resetInteraction: () => {
@@ -386,6 +378,9 @@ export class Chart {
       resolveMarketDataCacheMaxBytes(
         this.kernel.settings.readonly.settings.peek().marketDataCacheMaxMiB,
       ),
+    )
+    this.disposeTradeDemand = this.kernel.indicator.readonly.instances.subscribe(() =>
+      this.dataManager.reconcileTradeInput(),
     )
 
     // 对比品种唯一写原语；UI 与 Agent 共用同一实例。
@@ -477,6 +472,7 @@ export class Chart {
       getIndicatorManager: () => this.indicatorManager,
       getActiveMode: () => this.activeMode,
       dataView$: this.kernel.mode.readonly.dataView,
+      primaryRenderer$: this.kernel.mode.readonly.effectivePrimaryRenderer,
       settings$: this.kernel.settings.readonly.settings,
       mainPriceAxis: this.kernel.mainPriceAxis,
       customMarkers$: this.kernel.marker.readonly.customMarkers,
@@ -484,14 +480,24 @@ export class Chart {
       selectedDrawingIds$: this.kernel.drawing.readonly.selectedDrawingIds,
       getOverlay: () => this.drawingSession?.getPaintOverlay() ?? [],
       getSelectionMarquee: () => this.drawingSession?.getSelectionMarquee() ?? null,
-      onLegendContext: (ctx) => {
-        this._legendTemplateContext.set(ctx)
-      },
-      onLegendRows: (paneId, rows) => {
+      projectLegendFrame: (contexts) => {
+        this.legend.projectFrame(contexts)
         const paneOrder = this.kernel.pane.readonly.paneSpecs.peek().map((pane) => pane.id)
-        this.legendDom.update(paneId, rows, paneOrder)
+        const rows = this.legend.rows.peek()
+        for (const paneId of paneOrder)
+          this.legendDom.update(
+            paneId,
+            paneId === MAIN_PANE_ID && this.getOption().legend?.visible === false
+              ? []
+              : rows.filter((row) => row.paneId === paneId),
+            paneOrder,
+          )
       },
-      onClearLegendRows: () => this.legendDom.clear(),
+      getLegendConfiguration: () => this.legend.configuration.peek(),
+      clearLegendFrame: () => {
+        this.legend.clearFrame()
+        this.legendDom.clear()
+      },
       commitRightAxisWidthMeasurement: (extrema) => {
         this.commitRightAxisWidthMeasurement(extrema)
       },
@@ -570,7 +576,18 @@ export class Chart {
     })
     this.indicators = new ChartIndicatorFacade({
       manager: this.indicatorManager,
-      schedulePersistence: () => this.scheduleWorkspacePersistence(),
+    })
+    this.legend = new LegendManager({
+      host: this.pluginHost,
+      indicators: this.indicators,
+      panes: this.panes,
+      comparisons: this.comparisonCommands,
+      getComparisonHidden: (identity) =>
+        this.dataManager.getComparisonHidden().get(identity) === true,
+      setComparisonHidden: (identity, hidden) => this.setComparisonHidden(identity, hidden),
+      getOptions: () => this.getOption(),
+      getVisibleIndicatorIds: () => this.kernel.visibleMainIndicatorIds$(),
+      requestRender: () => this.scheduleDraw(),
     })
 
     // 异步计算结果就绪后串联 Alert 管线
@@ -580,6 +597,14 @@ export class Chart {
     })
 
     this.startRuntime()
+    // 设置来源统一为内核；布局恢复和界面提交都投影到实际运行资源。
+    let previousSettings = this.kernel.settings.readonly.settings.peek()
+    this.disposeSettingsProjection = this.kernel.settings.readonly.settings.subscribe(() => {
+      const next = this.kernel.settings.readonly.settings.peek()
+      const previous = previousSettings
+      previousSettings = next
+      this.projectSettings(previous, next)
+    })
   }
 
   /** 在所有运行时依赖就绪后，统一将 kernel 状态投影为可绘制图表。 */
@@ -588,45 +613,18 @@ export class Chart {
     this.viewportManager.init()
     this.ensurePaneScaleTypesFromSettings()
     this.installActiveRendererProjection()
+    // 左轴只在分时视图绘制刻度；其余视图不分配左轴后备存储。
+    this.disposeLeftAxisProjection = effect(() => {
+      this.layoutManager.setLeftAxisVisible(
+        isTimeShareDataView(this.kernel.mode.readonly.dataView()),
+      )
+    })
     this.scheduleDraw()
   }
 
   getViewport(): Viewport | null {
     if (this.kernel.viewport.readonly.viewWidth.peek() === 0) return null
     return this.kernel.viewport.readonly.viewport.peek()
-  }
-
-  /** 由 controller 在构造完成后注入浏览器工作区持久化。 */
-  setViewWorkspacePersistence(persistence: ViewWorkspacePersistence): void {
-    this.workspacePersistence?.dispose()
-    this.workspacePersistence = persistence
-  }
-
-  /** 调度用户工作区快照持久化。 */
-  private scheduleWorkspacePersistence(): void {
-    this.workspacePersistence?.schedule()
-  }
-
-  /** 由 controller 在构造完成后注入各 Pane 范围模式持久化。 */
-  setPanePriceAxisPersistence(persistence: PanePriceAxisModePersistence): void {
-    this.panePriceAxisPersistence?.dispose()
-    this.panePriceAxisPersistence = persistence
-  }
-
-  /** 返回各 Pane 的范围模式快照，供持久化适配器读取。 */
-  snapshotPanePriceAxisModes(): PanePriceAxisModesSnapshot {
-    const modes: Record<string, PriceAxisRangeMode> = {}
-    for (const [paneId, state] of Object.entries(
-      this.kernel.mainPriceAxis.readonly.paneRanges.peek(),
-    )) {
-      modes[paneId] = state.rangeMode
-    }
-    return modes
-  }
-
-  /** 调度各 Pane 范围模式快照持久化。 */
-  private schedulePanePriceAxisPersistence(): void {
-    this.panePriceAxisPersistence?.schedule()
   }
 
   /** 获取当前活跃的模式处理器 */
@@ -659,7 +657,7 @@ export class Chart {
     this.renderer.clearCachedFrame()
     this.renderer.clearAllCanvases()
     // #legend 插槽消费独立的 Vue DOM 上下文，不随 canvas 清屏；切换时必须同步清除旧图例。
-    this._legendTemplateContext.set(null)
+    this.legend.clearFrame()
     this.legendDom.clear()
 
     if (isTimeShareDataView(nextDataView)) {
@@ -757,8 +755,7 @@ export class Chart {
       }
       return capture({
         dpr: this.kernel.viewport.readonly.dpr.peek(),
-        surface:
-          source && surface.captureFrame ? { source, image: surface.captureFrame() } : null,
+        surface: source && surface.captureFrame ? { source, image: surface.captureFrame() } : null,
       })
     })
   }
@@ -834,13 +831,6 @@ export class Chart {
     const prev = this.kernel.settings.readonly.settings.peek()
     this.kernel.settings.actions.patch(settings)
     const next = this.kernel.settings.readonly.settings.peek()
-    this.interaction.onSettingsChanged(prev, next)
-    if (prev.marketDataCacheMaxMiB !== next.marketDataCacheMaxMiB) {
-      this.dataManager.marketDataCache.setMaxBytes(
-        resolveMarketDataCacheMaxBytes(next.marketDataCacheMaxMiB),
-      )
-    }
-
     if (
       prev.mainRightAxisTypeSetting !== next.mainRightAxisTypeSetting &&
       next.mainRightAxisTypeSetting !== AXIS_TYPE_NONE
@@ -849,7 +839,16 @@ export class Chart {
         resolvePriceScaleTypeSetting(next.mainRightAxisTypeSetting),
       )
     }
+  }
 
+  /** 将内核设置变更应用到交互、缓存和渲染后端，不回写业务设置。 */
+  private projectSettings(prev: Readonly<ChartSettings>, next: Readonly<ChartSettings>): void {
+    this.interaction.onSettingsChanged(prev, next)
+    if (prev.marketDataCacheMaxMiB !== next.marketDataCacheMaxMiB) {
+      this.dataManager.marketDataCache.setMaxBytes(
+        resolveMarketDataCacheMaxBytes(next.marketDataCacheMaxMiB),
+      )
+    }
     if (prev.rendererBackend !== next.rendererBackend) {
       void this.rendererHost.switchTo(next.rendererBackend as RendererBackend).then(() => {
         this.syncGpuSceneCanvas()
@@ -994,7 +993,6 @@ export class Chart {
         renderer.getPane().yAxis.resetTransform()
       }
     })
-    this.schedulePanePriceAxisPersistence()
     this.scheduleDraw()
   }
 
@@ -1012,7 +1010,6 @@ export class Chart {
       this.kernel.pane.actions.setPaneScaleType(paneId, type)
       this.projectPaneScaleTypes()
     }
-    this.scheduleWorkspacePersistence()
     this.scheduleDraw()
   }
 
@@ -1041,6 +1038,11 @@ export class Chart {
   /** 返回图表与 Agent 共用的实例级行情缓存。 */
   getMarketDataCache(): MarketDataCache {
     return this.dataManager.marketDataCache
+  }
+
+  /** 捕获当前 K 线视图的视口锚点，供布局文档持久化。 */
+  captureViewportSnapshot(): void {
+    this.dataManager.saveActiveKLineViewportSnapshot()
   }
 
   /** 请求当前图表缓存覆盖指定左边界。 */
@@ -1147,8 +1149,8 @@ export class Chart {
   }
 
   /** 根据本帧已封存的中心点读取逻辑索引对应的视口内 X 坐标。 */
-  getScreenXAtLogicalIndex(index: number): number | null {
-    return this.interaction.getScreenXAtLogicalIndex(index)
+  getXAtLogicalIndex(index: number): number | null {
+    return this.interaction.getXAtLogicalIndex(index)
   }
 
   /** 获取内容总宽度（用于外部 scroll-content 撑开 scrollWidth） */
@@ -1314,16 +1316,19 @@ export class Chart {
     this.interaction.stopInertia()
     this.zoomController.stopAnimation()
     this.renderer.stopScheduling()
-    this.workspacePersistence?.dispose()
-    this.workspacePersistence = null
-    this.panePriceAxisPersistence?.dispose()
-    this.panePriceAxisPersistence = null
     // 插件卸载时仍可访问 Scene、状态与服务；随后统一释放图表资源。
     await this.pluginHost.destroy()
     this.disposeActiveRendererProjection?.()
     this.disposeActiveRendererProjection = null
+    this.disposeLeftAxisProjection?.()
+    this.disposeLeftAxisProjection = null
+    this.disposeTradeDemand?.()
+    this.disposeTradeDemand = null
+    this.disposeSettingsProjection?.()
+    this.disposeSettingsProjection = null
     this.indicatorManager.destroy()
     this.renderer.destroy()
+    this.legend.dispose()
     this.legendDom.dispose()
     this.viewportScrollBridge.dispose()
     this.dataManager.destroy()
@@ -1480,11 +1485,6 @@ export class Chart {
   /** 清除区间选择。 */
   clearRangeSelection(): void {
     this.kernel.interaction.actions.clearRangeSelection()
-  }
-
-  /** 主图左上角图例模板上下文（null 表示无数据） */
-  get legendTemplateContext(): ReadonlySignal<LegendTemplateContext | null> {
-    return this._legendTemplateContext
   }
 
   // ---------- Data ----------

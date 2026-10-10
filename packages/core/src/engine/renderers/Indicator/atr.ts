@@ -3,7 +3,7 @@ import { RENDERER_PRIORITY } from '@/foundation/plugin/index.js'
 import { resolveThemeColors } from '@/foundation/tokens/index.js'
 import type { Layer } from '@/rendering/scene/types.js'
 import { calcATRData } from '../../indicators/calculators/index.js'
-import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { Indicator } from '../../indicators/indicatorDecorator.js'
 import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
 import type { ATRRenderState } from '../../indicators/state/atrState.js'
 import { EMPTY_ATR_STATE } from '../../indicators/state/atrState.js'
@@ -57,7 +57,7 @@ function createATRLayer(options: ATRRendererOptions = {}): Layer<RenderContext> 
   }
 
   return createIndicatorRendererLayer({
-    name: `atr_${paneId}`,
+    definitionId: 'atr',
     paneId,
     z: RENDERER_PRIORITY.INDICATOR,
     draw(context) {

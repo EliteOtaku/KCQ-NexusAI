@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitest/config'
 import babel from 'vite-plugin-babel'
+import { indicatorEntrypointsPlugin } from '../../scripts/indicator-entrypoints-plugin.mjs'
 
 // Some modules and their transitive dependencies use `@/...` aliases
 // and `@Indicator()` decorators — so we mirror the babel transform here.
@@ -14,6 +15,7 @@ const foundationUtilsSrc = fileURLToPath(new URL('./src/foundation/utils/', impo
 
 export default defineConfig({
   plugins: [
+    indicatorEntrypointsPlugin(),
     babel({
       include: [/\/src\/.*\.tsx?$/],
       exclude: [/node_modules/],
@@ -28,6 +30,7 @@ export default defineConfig({
     }),
   ],
   test: {
+    setupFiles: ['./src/engine/indicators/__tests__/helpers/initializeDefinitions.ts'],
     // 持久化 transform 缓存，跨 vitest 进程复用（Vitest 5+）
     fsModuleCache: true,
     environment: 'node',

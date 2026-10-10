@@ -139,7 +139,9 @@ export class InteractionController {
    * 业务 settings 本体在 kernel.settings；此处不再持有 plain 副本。
    */
   onSettingsChanged(prev: ChartSettings, next: ChartSettings): void {
-    const nextMode = (next.tooltipPosition as TooltipPositionMode) ?? 'crosshair'
+    // 'none'（不显示）不需要定位模式；显隐由宿主按设置控制，定位沿用 crosshair。
+    const nextMode: TooltipPositionMode =
+      next.tooltipPosition === 'adaptive' ? 'adaptive' : 'crosshair'
     if (nextMode !== 'adaptive') this.tooltipAdaptiveLock = null
     this.tooltipPositionMode = nextMode
     if (prev.mainPriceAxisRangeMode !== next.mainPriceAxisRangeMode) {
@@ -611,7 +613,7 @@ export class InteractionController {
   }
 
   /** K 线按无界槽位投影，分时按封存的交易中心投影。 */
-  getScreenXAtLogicalIndex(index: number): number | null {
+  getXAtLogicalIndex(index: number): number | null {
     if (!Number.isInteger(index)) return null
     const view = this.chart.kernel.viewport.readonly.viewSnapshot.peek()
     const world = view.worldAtIndex(index)

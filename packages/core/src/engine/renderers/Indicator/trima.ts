@@ -4,7 +4,7 @@ import { RENDERER_PRIORITY } from '@/foundation/plugin/index.js'
 import { resolveThemeColors } from '@/foundation/tokens/index.js'
 import type { Layer } from '@/rendering/scene/types.js'
 import { calcTRIMAData } from '../../indicators/calculators/index.js'
-import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { Indicator } from '../../indicators/indicatorDecorator.js'
 import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
 import type { TRIMARenderState } from '../../indicators/state/trimaState.js'
 import { EMPTY_TRIMA_STATE } from '../../indicators/state/trimaState.js'
@@ -25,7 +25,7 @@ interface TRIMARendererOptions {
 function createTRIMALayer(options: TRIMARendererOptions = {}): Layer<RenderContext> {
   const { paneId = 'main', instanceId } = options
   return createIndicatorRendererLayer({
-    name: `trima_${paneId}`,
+    definitionId: 'trima',
     paneId,
     z: RENDERER_PRIORITY.INDICATOR,
     draw(context) {
@@ -91,7 +91,6 @@ const getTRIMATitleInfo = createSingleLineTitleInfo({
   defaultPaneId: 'main',
   allowMainPane: true,
   mainPane: {
-    rendererName: 'trima_main',
     toActiveConfig: (params, active) => ({ ...params, showTRIMA: active }),
   },
   visibleState: { compose: createSparseVisibleStateComposer('trima', EMPTY_TRIMA_STATE) },

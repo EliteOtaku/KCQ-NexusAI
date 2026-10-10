@@ -3,7 +3,7 @@ import { RENDERER_PRIORITY } from '@/foundation/plugin/index.js'
 import { resolveThemeColors } from '@/foundation/tokens/index.js'
 import type { Layer } from '@/rendering/scene/types.js'
 import { calcHMAData } from '../../indicators/calculators/index.js'
-import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { Indicator } from '../../indicators/indicatorDecorator.js'
 import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
 import type { HMARenderState } from '../../indicators/state/hmaState.js'
 import { EMPTY_HMA_STATE } from '../../indicators/state/hmaState.js'
@@ -24,7 +24,7 @@ interface HMARendererOptions {
 function createHMALayer(options: HMARendererOptions = {}): Layer<RenderContext> {
   const { paneId = 'main', instanceId } = options
   return createIndicatorRendererLayer({
-    name: `hma_${paneId}`,
+    definitionId: 'hma',
     paneId,
     z: RENDERER_PRIORITY.INDICATOR,
     draw(context) {
@@ -90,7 +90,6 @@ const getHMATitleInfo = createSingleLineTitleInfo({
   defaultPaneId: 'main',
   allowMainPane: true,
   mainPane: {
-    rendererName: 'hma_main',
     toActiveConfig: (params, active) => ({ ...params, showHMA: active }),
   },
   visibleState: { compose: createSparseVisibleStateComposer('hma', EMPTY_HMA_STATE) },

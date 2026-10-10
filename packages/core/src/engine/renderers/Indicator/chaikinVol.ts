@@ -3,7 +3,7 @@ import { RENDERER_PRIORITY } from '@/foundation/plugin/index.js'
 import { resolveThemeColors } from '@/foundation/tokens/index.js'
 import type { Layer } from '@/rendering/scene/types.js'
 import { calcChaikinVolData } from '../../indicators/calculators/index.js'
-import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { Indicator } from '../../indicators/indicatorDecorator.js'
 import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
 import type { ChaikinVolRenderState } from '../../indicators/state/chaikinVolState.js'
 import { EMPTY_CHAIKIN_VOL_STATE } from '../../indicators/state/chaikinVolState.js'
@@ -24,7 +24,7 @@ function createChaikinVolLayer(
 ): Layer<RenderContext> {
   const { paneId = 'sub_ChaikinVol', instanceId } = options
   return createIndicatorRendererLayer({
-    name: `chaikinVol_${paneId}`,
+    definitionId: 'chaikinVol',
     paneId,
     z: RENDERER_PRIORITY.INDICATOR,
     draw(context) {

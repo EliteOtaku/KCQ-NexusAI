@@ -3,7 +3,7 @@ import { RENDERER_PRIORITY } from '@/foundation/plugin/index.js'
 import { resolveThemeColors } from '@/foundation/tokens/index.js'
 import type { Layer } from '@/rendering/scene/types.js'
 import { calcVWMAData } from '../../indicators/calculators/index.js'
-import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { Indicator } from '../../indicators/indicatorDecorator.js'
 import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
 import type { VWMARenderState } from '../../indicators/state/vwmaState.js'
 import { EMPTY_VWMA_STATE } from '../../indicators/state/vwmaState.js'
@@ -24,7 +24,7 @@ interface VWMARendererOptions {
 function createVWMALayer(options: VWMARendererOptions = {}): Layer<RenderContext> {
   const { paneId = 'main', instanceId } = options
   return createIndicatorRendererLayer({
-    name: `vwma_${paneId}`,
+    definitionId: 'vwma',
     paneId,
     z: RENDERER_PRIORITY.INDICATOR,
     draw(context) {
@@ -90,7 +90,6 @@ const getVWMATitleInfo = createSingleLineTitleInfo({
   defaultPaneId: 'main',
   allowMainPane: true,
   mainPane: {
-    rendererName: 'vwma_main',
     toActiveConfig: (params, active) => ({ ...params, showVWMA: active }),
   },
   visibleState: { compose: createSparseVisibleStateComposer('vwma', EMPTY_VWMA_STATE) },

@@ -7,7 +7,7 @@ import { RENDERER_PRIORITY } from '@/foundation/plugin/index.js'
 import { resolveThemeColors } from '@/foundation/tokens/index.js'
 import type { Layer } from '@/rendering/scene/types.js'
 import { calcALMAData } from '../../indicators/calculators/index.js'
-import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { Indicator } from '../../indicators/indicatorDecorator.js'
 import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
 import type { ALMARenderState } from '../../indicators/state/almaState.js'
 import { EMPTY_ALMA_STATE } from '../../indicators/state/almaState.js'
@@ -28,7 +28,7 @@ interface ALMARendererOptions {
 function createALMALayer(options: ALMARendererOptions = {}): Layer<RenderContext> {
   const { paneId = 'main', instanceId } = options
   return createIndicatorRendererLayer({
-    name: `alma_${paneId}`,
+    definitionId: 'alma',
     paneId,
     z: RENDERER_PRIORITY.INDICATOR,
     draw(context) {
@@ -94,7 +94,6 @@ const getALMATitleInfo = createSingleLineTitleInfo({
   defaultPaneId: 'main',
   allowMainPane: true,
   mainPane: {
-    rendererName: 'alma_main',
     toActiveConfig: (params, active) => ({ ...params, showALMA: active }),
   },
   visibleState: { compose: createSparseVisibleStateComposer('alma', EMPTY_ALMA_STATE) },

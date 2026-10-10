@@ -1,19 +1,50 @@
 // 验证浏览器 Agent bridge 可通过 runtime 根入口完成 Provider 目录请求。
 
 import type { AgentChartSymbolContextItem } from '@363045841yyt/klinechart-agent-runtime'
+import { AgentRuntimeError } from '@363045841yyt/klinechart-agent-runtime'
+import { createMemoryRuntimeSessions } from '@363045841yyt/klinechart-agent-runtime/testing'
 import { KLineChartError } from '@363045841yyt/klinechart-core'
 import type { ChartAgentController } from '@363045841yyt/klinechart-core/controllers'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { BrowserAgentBridge } from '../browser-agent/bridge/impl/browser-agent-bridge'
+import { BrowserAgentBridge as ProductionBrowserAgentBridge } from '../browser-agent/bridge/impl/browser-agent-bridge'
 import { BrowserToolRegistry } from '../browser-agent/tools/impl/browser-tool-registry'
 import { createOpenAiCompatibleFetchStub } from './_agentProviderFixtures'
 import { readStoredAgentModelSettings } from './_agentSettingsFixtures'
 import { createTestChartAgent, createTestChartAgentContext } from './_testChartAgent'
+import { BrowserAgentBridge } from './browser-agent-fixture'
 
 /** 清理每个测试写入的浏览器全局状态；LocalStorage 由全局 test-setup 统一清理。 */
 afterEach(() => {
   vi.unstubAllGlobals()
 })
+
+/** 装配仅含测试依赖的 Agent 工具注册表。 */
+function createTestToolRegistry(): BrowserToolRegistry {
+  return new BrowserToolRegistry({
+    fetch,
+    getWebSearchApiKey: () => undefined,
+    requestQuestion: async () => ({ selectedValues: [] }),
+  })
+}
+
+/** 保存一个 Provider 连接，把默认 chart-model 加入模型池并选中。 */
+async function connectChartProvider(
+  bridge: BrowserAgentBridge,
+  options: { profileName: string; baseUrl?: string; apiKey?: string },
+): Promise<void> {
+  await bridge.saveProvider({
+    baseUrl: options.baseUrl ?? 'https://provider.example/v1',
+    apiKey: options.apiKey ?? 'test-key',
+    protocol: 'openai-completions',
+    profileName: options.profileName,
+  })
+  await bridge.addProviderModelPoolModel({
+    id: 'chart-model',
+    name: 'Chart model',
+    compatibility: 'compatible',
+  })
+  await bridge.setProviderModel('chart-model')
+}
 
 describe('BrowserAgentBridge', () => {
   it('persists the enabled state of registered Agent tools', async () => {
@@ -95,18 +126,10 @@ describe('BrowserAgentBridge', () => {
 
   it('clears the Profile model state when its connection identity changes', async () => {
     const bridge = new BrowserAgentBridge()
-    await bridge.saveProvider({
-      baseUrl: 'https://provider-one.example/v1',
-      apiKey: 'test-key',
-      protocol: 'openai-completions',
+    await connectChartProvider(bridge, {
       profileName: 'Provider example',
+      baseUrl: 'https://provider-one.example/v1',
     })
-    await bridge.addProviderModelPoolModel({
-      id: 'chart-model',
-      name: 'Chart model',
-      compatibility: 'compatible',
-    })
-    await bridge.setProviderModel('chart-model')
 
     await bridge.saveProvider({
       baseUrl: 'https://provider-two.example/v1',
@@ -169,32 +192,18 @@ describe('BrowserAgentBridge', () => {
 
     await bridge.createProviderProfile('Provider one')
     await bridge.testProvider(first)
-    await bridge.saveProvider({
+    await connectChartProvider(bridge, {
+      profileName: 'Provider one',
       baseUrl: first.baseUrl,
       apiKey: first.apiKey,
-      protocol: first.protocol,
-      profileName: 'Provider one',
     })
-    await bridge.addProviderModelPoolModel({
-      id: 'chart-model',
-      name: 'Chart model',
-      compatibility: 'compatible',
-    })
-    await bridge.setProviderModel('chart-model')
     await bridge.createProviderProfile('Provider two')
     await bridge.testProvider(second)
-    await bridge.saveProvider({
+    await connectChartProvider(bridge, {
+      profileName: 'Provider two',
       baseUrl: second.baseUrl,
       apiKey: second.apiKey,
-      protocol: second.protocol,
-      profileName: 'Provider two',
     })
-    await bridge.addProviderModelPoolModel({
-      id: 'chart-model',
-      name: 'Chart model',
-      compatibility: 'compatible',
-    })
-    await bridge.setProviderModel('chart-model')
 
     const profiles = await bridge.listProviderProfiles()
     expect(profiles).toMatchObject([
@@ -320,18 +329,7 @@ describe('BrowserAgentBridge', () => {
 
   it('removes a pooled model and clears the selection when it was active', async () => {
     const bridge = new BrowserAgentBridge()
-    await bridge.saveProvider({
-      baseUrl: 'https://provider.example/v1',
-      apiKey: 'test-key',
-      protocol: 'openai-completions',
-      profileName: 'Provider example',
-    })
-    await bridge.addProviderModelPoolModel({
-      id: 'chart-model',
-      name: 'Chart model',
-      compatibility: 'compatible',
-    })
-    await bridge.setProviderModel('chart-model')
+    await connectChartProvider(bridge, { profileName: 'Provider example' })
 
     const pool = await bridge.removeProviderModelPoolModel('chart-model')
 
@@ -421,13 +419,9 @@ describe('BrowserAgentBridge', () => {
     const waitForTerminal = (runId: string) =>
       new Promise<void>((resolve) => {
         const unsubscribe = bridge.subscribe((event) => {
-          if (
-            event.type !== 'run.completed' &&
-            event.type !== 'run.cancelled' &&
-            event.type !== 'run.failed'
-          )
-            return
-          if (event.runId !== runId) return
+          if (event.type !== 'session.snapshot') return
+          const run = event.snapshot.runs.find((item) => item.id === runId)
+          if (!run || !['completed', 'cancelled', 'failed'].includes(run.status)) return
           unsubscribe()
           resolve()
         })
@@ -445,7 +439,17 @@ describe('BrowserAgentBridge', () => {
     expect(retry.runId).not.toBe(first.runId)
     await waitForTerminal(retry.runId)
     const snapshot = await bridge.openSession(session!.id)
-    expect(snapshot.runs.map((run) => run.id)).toEqual([first.runId, retry.runId])
+    expect(snapshot.runs.map((run) => run.id)).toEqual([retry.runId])
+    expect(snapshot.messages).toEqual([
+      expect.objectContaining({ role: 'user', content: '分析 RSI', runId: retry.runId }),
+    ])
+    const edited = await bridge.editMessage(retry.runId, '分析 EMA')
+    await waitForTerminal(edited.runId)
+    const branch = await bridge.openSession(session!.id)
+    expect(branch.messages).toEqual([
+      expect.objectContaining({ role: 'user', content: '分析 EMA', runId: edited.runId }),
+    ])
+    expect(branch.runs[0]).toMatchObject({ editOfRunId: retry.runId })
   })
 
   it('includes completed turns in the next Provider request', async () => {
@@ -462,33 +466,31 @@ describe('BrowserAgentBridge', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
     const bridge = new BrowserAgentBridge()
-    await bridge.saveProvider({
-      baseUrl: 'https://provider.example/v1',
-      apiKey: 'test-key',
-      protocol: 'openai-completions',
-      profileName: 'Provider example',
-    })
-    await bridge.addProviderModelPoolModel({
-      id: 'chart-model',
-      name: 'Chart model',
-      compatibility: 'compatible',
-    })
-    await bridge.setProviderModel('chart-model')
+    await connectChartProvider(bridge, { profileName: 'Provider example' })
     const [session] = await bridge.listSessions()
 
-    const waitForCompletion = () =>
+    const waitForCompletion = (prompt: string) =>
       new Promise<void>((resolve) => {
         const unsubscribe = bridge.subscribe((event) => {
-          if (event.type !== 'run.completed') return
+          if (
+            event.type !== 'session.snapshot' ||
+            event.snapshot.runs.at(-1)?.status !== 'completed'
+          )
+            return
+          if (
+            event.snapshot.messages.filter((message) => message.role === 'user').at(-1)?.content !==
+            prompt
+          )
+            return
           unsubscribe()
           resolve()
         })
       })
 
-    const firstCompleted = waitForCompletion()
+    const firstCompleted = waitForCompletion('第一轮问题')
     await bridge.startRun({ sessionId: session!.id, prompt: '第一轮问题', readOnly: true })
     await firstCompleted
-    const secondCompleted = waitForCompletion()
+    const secondCompleted = waitForCompletion('你刚刚说了什么')
     await bridge.startRun({ sessionId: session!.id, prompt: '你刚刚说了什么', readOnly: true })
     await secondCompleted
 
@@ -649,11 +651,7 @@ describe('BrowserAgentBridge', () => {
   it('routes a chart tool to the primitive host that owns it, falling back to the facade', () => {
     const primitiveHost = { create: () => true }
     const agent = createTestChartAgent({ toolHosts: [primitiveHost] })
-    const registry = new BrowserToolRegistry({
-      fetch,
-      getWebSearchApiKey: () => undefined,
-      requestQuestion: async () => ({ selectedValues: [] }),
-    })
+    const registry = createTestToolRegistry()
     // 读取私有方法：private 无法静态访问，测试只断言其路由行为。
     const chartToolTarget: (
       tool: { owns(host: object): boolean },
@@ -673,15 +671,35 @@ describe('BrowserAgentBridge', () => {
       getAvailableMarketDataSourceIds: () => [],
       getAvailableDrawingPaneIds: () => ['main', 'volume'],
     })
-    const registry = new BrowserToolRegistry({
-      fetch,
-      getWebSearchApiKey: () => undefined,
-      requestQuestion: async () => ({ selectedValues: [] }),
-    })
+    const registry = createTestToolRegistry()
     const resolveTools = registry.catalog.resolve({ agent, readOnly: false })
 
     expect(resolveTools.find((tool) => tool.name === 'drawing_create')?.description).toContain(
       'Available runtime paneIds: main, volume.',
     )
+  })
+
+  it('retries runtime initialization after a locked start and closes safely', async () => {
+    let attempts = 0
+    const bridge = new ProductionBrowserAgentBridge({
+      createSessions: async (redaction) => {
+        attempts += 1
+        if (attempts === 1) {
+          throw new AgentRuntimeError(
+            'SESSION_LOCKED',
+            'Agent sessions are open in another page.',
+            { retryable: true },
+          )
+        }
+        return createMemoryRuntimeSessions(redaction)
+      },
+    })
+
+    await expect(bridge.listSessions()).rejects.toMatchObject({ code: 'SESSION_LOCKED' })
+    await expect(bridge.close()).resolves.toBeUndefined()
+    await expect(bridge.listSessions()).resolves.toEqual([
+      expect.objectContaining({ title: expect.any(String) }),
+    ])
+    await bridge.close()
   })
 })

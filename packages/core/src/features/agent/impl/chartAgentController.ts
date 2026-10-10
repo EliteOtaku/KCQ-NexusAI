@@ -497,6 +497,20 @@ class ChartAgentControllerImpl implements ChartAgentController {
     )
   }
 
+  /**
+   * 按需加载副图指标定义，并解析为可在目标 pane 渲染的指标 ID。
+   * @returns 可渲染的指标 ID；定义缺失或无法在该 pane 渲染时返回 null。
+   */
+  private async resolveRenderableSubIndicator(
+    indicatorId: string,
+    paneId: string,
+  ): Promise<string | null> {
+    await this.dependencies.loadIndicators([indicatorId])
+    const resolved = this.dependencies.resolveSubPaneIndicatorId(indicatorId)
+    if (!resolved || !this.dependencies.isSubPaneRendererAvailable(resolved, paneId)) return null
+    return resolved
+  }
+
   /** 创建带副图指标内容的 pane。 */
   @Tool({
     name: 'pane_create',
@@ -508,9 +522,8 @@ class ChartAgentControllerImpl implements ChartAgentController {
     executionMode: 'sequential',
   })
   async createPane(input: Static<typeof PaneCreateToolParameters>): Promise<boolean> {
-    const indicatorId = this.dependencies.resolveSubPaneIndicatorId(input.indicatorId)
-    if (!indicatorId || !this.dependencies.isSubPaneRendererAvailable(indicatorId, input.paneId))
-      return false
+    const indicatorId = await this.resolveRenderableSubIndicator(input.indicatorId, input.paneId)
+    if (!indicatorId) return false
     return this.dependencies.paneManager.actions.create({ ...input, indicatorId })
   }
 
@@ -569,9 +582,8 @@ class ChartAgentControllerImpl implements ChartAgentController {
   async replacePaneContent(
     input: Static<typeof PaneReplaceContentToolParameters>,
   ): Promise<boolean> {
-    const indicatorId = this.dependencies.resolveSubPaneIndicatorId(input.indicatorId)
-    if (!indicatorId || !this.dependencies.isSubPaneRendererAvailable(indicatorId, input.paneId))
-      return false
+    const indicatorId = await this.resolveRenderableSubIndicator(input.indicatorId, input.paneId)
+    if (!indicatorId) return false
     return this.dependencies.paneManager.actions.replaceContent(
       input.paneId,
       indicatorId,
@@ -627,10 +639,11 @@ class ChartAgentControllerImpl implements ChartAgentController {
     safety: 'read-only',
     executionMode: 'parallel',
   })
-  queryIndicator(
+  async queryIndicator(
     input: IndicatorQueryInput,
     _context?: ChartToolExecutionContext,
   ): Promise<string> {
+    await this.dependencies.loadIndicators([input.definitionId])
     return this.dependencies.indicatorQuery.queryIndicator({
       definitionId: input.definitionId,
       params: input.params,

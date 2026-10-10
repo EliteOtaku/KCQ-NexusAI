@@ -126,10 +126,8 @@
     createIndicatorSelectorController,
     findIndicator,
     type IndicatorDefinition,
-    isBuiltinIndicatorsLoaded,
-    loadBuiltinIndicators,
   } from '@363045841yyt/klinechart-core/controllers'
-  import { computed, onMounted, ref } from 'vue'
+  import { computed, ref } from 'vue'
   import IconTablerInfoCircle from '~icons/tabler/info-circle'
   import IconTablerSearch from '~icons/tabler/search'
   import IconTablerSettings from '~icons/tabler/settings'
@@ -153,13 +151,14 @@
 
   const emit = defineEmits<{
     toggle: [indicatorId: string, active: boolean]
-    updateParams: [indicatorId: string, params: Record<string, number>]
+    updateParams: [indicatorId: string, params: Record<string, number | string>]
     reorderSubIndicators: [orderedIndicatorIds: string[]]
     replace: [paneId: string, indicatorId: string]
     close: []
   }>()
 
-  const controller = createIndicatorSelectorController()
+  // 目录来自编译期静态元数据，打开选择器不加载任何指标实现。
+  const controller = createIndicatorSelectorController({ catalog: allIndicatorDefinitions() })
 
   const menuOpen = coreSignalToVueRef(controller.menuOpen)
   const searchQuery = coreSignalToVueRef(controller.searchQuery)
@@ -172,13 +171,6 @@
 
   const catalog = coreSignalToVueRef(controller.catalog)
   const catalogLen = computed(() => catalog.value.length)
-
-  onMounted(async () => {
-    if (!isBuiltinIndicatorsLoaded()) {
-      await loadBuiltinIndicators()
-    }
-    controller.catalog.set(allIndicatorDefinitions())
-  })
 
   const paramsVisible = ref(false)
   const currentIndicatorId = ref<string | null>(null)
@@ -311,20 +303,22 @@
     emit('close')
   }
 
-  function getParamValues(indicatorId: string): Record<string, number> {
+  function getParamValues(indicatorId: string): Record<string, number | string> {
     const indicator = findIndicator(indicatorId)
     if (!indicator?.params) return {}
 
-    const defaultParams: Record<string, number> = {}
+    const defaultParams: Record<string, number | string> = {}
     for (const p of indicator.params) {
-      defaultParams[p.key] = p.default ?? p.min ?? 1
+      // 选项参数缺少默认值时回退到首个选项，避免非数值默认写入枚举参数。
+      defaultParams[p.key] = p.default ?? p.options?.[0]?.value ?? p.min ?? 1
     }
 
     const userParams = props.indicatorParams?.[indicatorId] || {}
-    const result: Record<string, number> = { ...defaultParams }
+    const result: Record<string, number | string> = { ...defaultParams }
 
+    // 数字与选项参数都可回填；其他类型暂由定义默认值表达。
     for (const [key, value] of Object.entries(userParams)) {
-      if (typeof value === 'number') {
+      if (typeof value === 'number' || typeof value === 'string') {
         result[key] = value
       }
     }
@@ -332,7 +326,7 @@
     return result
   }
 
-  function onParamsConfirm(values: Record<string, number>) {
+  function onParamsConfirm(values: Record<string, number | string>) {
     if (currentIndicatorId.value) {
       emit('updateParams', currentIndicatorId.value, values)
     }

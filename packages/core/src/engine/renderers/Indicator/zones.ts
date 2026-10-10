@@ -3,7 +3,7 @@ import { RENDERER_PRIORITY } from '@/foundation/plugin/index.js'
 import { type ColorTokens, resolveThemeColors } from '@/foundation/tokens/index.js'
 import type { Layer } from '@/rendering/scene/types.js'
 import { calcZonesData } from '../../indicators/calculators/index.js'
-import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { Indicator } from '../../indicators/indicatorDecorator.js'
 import {
   type GetTitleInfoFn,
   IndicatorKind,
@@ -20,7 +20,7 @@ function createZonesLayer(
 ): Layer<RenderContext> {
   const { paneId = 'main', instanceId } = options
   return createIndicatorRendererLayer({
-    name: `zones_${paneId}`,
+    definitionId: 'zones',
     paneId,
     z: RENDERER_PRIORITY.INDICATOR,
     draw(context) {
@@ -124,7 +124,6 @@ const getZonesTitleInfo: GetTitleInfoFn = (
   defaultPaneId: 'main',
   allowMainPane: true,
   mainPane: {
-    rendererName: 'zones_main',
     toActiveConfig: (params, active) => ({
       ...params,
       showFVG: active,

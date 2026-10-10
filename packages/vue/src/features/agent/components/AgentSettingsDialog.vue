@@ -12,7 +12,7 @@
       <BaseTabs v-model="activeTab" :tabs="agentTabs" :aria-label="text.settings" />
     </template>
 
-    <div class="provider-form">
+    <div class="provider-form agent-settings-selects">
       <div class="agent-settings-body">
         <section v-if="activeTab === 'interface'" class="agent-settings-interface" role="tabpanel">
           <div class="settings-item">
@@ -108,6 +108,7 @@
               <label class="provider-field">
                 <span class="provider-field__label">{{ text.baseUrl }}</span>
                 <input
+                  class="form-control"
                   v-model="providerSettings.baseUrl"
                   type="text"
                   autocomplete="off"
@@ -118,6 +119,7 @@
               <label class="provider-field">
                 <span class="provider-field__label">{{ text.apiKey }}</span>
                 <input
+                  class="form-control"
                   v-model="providerSettings.apiKey"
                   type="password"
                   autocomplete="new-password"
@@ -130,6 +132,7 @@
               <label class="provider-field">
                 <span class="provider-field__label">{{ text.additionalHeaders }}</span>
                 <textarea
+                  class="form-control"
                   v-model="providerSettings.headers"
                   rows="4"
                   spellcheck="false"
@@ -209,6 +212,7 @@
                 <span class="provider-field__label">{{ text.exaApiKey }}</span>
                 <div class="provider-field__control">
                   <input
+                    class="form-control"
                     v-model="providerSettings.exaApiKey"
                     type="password"
                     autocomplete="new-password"
@@ -288,7 +292,13 @@
     <form id="agent-provider-profile-form" @submit.prevent="submitProfileName()">
       <label class="provider-field">
         <span class="provider-field__label">{{ text.providerProfileName }}</span>
-        <input ref="profileNameInput" v-model="profileNameDraft" type="text" autocomplete="off" />
+        <input
+          class="form-control"
+          ref="profileNameInput"
+          v-model="profileNameDraft"
+          type="text"
+          autocomplete="off"
+        />
       </label>
       <p v-if="profileNameDialogError" class="provider-profile-error" role="alert">
         {{ profileNameDialogError }}
@@ -526,6 +536,8 @@
     },
   )
 </script>
+
+<style scoped src="../../../components/common/form-control.css"></style>
 
 <style scoped>
   .provider-form {
@@ -848,11 +860,7 @@
     border-radius: 4px;
     color: var(--klc-color-ui-text);
     background: var(--klc-color-ui-input);
-    font:
-      11px/1.4 ui-monospace,
-      SFMono-Regular,
-      Consolas,
-      monospace;
+    font: 11px/1.4 var(--klc-typography-font-family-mono);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
@@ -921,29 +929,6 @@
     font-size: 12px;
   }
 
-  .provider-field input,
-  .provider-field textarea,
-  .provider-field select {
-    width: 100%;
-    height: 34px;
-    box-sizing: border-box;
-    padding: 0 10px;
-    border: 1px solid var(--klc-color-ui-border);
-    border-radius: 8px;
-    outline: none;
-    color: var(--klc-color-ui-text);
-    background: var(--klc-color-ui-input);
-    font: inherit;
-    font-size: 12px;
-    transition:
-      background-color 0.2s ease,
-      border-color 0.2s ease,
-      box-shadow 0.2s ease;
-  }
-
-  .provider-field input:disabled,
-  .provider-field textarea:disabled,
-  .provider-field select:disabled,
   .provider-settings-models__header input:disabled {
     color: var(--klc-color-ui-muted);
     background: transparent;
@@ -961,7 +946,7 @@
     min-height: 76px;
     padding: 8px 10px;
     resize: vertical;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-family: var(--klc-typography-font-family-mono);
     line-height: 1.4;
   }
 
@@ -984,14 +969,12 @@
 
   .provider-protocol-control :deep(.dropdown__trigger) {
     width: 100%;
-    height: 34px;
     box-sizing: border-box;
-    padding: 0 10px;
   }
 
   .provider-protocol-control :deep(.dropdown__value),
   .provider-profile-dropdown :deep(.dropdown__value) {
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 400;
   }
 
@@ -1007,9 +990,7 @@
 
   .provider-profile-dropdown :deep(.dropdown__trigger) {
     width: 100%;
-    height: 34px;
     box-sizing: border-box;
-    padding: 0 10px;
   }
 
   .provider-profile-new-button {
@@ -1107,3 +1088,4 @@
     }
   }
 </style>
+<style src="./agent-select-trigger.css"></style>

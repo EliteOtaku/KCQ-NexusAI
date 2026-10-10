@@ -11,6 +11,7 @@
       @wheel="onWheel"
     >
       <SymbolSelector
+        class="top-toolbar__item"
         v-if="displaySymbol"
         :symbol="displaySymbol"
         :selected-item="symbolItem"
@@ -28,6 +29,7 @@
         @manage-sources="showSourceDialog = true"
       />
       <CompareSymbolSelector
+        class="top-toolbar__item"
         :symbols="symbolPool"
         :search="search"
         :selected="overlaySymbols"
@@ -41,28 +43,36 @@
         @manage-sources="showSourceDialog = true"
       />
       <KLineLevelDropdown
+        class="top-toolbar__item"
         v-if="supportedKLineLevels === undefined || supportedKLineLevels.length > 0"
         :model-value="kLineLevel"
         :supported-levels="supportedKLineLevels"
         @update:model-value="emit('kLineLevelChange', $event)"
       />
       <KLineAdjustmentDropdown
+        class="top-toolbar__item"
         v-if="supportedAdjustments === undefined || supportedAdjustments.length > 0"
         :model-value="kLineAdjust"
         :supported-adjustments="supportedAdjustments"
         @update:model-value="emit('kLineAdjustChange', $event)"
       />
+      <KLineShapeDropdown
+        v-if="!showBackButton"
+        class="top-toolbar__item"
+        :model-value="kLineShape"
+        @update:model-value="emit('kLineShapeChange', $event)"
+      />
+      <BaseTooltip v-if="showBackButton" content="返回" placement="bottom" trigger-display="contents">
       <button
-        v-if="showBackButton"
         type="button"
         class="control-button back-button"
-        title="返回"
         aria-label="返回"
         @click="emit('back')"
       >
         <IconTablerArrowLeft class="back-button__icon" aria-hidden="true" />
         返回
       </button>
+      </BaseTooltip>
       <AggregationSourceDialog
         :show="showSourceDialog"
         :sources="aggregationSources"
@@ -73,7 +83,44 @@
         @update-endpoint="onUpdateSourceEndpoint"
       />
     </div>
+    <div class="layout-actions">
+      <LayoutMenu :controller="layoutController ?? null" />
+    </div>
     <div class="screenshot-actions">
+      <BaseTooltip content="撤回" placement="bottom">
+        <button
+          type="button"
+          class="control-button history-button"
+          aria-label="撤回"
+          :disabled="!canUndoDrawing"
+          @click="emit('undoDrawing')"
+        >
+          <IconTablerArrowBackUp class="history-button__icon" aria-hidden="true" />
+        </button>
+      </BaseTooltip>
+      <BaseTooltip content="重做" placement="bottom">
+        <button
+          type="button"
+          class="control-button history-button"
+          aria-label="重做"
+          :disabled="!canRedoDrawing"
+          @click="emit('redoDrawing')"
+        >
+          <IconTablerArrowForwardUp class="history-button__icon" aria-hidden="true" />
+        </button>
+      </BaseTooltip>
+      <BaseTooltip :content="isFullscreen ? '退出全屏' : '全屏显示'" placement="bottom">
+        <button
+          type="button"
+          class="control-button history-button"
+          :aria-label="isFullscreen ? '退出全屏' : '全屏显示'"
+          :aria-pressed="!!isFullscreen"
+          @click="emit('toggleFullscreen')"
+        >
+          <IconTablerMinimize v-if="isFullscreen" class="history-button__icon" aria-hidden="true" />
+          <IconTablerMaximize v-else class="history-button__icon" aria-hidden="true" />
+        </button>
+      </BaseTooltip>
       <span v-if="screenshotMessage" class="screenshot-message" role="status">
         {{ screenshotMessage }}
       </span>
@@ -82,22 +129,50 @@
         :groups="screenshotMenuGroups"
         :disabled="screenshotCapturing"
         trigger-class="screenshot-button"
+        tooltip-placement="bottom"
         placement="bottom"
         @select="onScreenshotSelect"
       >
         <template #trigger>
           <IconTablerCamera class="screenshot-button__icon" aria-hidden="true" />
         </template>
+        <template #item-icon="{ item }">
+          <IconTablerDownload
+            v-if="item.id === chartScreenshotActions.download"
+            aria-hidden="true"
+          />
+          <IconTablerClipboard v-else-if="item.id === chartScreenshotActions.copy" aria-hidden="true" />
+        </template>
       </DropMenu>
+      <slot name="watchlist"></slot>
+      <BaseTooltip content="设置" placement="bottom">
+        <button
+          type="button"
+          class="control-button history-button"
+          aria-label="设置"
+          @click="emit('settings')"
+        >
+          <IconTablerSettings class="history-button__icon" aria-hidden="true" />
+        </button>
+      </BaseTooltip>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+  import type { ChartSettings } from '@363045841yyt/klinechart-core/config'
+  import type { ChartController } from '@363045841yyt/klinechart-core/controllers'
   import type { KLinePeriod } from '@363045841yyt/klinechart-core/market-data'
   import { computed, ref } from 'vue'
+  import IconTablerArrowBackUp from '~icons/tabler/arrow-back-up'
+  import IconTablerArrowForwardUp from '~icons/tabler/arrow-forward-up'
   import IconTablerArrowLeft from '~icons/tabler/arrow-left'
   import IconTablerCamera from '~icons/tabler/camera'
+  import IconTablerClipboard from '~icons/tabler/clipboard'
+  import IconTablerDownload from '~icons/tabler/download'
+  import IconTablerMaximize from '~icons/tabler/maximize'
+  import IconTablerMinimize from '~icons/tabler/minimize'
+  import IconTablerSettings from '~icons/tabler/settings'
   import {
     type ChartScreenshotAction,
     chartScreenshotActions,
@@ -108,13 +183,15 @@
     AggregationSourceEndpoint,
   } from '../composables/useAggregationSources.js'
   import type { SymbolSearchFn } from '../composables/useSymbolSearch.js'
-
   import AggregationSourceDialog from './AggregationSourceDialog.vue'
   import CompareSymbolSelector from './CompareSymbolSelector.vue'
+  import BaseTooltip from './common/BaseTooltip.vue'
   import DropMenu, { type DropMenuGroup } from './DropMenu.vue'
   import KLineAdjustmentDropdown, { type KLineAdjustment } from './KLineAdjustmentDropdown.vue'
   import KLineLevelDropdown from './KLineLevelDropdown.vue'
+  import KLineShapeDropdown from './KLineShapeDropdown.vue'
   import { isKLineLevel, type KLineLevel } from './kLineLevel'
+  import LayoutMenu from './LayoutMenu.vue'
   import type { SymbolItem } from './SymbolSelector.vue'
   import SymbolSelector from './SymbolSelector.vue'
 
@@ -194,10 +271,12 @@
 
   const props = withDefaults(
     defineProps<{
+      layoutController?: ChartController | null
       symbol?: string
       symbolItem?: SymbolItem
       kLineLevel?: string
       kLineAdjust?: string
+      kLineShape?: ChartSettings['klineShape']
       symbols?: SymbolItem[]
       search?: SymbolSearchFn<SymbolItem>
       symbolLoading?: boolean
@@ -210,6 +289,9 @@
       comparisonLoading?: boolean
       showBackButton?: boolean
       screenshotCapturing?: boolean
+      canUndoDrawing?: boolean
+      canRedoDrawing?: boolean
+      isFullscreen?: boolean
       screenshotMessage?: string | null
       aggregationSources?: ReadonlyArray<AggregationSourceDefinition>
       enabledSourceNames?: ReadonlySet<string>
@@ -225,6 +307,7 @@
   )
 
   const emit = defineEmits<{
+    (e: 'kLineShapeChange', shape: NonNullable<ChartSettings['klineShape']>): void
     (e: 'addOverlaySymbol', item: SymbolItem): void
     (e: 'removeOverlaySymbol', code: string): void
     (e: 'kLineLevelChange', level: KLineLevel): void
@@ -234,6 +317,10 @@
     (e: 'toggleAggregationSource', name: string, enabled: boolean): void
     (e: 'updateSourceEndpoint', name: string, patch: Partial<AggregationSourceEndpoint>): void
     (e: 'back'): void
+    (e: 'undoDrawing'): void
+    (e: 'redoDrawing'): void
+    (e: 'toggleFullscreen'): void
+    (e: 'settings'): void
     (e: 'screenshot', action: ChartScreenshotAction): void
   }>()
 
@@ -287,9 +374,9 @@
     gap: 6px;
     padding: 0 8px;
     border: 1px solid var(--klc-color-ui-border);
-    border-radius: 3px;
+    border-bottom: 0;
+    border-radius: 0;
     background: var(--klc-color-ui-surface);
-    box-shadow: 0 1px 3px color-mix(in srgb, var(--klc-color-ui-text) 6%, transparent);
     box-sizing: border-box;
     user-select: none;
   }
@@ -299,7 +386,7 @@
     min-width: 0;
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 0;
     height: 100%;
     overflow-x: auto;
     overflow-y: hidden;
@@ -308,6 +395,53 @@
 
   .top-toolbar__controls::-webkit-scrollbar {
     display: none;
+  }
+
+  .top-toolbar__item {
+    position: relative;
+    flex: 0 0 auto;
+  }
+
+  .top-toolbar__item + .top-toolbar__item {
+    margin-left: 4px;
+    padding-left: 5px;
+  }
+
+  .top-toolbar__item + .top-toolbar__item::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    height: 22px;
+    width: 1px;
+    transform: translateY(-50%);
+    background: var(--klc-color-ui-border);
+  }
+
+  .top-toolbar :deep(.symbol-chip),
+  .top-toolbar :deep(.compare-chip),
+  .top-toolbar__item :deep(.drop-menu__trigger),
+  .top-toolbar .back-button,
+  .top-toolbar .history-button,
+  .top-toolbar :deep(.screenshot-button) {
+    height: 30px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .top-toolbar :deep(.symbol-chip:hover),
+  .top-toolbar :deep(.symbol-chip.is-open),
+  .top-toolbar :deep(.symbol-chip[aria-expanded='true']),
+  .top-toolbar :deep(.compare-chip:hover),
+  .top-toolbar :deep(.compare-chip.is-open),
+  .top-toolbar__item :deep(.drop-menu__trigger:hover:not(:disabled)),
+  .top-toolbar__item :deep(.drop-menu__trigger[aria-expanded='true']),
+  .top-toolbar .back-button:hover:not(:disabled),
+  .top-toolbar .history-button:hover:not(:disabled) {
+    background: var(--klc-color-ui-hover);
   }
 
   .back-button {
@@ -320,12 +454,30 @@
     height: 15px;
   }
 
+  .layout-actions {
+    display: flex;
+    align-items: center;
+    flex: 0 0 auto;
+    margin-left: auto;
+    border-left: 1px solid var(--klc-color-ui-border);
+    padding-left: 4px;
+  }
+
   .screenshot-actions {
     flex: 0 0 auto;
     display: flex;
     align-items: center;
-    gap: 6px;
-    margin-left: auto;
+    gap: 2px;
+    border-left: 1px solid var(--klc-color-ui-border);
+    padding-left: 4px;
+  }
+
+  .screenshot-actions .history-button,
+  .screenshot-actions :deep(.screenshot-button) {
+    color: var(--klc-color-ui-muted);
+    width: 30px;
+    min-width: 30px;
+    padding: 0;
   }
 
   /* 截图入口只保留图标，去掉外框和默认底色，交互提示交给 hover tooltip。 */
@@ -344,6 +496,11 @@
   }
 
   .screenshot-button__icon {
+    width: 18px;
+    height: 18px;
+  }
+
+  .history-button__icon {
     width: 18px;
     height: 18px;
   }

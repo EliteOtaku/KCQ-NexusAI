@@ -7,6 +7,7 @@ import babel from 'vite-plugin-babel'
 import Icons from 'unplugin-icons/vite'
 
 import { createCoreSourceAliases } from '../../scripts/core-source-aliases.mjs'
+import { indicatorEntrypointsPlugin } from '../../scripts/indicator-entrypoints-plugin.mjs'
 
 const coreSrc = fileURLToPath(new URL('../core/src', import.meta.url))
 const repoSrc = fileURLToPath(new URL('../../src', import.meta.url))
@@ -28,6 +29,7 @@ const vueResolverPlugin = {
 
 export default defineConfig({
   plugins: [
+    indicatorEntrypointsPlugin(),
     vueResolverPlugin,
     babel({
       include: [/\/src\/.*\.tsx?$/],
@@ -55,6 +57,14 @@ export default defineConfig({
     extensions: ['.mjs', '.js', '.mts', '.ts', '.jsx', '.tsx', '.json', '.vue'],
     alias: [
       ...coreAliases,
+      {
+        find: /^@363045841yyt\/klinechart-agent-runtime\/testing$/,
+        replacement: fileURLToPath(new URL('../agent-runtime/src/testing/index.ts', import.meta.url)),
+      },
+      {
+        find: /^@363045841yyt\/klinechart-agent-runtime\/browser$/,
+        replacement: fileURLToPath(new URL('../agent-runtime/src/browser.ts', import.meta.url)),
+      },
       {
         find: /^@363045841yyt\/klinechart-agent-runtime$/,
         replacement: agentRuntime,

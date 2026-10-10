@@ -7,7 +7,7 @@ import { RENDERER_PRIORITY } from '@/foundation/plugin/index.js'
 import { resolveThemeColors } from '@/foundation/tokens/index.js'
 import type { Layer } from '@/rendering/scene/types.js'
 import { calcSMMAData } from '../../indicators/calculators/index.js'
-import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { Indicator } from '../../indicators/indicatorDecorator.js'
 import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
 import type { SMMARenderState } from '../../indicators/state/smmaState.js'
 import { EMPTY_SMMA_STATE } from '../../indicators/state/smmaState.js'
@@ -33,7 +33,7 @@ interface SMMARendererOptions {
 function createSMMALayer(options: SMMARendererOptions = {}): Layer<RenderContext> {
   const { paneId = 'main', instanceId } = options
   return createIndicatorRendererLayer({
-    name: `smma_${paneId}`,
+    definitionId: 'smma',
     paneId,
     z: RENDERER_PRIORITY.INDICATOR,
     draw(context) {
@@ -101,7 +101,6 @@ const getSMMATitleInfo = createSingleLineTitleInfo({
   defaultPaneId: 'main',
   allowMainPane: true,
   mainPane: {
-    rendererName: 'smma_main',
     toActiveConfig: (params, active) => ({ ...params, showSMMA: active }),
   },
   visibleState: { compose: createSparseVisibleStateComposer('smma', EMPTY_SMMA_STATE) },

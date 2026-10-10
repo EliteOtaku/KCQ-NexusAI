@@ -14,6 +14,7 @@ import babel from 'vite-plugin-babel'
 import Icons from 'unplugin-icons/vite'
 
 import { createCoreSourceAliases } from '../../../scripts/core-source-aliases.mjs'
+import { indicatorEntrypointsPlugin } from '../../../scripts/indicator-entrypoints-plugin.mjs'
 
 const decoratorTransform = babel({
   include: [/\/src\/.*\.tsx?$/],
@@ -101,6 +102,7 @@ export default defineConfig({
     },
   },
   plugins: [
+    indicatorEntrypointsPlugin(),
     watchWorkspaceSources(root),
     decoratorTransform,
     vue(),
@@ -110,6 +112,10 @@ export default defineConfig({
     extensions: ['.mjs', '.js', '.mts', '.ts', '.jsx', '.tsx', '.json', '.vue'],
     alias: [
       ...createCoreSourceAliases(coreSrc),
+      {
+        find: /^@363045841yyt\/klinechart-agent-runtime\/browser$/,
+        replacement: `${root}/packages/agent-runtime/src/browser.ts`,
+      },
       {
         find: /^@363045841yyt\/klinechart-agent-runtime\/contracts\/ui$/,
         replacement: agentContracts,

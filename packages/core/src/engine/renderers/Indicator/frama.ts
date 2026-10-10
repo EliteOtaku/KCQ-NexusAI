@@ -8,7 +8,7 @@ import { resolveThemeColors } from '@/foundation/tokens/index.js'
 import type { KLineData } from '@/foundation/types/price.js'
 import type { Layer } from '@/rendering/scene/types.js'
 import { calcFRAMAData } from '../../indicators/calculators/frama.js'
-import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { Indicator } from '../../indicators/indicatorDecorator.js'
 import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
 import type { FRAMARenderState } from '../../indicators/state/framaState.js'
 import { EMPTY_FRAMA_STATE } from '../../indicators/state/framaState.js'
@@ -30,7 +30,7 @@ interface FRAMARendererOptions {
 function createFRAMALayer(options: FRAMARendererOptions = {}): Layer<RenderContext> {
   const { paneId = 'main', instanceId } = options
   return createIndicatorRendererLayer({
-    name: `frama_${paneId}`,
+    definitionId: 'frama',
     paneId,
     z: RENDERER_PRIORITY.INDICATOR,
     draw(context) {
@@ -96,7 +96,6 @@ const getFRAMATitleInfo = createSingleLineTitleInfo({
   defaultPaneId: 'main',
   allowMainPane: true,
   mainPane: {
-    rendererName: 'frama_main',
     toActiveConfig: (params, active) => ({ ...params, showFRAMA: active }),
   },
   visibleState: { compose: createSparseVisibleStateComposer('frama', EMPTY_FRAMA_STATE) },

@@ -1,55 +1,75 @@
 <template>
-  <section ref="workspace" class="agent-workspace" aria-label="Agent Alpha">
+  <section ref="workspace" class="agent-workspace" :aria-label="text.agent">
     <AgentHeader
-      :sessions="state.sessions"
-      :active-session-id="state.activeSessionId"
       :locale="locale"
-      @create="createSession"
-      @select="selectSession"
-      @rename="renameSession"
-      @delete="deleteSession"
+      :sessions-open="sessionDrawerOpen"
+      :available="available"
+      @create="handleCreateSession"
+      @toggle-sessions="sessionDrawerOpen = !sessionDrawerOpen"
       @settings="providerSettings.show(state.provider)"
-      @close="$emit('close')"
+      @close="handleClosePanel"
     />
 
-    <AgentTimeline
-      :messages="state.messages"
-      :tool-calls="state.toolCalls"
-      :confirmations="state.confirmations"
-      :questions="state.questions"
-      :run="state.run"
-      :runs="[...state.previousRuns, state.run]"
-      :error="state.error"
-      :can-undo="state.canUndoTurn"
-      :collapse-reasoning="collapseReasoning"
-      :locale="locale"
-      @prompt="draft = $event"
-      @confirm="confirmTool"
-      @answer="answerQuestion"
-      @retry="retry"
-      @undo="undoTurn"
-    />
+    <template v-if="available">
+      <AgentSessionDrawer
+        :show="sessionDrawerOpen"
+        :sessions="state.sessions"
+        :active-session-id="state.activeSessionId"
+        :locale="locale"
+        @close="sessionDrawerOpen = false"
+        @create="handleCreateSession"
+        @select="handleSelectSession"
+        @rename="renameSession"
+        @delete="deleteSession"
+      />
 
-    <AgentContextInjectionCard :context-items="contextItems" :locale="locale" />
-    <AgentContextBar
-      :context-items="contextItems"
+      <AgentTimeline
+        :messages="state.messages"
+        :tool-calls="state.toolCalls"
+        :confirmations="state.confirmations"
+        :questions="state.questions"
+        :run="state.run"
+        :runs="[...state.previousRuns, state.run]"
+        :error="state.error"
+        :can-undo="state.canUndoTurn"
+        :collapse-reasoning="collapseReasoning"
+        :locale="locale"
+        @prompt="draft = $event"
+        :edit-message="editMessage"
+        :actions-disabled="isRunning"
+        @confirm="confirmTool"
+        @answer="answerQuestion"
+        @retry="retry"
+        @undo="undoTurn"
+      />
+
+      <AgentContextBar
+        :context-items="contextItems"
+        :locale="locale"
+        :read-only="readOnly"
+        @read-only="setReadOnly"
+      />
+      <AgentComposer
+        v-model:draft="draft"
+        :running="isRunning"
+        :provider="state.provider"
+        :models="models"
+        :models-loading="modelsLoading"
+        :usage="state.run.usage"
+        :locale="locale"
+        @send="send"
+        @stop="stop"
+        @model="setModel"
+        @models-open="loadModels"
+        @reasoning-effort="setReasoningEffort"
+      />
+    </template>
+
+    <AgentUnavailableNotice
+      v-else-if="availability.status === 'unavailable'"
+      :error="availability.error"
       :locale="locale"
-      :read-only="readOnly"
-      @read-only="setReadOnly"
-    />
-    <AgentComposer
-      v-model:draft="draft"
-      :running="isRunning"
-      :provider="state.provider"
-      :models="models"
-      :models-loading="modelsLoading"
-      :usage="state.run.usage"
-      :locale="locale"
-      @send="send"
-      @stop="stop"
-      @model="setModel"
-      @models-open="loadModels"
-      @reasoning-effort="setReasoningEffort"
+      @retry="retryInitialize"
     />
 
     <p class="sr-only" aria-live="polite" aria-atomic="true">{{ liveAnnouncement }}</p>
@@ -64,25 +84,29 @@
 </template>
 
 <script setup lang="ts">
-  import { nextTick, onUnmounted, ref, watch } from 'vue'
+  import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
   import type { AgentBridgeClient } from '../agent-contracts.js'
+  import { getAgentCopy } from '../agent-copy.js'
   import { useAgentWorkspace } from '../workspace/impl/use-agent-workspace.js'
   import AgentComposer from './AgentComposer.vue'
   import AgentContextBar from './AgentContextBar.vue'
-  import AgentContextInjectionCard from './AgentContextInjectionCard.vue'
   import AgentHeader from './AgentHeader.vue'
+  import AgentSessionDrawer from './AgentSessionDrawer.vue'
   import AgentSettingsDialog from './AgentSettingsDialog.vue'
   import AgentTimeline from './AgentTimeline.vue'
+  import AgentUnavailableNotice from './AgentUnavailableNotice.vue'
 
   const props = defineProps<{ bridge: AgentBridgeClient }>()
-  defineEmits<{ close: [] }>()
+  const emit = defineEmits<{ close: [] }>()
 
   const workspace = ref<HTMLElement | null>(null)
+  const sessionDrawerOpen = ref(false)
   const liveAnnouncement = ref('')
   let announcementTimer: ReturnType<typeof setTimeout> | undefined
 
   const {
     state,
+    availability,
     contextItems,
     draft,
     providerSettings,
@@ -99,6 +123,8 @@
     send,
     stop,
     retry,
+    retryInitialize,
+    editMessage,
     confirmTool,
     answerQuestion,
     undoTurn,
@@ -107,6 +133,27 @@
     loadModels,
     setReasoningEffort,
   } = useAgentWorkspace(props.bridge)
+
+  const text = computed(() => getAgentCopy(locale.value))
+  const available = computed(() => availability.value.status === 'ready')
+
+  // 新建会话后收起抽屉，让新对话立即可见。
+  async function handleCreateSession(): Promise<void> {
+    await createSession()
+    sessionDrawerOpen.value = false
+  }
+
+  // 选中会话后收起抽屉。
+  async function handleSelectSession(sessionId: string): Promise<void> {
+    await selectSession(sessionId)
+    sessionDrawerOpen.value = false
+  }
+
+  // 关闭面板前先收起抽屉，避免再次打开时残留旧的抽屉状态。
+  function handleClosePanel(): void {
+    sessionDrawerOpen.value = false
+    emit('close')
+  }
 
   function focusTarget(selector: string): void {
     void nextTick(() => workspace.value?.querySelector<HTMLElement>(selector)?.focus())
@@ -146,6 +193,13 @@
   )
 
   watch(
+    () => availability.value.status,
+    (status) => {
+      if (status === 'unavailable') focusTarget('[data-focus="availability"]')
+    },
+  )
+
+  watch(
     () => state.value.run.status,
     (status) => {
       if (['completed', 'cancelled', 'partial'].includes(status)) {
@@ -162,10 +216,11 @@
 <style scoped>
   .agent-workspace {
     --agent-bg: var(--klc-color-ui-background);
+    --agent-control-radius: 8px;
     --agent-surface: var(--klc-color-ui-surface);
     --agent-card: var(--klc-color-ui-card);
     --agent-control: var(--klc-color-ui-control-background);
-    --agent-input: var(--klc-color-ui-input);
+    --agent-input: var(--klc-color-agent-composer-input-background);
     --agent-hover: var(--klc-color-ui-hover);
     --agent-user-message: var(--klc-color-agent-user-message);
     --agent-border: var(--klc-color-ui-border);
@@ -176,24 +231,22 @@
     --agent-accent: var(--klc-color-ui-accent);
     --agent-accent-strong: var(--klc-color-ui-accent-strong);
     --agent-focus: var(--klc-color-ui-focus);
+    --toggle-switch-track-background: var(--agent-control);
+    --toggle-switch-thumb-background: var(--klc-color-ui-on-accent);
+    --toggle-switch-active-background: var(--agent-accent);
+    --toggle-switch-focus-color: var(--agent-focus);
     --agent-warning-bg: var(--klc-color-ui-warning-background);
     --agent-danger-bg: var(--klc-color-ui-danger-background);
 
     height: 100%;
     min-width: 0;
+    position: relative;
     display: grid;
-    grid-template-rows: auto minmax(0, 1fr) auto auto auto;
+    grid-template-rows: auto minmax(0, 1fr) auto auto;
     overflow: hidden;
     color: var(--agent-text);
     background: var(--agent-bg);
-    font-family:
-      Inter,
-      ui-sans-serif,
-      system-ui,
-      -apple-system,
-      BlinkMacSystemFont,
-      'Segoe UI',
-      sans-serif;
+    font-family: var(--klc-typography-font-family);
     letter-spacing: 0;
   }
 

@@ -5,7 +5,7 @@ import { resolveThemeColors } from '@/foundation/tokens/index.js'
 import type { KLineData } from '@/foundation/types/price.js'
 import type { Layer } from '@/rendering/scene/types.js'
 import { calcKeltnerData } from '../../indicators/calculators/index.js'
-import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { Indicator } from '../../indicators/indicatorDecorator.js'
 import type { TitleInfo } from '../../indicators/indicatorMetadata.js'
 import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
 import type { KeltnerRenderState } from '../../indicators/state/keltnerState.js'
@@ -25,7 +25,7 @@ interface KeltnerRendererOptions {
 function createKeltnerLayer(options: KeltnerRendererOptions = {}): Layer<RenderContext> {
   const { paneId = 'main', instanceId } = options
   return createIndicatorRendererLayer({
-    name: `keltner_${paneId}`,
+    definitionId: 'keltner',
     paneId,
     z: RENDERER_PRIORITY.INDICATOR,
     draw(context) {
@@ -128,7 +128,6 @@ function getKeltnerTitleInfo(
   defaultPaneId: 'main',
   allowMainPane: true,
   mainPane: {
-    rendererName: 'keltner_main',
     toActiveConfig: (params, active) => ({
       ...params,
       showUpper: active,

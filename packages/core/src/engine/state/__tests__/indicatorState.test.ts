@@ -1,7 +1,14 @@
-import { describe, expect, it } from 'vitest'
+/** 验证指标状态写入，使用正式装配的计算参数契约。 */
+import { beforeAll, describe, expect, it } from 'vitest'
+import { registerIndicatorDefinition } from '../../indicators/indicatorDefinitionRegistry'
+import { CCIIndicatorDefinition } from '../../renderers/Indicator/cci'
+import { VolumeIndicatorDefinition } from '../../renderers/subVolume'
 import { createIndicatorState, type IndicatorInstanceSpec } from '../indicatorState'
-import '../../renderers/subVolume'
-import '../../renderers/Indicator/cci'
+
+beforeAll(() => {
+  registerIndicatorDefinition(CCIIndicatorDefinition)
+  registerIndicatorDefinition(VolumeIndicatorDefinition)
+})
 
 describe('indicatorState', () => {
   it('restores independent user indicators for kline and timeshare workspaces', () => {
@@ -46,7 +53,7 @@ describe('indicatorState', () => {
 
   it('upsert adds and merges params immutably', () => {
     const m = createIndicatorState()
-    m.actions.upsertMain('MA', { period: 5 })
+    m.actions.upsertMain('MA', { period1: 5 })
     expect(m.readonly.instances()).toEqual([
       {
         instanceId: 'main:MA',
@@ -54,15 +61,15 @@ describe('indicatorState', () => {
         paneId: 'main',
         role: 'main',
         ordinal: 0,
-        params: { period: 5 },
+        params: { period1: 5 },
       },
     ])
     const first = m.readonly.instances()
-    m.actions.upsertMain('MA', { period: 10, color: 'red' })
+    m.actions.upsertMain('MA', { period1: 10, color: 'red' })
     const second = m.readonly.instances()
     expect(second).not.toBe(first)
-    expect(second[0]?.params).toEqual({ period: 10, color: 'red' })
-    expect(first[0]?.params).toEqual({ period: 5 })
+    expect(second[0]?.params).toEqual({ period1: 10, color: 'red' })
+    expect(first[0]?.params).toEqual({ period1: 5 })
     expect(m.readonly.configRevision()).toBe(2)
   })
 

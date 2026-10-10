@@ -5,7 +5,7 @@ import type { KLineData } from '@/foundation/types/price.js'
 import { alignToPhysicalPixelCenter } from '@/foundation/utils/pixelAlign.js'
 import type { Layer } from '@/rendering/scene/types.js'
 import { calcENEData } from '../../indicators/calculators/index.js'
-import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { Indicator } from '../../indicators/indicatorDecorator.js'
 import type {
   GetTitleInfoFn,
   IndicatorPriceRangeComputer,
@@ -97,7 +97,7 @@ const composeENERenderState: IndicatorRenderStateComposer = (
 export function createENELayer(options: ENERendererOptions = {}): Layer<RenderContext> {
   const { instanceId } = options
   return createIndicatorRendererLayer({
-    name: 'ene',
+    definitionId: 'ene',
     paneId: 'main',
     z: RENDERER_PRIORITY.INDICATOR,
     draw(context) {
@@ -215,7 +215,6 @@ const getENETitleInfo: GetTitleInfoFn = (
   indicatorType: 'channel',
   defaultPaneId: 'main',
   mainPane: {
-    rendererName: 'ene',
     toActiveConfig: (params, active) => (active ? params : null),
     computePriceRange: computeENEPriceRange,
     composeRenderState: composeENERenderState,

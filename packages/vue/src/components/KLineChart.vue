@@ -7,12 +7,21 @@
   >
     <div class="chart-workspace">
       <TopToolbar
+        :layout-controller="controller"
+        :is-fullscreen="effectiveIsFullscreen"
+        @toggle-fullscreen="handleToggleFullscreen"
+        @settings="chartSettingsOpen = true"
+        :can-undo-drawing="canUndoDrawing"
+        :can-redo-drawing="canRedoDrawing"
+        @undo-drawing="controller?.undoDrawing()"
+        @redo-drawing="controller?.redoDrawing()"
         :symbol="currentSymbol"
         :symbol-item="currentSymbolItem ?? undefined"
         :symbols="symbolPool"
         :search="searchSymbols"
         :k-line-level="kLineLevel"
         :k-line-adjust="kLineAdjust"
+        :k-line-shape="kLineShape"
         :symbol-loading="symbolStatus === 'loading'"
         :symbol-error="symbolStatus === 'error'"
         :symbol-retrying="symbolRetrying"
@@ -33,15 +42,25 @@
         @remove-overlay-symbol="onRemoveOverlaySymbol"
         @k-line-level-change="onKLineLevelChange"
         @k-line-adjust-change="onKLineAdjustChange"
+        @k-line-shape-change="onKLineShapeChange"
         @symbol-change="onSymbolChange"
         @add-watchlist="addWatchlistItem"
         @toggle-aggregation-source="setAggregationSourceEnabled"
         @update-source-endpoint="setAggregationSourceEndpoint"
         @back="onBackFromTimeShare"
-      />
+      >
+        <template #watchlist>
+          <WatchlistPanel
+            :items="watchlistItems"
+            :active-key="currentSymbolItem ? symbolIdentityKey(currentSymbolItem) : undefined"
+            @select="onSymbolChange"
+            @remove="removeWatchlistItem"
+          />
+        </template>
+      </TopToolbar>
       <div ref="chartStageRef" class="chart-stage">
         <LeftToolbar
-          :is-fullscreen="effectiveIsFullscreen"
+          v-model:settings-open="chartSettingsOpen"
           :alert-controller="controller"
           :effective-settings="chartSettings"
           :renderer-runtime="rendererRuntime"
@@ -49,8 +68,6 @@
           :drawing-tool-id="drawingToolId"
           :magnet-mode="magnetMode"
           :continuous-drawing="continuousDrawing"
-          :can-undo-drawing="canUndoDrawing"
-          :can-redo-drawing="canRedoDrawing"
           :has-drawings="drawings.length > 0"
           :has-indicators="activeIndicators.length > 0"
           :all-drawings-hidden="drawings.length > 0 && drawings.every((drawing) => !drawing.visible)"
@@ -63,11 +80,8 @@
           @set-magnet-mode="setMagnetMode"
           @set-continuous-drawing="setContinuousDrawing"
           @toggle-indicator="onToggleIndicator"
-          @toggle-fullscreen="handleToggleFullscreen"
           @zoom-in="applyZoomToLevel(zoomLevel + 1)"
           @zoom-out="applyZoomToLevel(zoomLevel - 1)"
-          @undo-drawing="controller?.undoDrawing()"
-          @redo-drawing="controller?.redoDrawing()"
           @clear-drawings="controller?.clearDrawings()"
           @clear-indicators="clearAllIndicators"
           @set-global-drawing-lock="onSetGlobalDrawingLock"
@@ -78,6 +92,21 @@
           @update-source-endpoint="setAggregationSourceEndpoint"
         />
         <div ref="chartMainRef" class="chart-main">
+          <a
+            class="chart-brand"
+            href="https://github.com/363045841/KLineChartQuant"
+            target="_blank"
+            rel="noopener noreferrer"
+            :style="{
+              bottom: `${props.bottomAxisHeight + 8}px`,
+              '--chart-brand-axis-width': `${
+                chartMode === 'timeshare'
+                  ? props.rightAxisWidth + props.priceLabelWidth
+                  : priceAxisPosition === 'left' ? axisHostWidth : 0
+              }px`,
+            }"
+            aria-label="KlineChartQuant"
+          >KlineChartQuant</a>
           <div
             ref="leftAxisLayerRef"
             v-show="chartMode === 'timeshare'"
@@ -100,10 +129,6 @@
             tabindex="0"
             @keydown="onDrawingHistoryKeydown"
             class="chart-container"
-            :class="{
-              'chart-container--axis-left': chartMode !== 'timeshare' && priceAxisPosition === 'left',
-              'chart-container--dual-axis': chartMode === 'timeshare',
-            }"
             @pointerdown="onPointerDown"
             @pointermove="onPointerMove"
             @pointerup="onPointerUp"
@@ -118,11 +143,11 @@
                 <canvas ref="xAxisCanvasRef" class="x-axis-canvas"></canvas>
 
                 <div
-                  v-if="hasLegendSlot && legendTemplateContext"
+                  v-if="hasLegendSlot && legendContext"
                   class="main-legend-overlay"
                   :style="legendOverlayStyle"
                 >
-                  <slot name="legend" v-bind="legendTemplateContext" />
+                  <slot name="legend" v-bind="legendContext" />
                 </div>
 
                 <CanvasToolbarStack>
@@ -302,12 +327,6 @@
         </div>
       </div>
     </div>
-    <WatchlistPanel
-      :items="watchlistItems"
-      :active-key="currentSymbolItem ? symbolIdentityKey(currentSymbolItem) : undefined"
-      @select="onSymbolChange"
-      @remove="removeWatchlistItem"
-    />
     <ExportProgressDialog :progress="exportingProgress" @close="exportingProgress = null" />
     <BatchStockDialog
       :show="showBatchStockDialog"
@@ -346,7 +365,11 @@
 </template>
 
 <script setup lang="ts">
-  import { type ChartSettings, resolveSettings } from '@363045841yyt/klinechart-core/config'
+  import {
+    type ChartSettings,
+    normalizeSettings,
+    TOOLTIP_POSITION_NONE,
+  } from '@363045841yyt/klinechart-core/config'
   import {
     type ChartController,
     type ChartMountOptions,
@@ -406,6 +429,7 @@
     setEndpoint: setAggregationSourceEndpoint,
   } = useAggregationSources(aggregationSources)
 
+  import './tooltip.css'
   import { useCanvasDrawingTemplates } from '../composables/chart/useCanvasDrawingTemplates.js'
   import { useChartScreenshot } from '../composables/chart/useChartScreenshot.js'
   import { useChartState } from '../composables/chart/useChartState.js'
@@ -419,12 +443,13 @@
   import { useIndicatorManager } from '../composables/chart/useIndicatorManager.js'
   import { useInteractionBridge } from '../composables/chart/useInteractionBridge.js'
   import { useKLineTooltip } from '../composables/chart/useKLineTooltip.js'
-  import { useLegendActions } from '../composables/chart/useLegendActions.js'
+  import { useLegendUi } from '../composables/chart/useLegendUi.js'
   import { usePaneAxisItems } from '../composables/chart/usePaneAxisItems.js'
   import { useRangeSelection } from '../composables/chart/useRangeSelection.js'
   import { provideFullscreenTeleportTarget } from '../composables/useFullscreenTeleportTarget.js'
   import { symbolIdentityKey } from '../composables/useSymbolSearch.js'
   import { useWatchlist } from '../composables/useWatchlist.js'
+  import { readElementSize } from '../utils/elementSize.js'
 
   import BatchStockDialog from './BatchStockDialog.vue'
   import CanvasToolbarStack from './common/CanvasToolbarStack.vue'
@@ -473,7 +498,7 @@
       /** 价格标签额外宽度（用于显示涨跌幅，默认 60px） */
       priceLabelWidth?: number
 
-      /** 缩放级别数量（默认 10） */
+      /** 缩放级别数量（默认 80） */
       zoomLevels?: number
       /** 初始缩放级别（1 ~ zoomLevels，默认居中） */
       initialZoomLevel?: number
@@ -483,8 +508,7 @@
       timezone?: string
 
       /**
-       * 图表设置。逐 key 覆盖：显式声明的 key 优先，未声明的回落到 localStorage 存量，
-       * 最后用默认值补齐。未传时等价于 localStorage 存量 + 默认值。
+       * 图表设置。显式声明的 key 覆盖活动布局，其余设置由布局和默认值提供。
        */
       settings?: Partial<ChartSettings>
 
@@ -497,11 +521,11 @@
     {
       yPaddingPx: 20,
       minKWidth: 1,
-      maxKWidth: 50,
+      maxKWidth: 200,
       rightAxisWidth: 0,
       bottomAxisHeight: 24,
       priceLabelWidth: 60,
-      zoomLevels: 20,
+      zoomLevels: 80,
       initialZoomLevel: 3,
       // 显式 undefined：覆盖 Vue 对 Boolean 缺省值的强制转换（默认会变成 false），
       // 保证未绑定 isFullscreen 时为非受控模式（props.isFullscreen === undefined）
@@ -511,7 +535,6 @@
   )
 
   const emit = defineEmits<{
-    (e: 'zoomLevelChange', level: number, kWidth: number): void
     (e: 'toggleFullscreen'): void
     (e: 'update:isFullscreen', value: boolean): void
     (e: 'themeChange', theme: 'light' | 'dark'): void
@@ -728,6 +751,9 @@
       exchange: info.exchange ?? '',
       sessionId: info.sessionId ?? (info.market || undefined),
       providerRef: info.params,
+      tickSize: info.tickSize,
+      lotSize: info.lotSize,
+      currency: info.currency,
       capabilities: info.capabilities ?? {},
     }
   }
@@ -739,6 +765,9 @@
       assetClass: item.assetClass,
       sessionId: item.sessionId,
       capabilities: item.capabilities,
+      tickSize: item.tickSize,
+      lotSize: item.lotSize,
+      currency: item.currency,
       symbol: item.symbol,
       market: item.sessionId ?? '',
       description: item.name,
@@ -778,6 +807,7 @@
 
   // ── Fullscreen (controlled / uncontrolled) ──
   const internalIsFullscreen = ref(false)
+  const chartSettingsOpen = ref(false)
   const effectiveIsFullscreen = computed(() => props.isFullscreen ?? internalIsFullscreen.value)
   let onFullscreenChange: (() => void) | null = null
 
@@ -838,8 +868,8 @@
   })
   const isIntraday = computed(() => kLineLevel.value.includes('min'))
 
-  // setup 阶段即分层解析 settings，避免子组件先读 localStorage 造成闪色
-  const _initialResolved = resolveSettings(props.settings)
+  // 控制器就绪前使用显式设置与默认值，就绪后直接读取活动布局设置。
+  const _initialResolved = normalizeSettings(props.settings)
   const _initialTheme: 'light' | 'dark' = (() => {
     const theme = _initialResolved.theme as string
     if (theme === 'auto') {
@@ -851,17 +881,17 @@
     return theme as 'light' | 'dark'
   })()
 
-  const {
-    chartTheme,
-    chartSettings,
-    tooltipColors,
-    themeCssVars,
-    handleSettingsChange,
-    applyThemeFromSettings,
-  } = useChartTheme(controller, _initialTheme)
+  const { chartTheme, chartSettings, tooltipColors, themeCssVars, handleSettingsChange } =
+    useChartTheme(controller, _initialTheme, _initialResolved)
 
-  if (props.settings !== undefined) {
-    chartSettings.value = _initialResolved
+  const liveSettings = useControllerSignal(
+    controller,
+    (ctrl) => ctrl.settings,
+    () => _initialResolved,
+  )
+  const kLineShape = computed(() => liveSettings.value.klineShape ?? 'candlestick')
+  function onKLineShapeChange(shape: NonNullable<ChartSettings['klineShape']>): void {
+    handleSettingsChange({ ...liveSettings.value, klineShape: shape })
   }
 
   const showBatchStockDialog = ref(false)
@@ -924,7 +954,6 @@
     clearAllSubPanes,
     clearAllIndicators,
     switchSubIndicator,
-    moveSubPane,
     handleIndicatorToggle,
     handleUpdateParams,
     handleReorderSubIndicators,
@@ -940,10 +969,7 @@
     replacementId: replacementPaneId,
     replacementRole,
     replaceLegend,
-  } = useLegendActions(controller, canvasLayerRef, {
-    removePane: removeSubPane,
-    movePane: moveSubPane,
-    replacePane: switchSubIndicator,
+  } = useLegendUi(controller, canvasLayerRef, {
     openSelector: () => indicatorSelectorRef.value?.openMenu(),
     openIndicatorSettings: (definitionId) => indicatorSelectorRef.value?.openParams(definitionId),
   })
@@ -1131,13 +1157,11 @@
     if (!_markerTooltipRO) {
       _markerTooltipRO = new ResizeObserver((entries) => {
         for (const entry of entries) {
-          const target = entry.target as HTMLDivElement
-          if (!target.isConnected) continue
-          const w = entry.borderBoxSize[0]?.inlineSize ?? entry.contentRect.width
-          const h = entry.borderBoxSize[0]?.blockSize ?? entry.contentRect.height
+          const size = readElementSize(entry)
+          if (!size) continue
           markerTooltipSize.value = {
-            width: Math.max(120, Math.round(w)),
-            height: Math.max(60, Math.round(h)),
+            width: Math.max(120, size.width),
+            height: Math.max(60, size.height),
           }
         }
       })
@@ -1212,7 +1236,7 @@
   })
 
   /** 主图图例模板上下文（#legend slot 消费） */
-  const legendTemplateContext = shallowRef<LegendTemplateContext | null>(null)
+  const legendContext = shallowRef<LegendTemplateContext | null>(null)
   let _unsubLegend: (() => void) | null = null
 
   const hasLegendSlot = ref(!!slots.legend)
@@ -1224,7 +1248,7 @@
   })
 
   const legendOverlayStyle = computed(() => {
-    const ctx = legendTemplateContext.value
+    const ctx = legendContext.value
     if (!ctx) return undefined
     return {
       left: `${ctx.layout.x}px`,
@@ -1246,16 +1270,16 @@
     _unsubLegend?.()
     _unsubLegend = null
     if (!hasLegendSlot.value) {
-      legendTemplateContext.value = null
+      legendContext.value = null
       return
     }
 
-    _unsubLegend = ctrl.legendTemplateContext.subscribe(() => {
-      const next = ctrl.legendTemplateContext.peek()
-      if (legendTemplateContext.value === next) return
-      legendTemplateContext.value = next
+    _unsubLegend = ctrl.legend.context.subscribe(() => {
+      const next = ctrl.legend.context.peek()
+      if (legendContext.value === next) return
+      legendContext.value = next
     })
-    legendTemplateContext.value = ctrl.legendTemplateContext.peek()
+    legendContext.value = ctrl.legend.context.peek()
   }
 
   watch(
@@ -1276,6 +1300,11 @@
   const paneSeparatorLines = ref<Array<{ id: string; top: number }>>([])
   const markerTooltipSize = ref({ width: 220, height: 120 })
   const isMobile = window.matchMedia('(pointer: coarse)').matches
+
+  /** 数据悬浮框是否启用；设置为“不显示”时隐藏内置与外部 tooltip */
+  const isTooltipEnabled = computed(
+    () => (chartSettings.value?.tooltipPosition ?? 'adaptive') !== TOOLTIP_POSITION_NONE,
+  )
 
   /** adaptive 模式下 tooltip 可拖拽（内置与 #kline-tooltip 共用） */
   const isTooltipDraggable = computed(
@@ -1298,6 +1327,7 @@
     isIntraday: () => isIntraday.value,
     timezone: () => props.timezone,
     isDraggable: () => isTooltipDraggable.value,
+    isEnabled: () => isTooltipEnabled.value,
   })
 
   const externalHoveredKLine = computed(() => {
@@ -1310,7 +1340,9 @@
     }
     return null
   })
-  const showExternalKLineTooltip = computed(() => externalHoveredKLine.value !== null && !isMobile)
+  const showExternalKLineTooltip = computed(
+    () => externalHoveredKLine.value !== null && !isMobile && isTooltipEnabled.value,
+  )
   const externalKLineTooltipStyle = computed(() => {
     const position = dragPos.value ?? externalInteractionState.value.tooltipPos
     const offset = getLayerOffset()
@@ -1664,9 +1696,14 @@
     // 不依赖 registerSymbols 在 subscribe 之前还是之后调用。
     symbolPool.value = ctrl.symbolCatalog.peek().map(fromSymbolInfo)
 
-    const unsubscribeSymbols = ctrl.symbols.subscribe(() => {
+    /** 初次接线与之后的布局切换使用同一份品种投影，避免显示旧名称。 */
+    const syncCurrentSymbol = () => {
       const specs = ctrl.symbols.peek()
-      if (specs.length === 0) return
+      if (specs.length === 0) {
+        currentSymbol.value = '选择商品'
+        currentSymbolItem.value = null
+        return
+      }
       const primary = specs[0]
       const primaryInfo = ctrl.symbolCatalog
         .peek()
@@ -1678,28 +1715,38 @@
               info.exchange === primary.exchange,
         )
       currentSymbol.value = primary.symbol
-      currentSymbolItem.value = primaryInfo
-        ? fromSymbolInfo(primaryInfo)
-        : {
-            id:
-              primary.id ??
-              legacyInstrumentId(
-                primary.source ?? '',
-                primary.symbol,
-                primary.exchange ?? '',
-                primary.params,
-              ),
-            sourceId: primary.source ?? '',
-            symbol: primary.symbol,
-            name: primary.symbol,
-            assetClass: 'unknown',
-            exchange: primary.exchange ?? '',
-            sessionId: primary.market || undefined,
-            providerRef: primary.params,
-            capabilities: {},
-          }
-      if (primary.adjust) kLineAdjust.value = primary.adjust as 'qfq' | 'hfq' | 'splits' | 'none'
-    })
+      currentSymbolItem.value =
+        primary.instrument ??
+        (primaryInfo
+          ? fromSymbolInfo(primaryInfo)
+          : {
+              id:
+                primary.id ??
+                legacyInstrumentId(
+                  primary.source ?? '',
+                  primary.symbol,
+                  primary.exchange ?? '',
+                  primary.params,
+                ),
+              sourceId: primary.source ?? '',
+              symbol: primary.symbol,
+              name: primary.symbol,
+              assetClass: 'unknown',
+              exchange: primary.exchange ?? '',
+              sessionId: primary.market || undefined,
+              providerRef: primary.params,
+              capabilities: {},
+            })
+      if (
+        primary.adjust === 'qfq' ||
+        primary.adjust === 'hfq' ||
+        primary.adjust === 'splits' ||
+        primary.adjust === 'none'
+      )
+        kLineAdjust.value = primary.adjust
+    }
+    syncCurrentSymbol()
+    const unsubscribeSymbols = ctrl.symbols.subscribe(syncCurrentSymbol)
 
     const unsubscribeComparisonSpecs = ctrl.comparisonSpecs.subscribe(() => {
       const comparisonSpecs = ctrl.comparisonSpecs.peek()
@@ -1750,16 +1797,35 @@
     }
   }
 
+  /** 只取 props.settings 中显式声明（非 undefined）的 key，未声明项保留内核当前值。 */
+  function declaredSettings(settings: Partial<ChartSettings>): Partial<ChartSettings> {
+    return Object.fromEntries(
+      Object.entries(settings).filter(([, value]) => value !== undefined),
+    ) as Partial<ChartSettings>
+  }
+
+  /**
+   * 活动布局恢复后，只把 props 显式声明的 key 覆盖到内核。
+   */
   function applyInitialSettings(ctrl: ChartController): void {
-    // 分层解析：settings prop 显式 key > localStorage 存量 > 默认值
-    const resolved = resolveSettings(props.settings)
-    chartSettings.value = resolved
-    ctrl.updateSettingsFacade(resolved)
-    applyThemeFromSettings(resolved.theme as string)
+    if (props.settings !== undefined) ctrl.updateSettingsFacade(declaredSettings(props.settings))
+  }
+
+  /** 受控指标引用的定义实现按需加载；加载失败时由同步方法拒绝写入并给出提示。 */
+  async function loadControlledIndicators(ctrl: ChartController): Promise<void> {
+    const ids = (props.indicators ?? [])
+      .filter((indicator) => indicator.enabled)
+      .map((indicator) => indicator.definitionId)
+    if (ids.length === 0) return
+    try {
+      await ctrl.loadIndicators(ids)
+    } catch (err) {
+      console.error('[KLineChart] loading indicators failed:', err)
+    }
   }
 
   /** 将受控业务 props 按固定顺序同步到 ChartController。 */
-  function applyControlledChartProps(ctrl: ChartController): void {
+  function applyControlledChartProps(ctrl: ChartController, initial = false): void {
     if (props.indicators !== undefined) {
       for (const indicator of ctrl.indicators.peek()) {
         ctrl.removeIndicator(indicator.id)
@@ -1773,7 +1839,7 @@
 
     if (props.customData) {
       ctrl.applyCustomData(props.customData)
-    } else if (props.symbols !== undefined) {
+    } else if (props.symbols !== undefined && (!initial || ctrl.symbols.peek().length === 0)) {
       // 受控 symbols = [主品种, ...对比品种]；对比集合独立写入，首项作为普通序列推入保证可比对。
       ctrl.setSymbols(props.symbols.length > 0 ? [props.symbols[0]!] : [])
       ctrl.setComparisonSpecs(props.symbols.length > 1 ? props.symbols : [])
@@ -1821,6 +1887,8 @@
       console.error('[KLineChart] initChart failed:', err)
       return
     }
+    // 受控指标的实现须在首次同步前就绪，保证其与首批行情同帧计算。
+    await loadControlledIndicators(ctrl)
     if (!containerRef.value || !chartMainRef.value) {
       // 组件在 await 期间已卸载：此时 ctrl 尚未写入 controller.value，需主动释放。
       ctrl.dispose()
@@ -1836,7 +1904,7 @@
     cleanupChartCallbacks = setupChartCallbacks(ctrl)
 
     // 指标必须在 data source 首次加载前创建，避免 scheduler 漏掉首帧计算。
-    applyControlledChartProps(ctrl)
+    applyControlledChartProps(ctrl, true)
 
     // 4) 工具栏初始设置
     applyInitialSettings(ctrl)
@@ -1863,7 +1931,7 @@
     _unsubLegend?.()
     _unsubLegend = null
     applyLegendRenderMode(controller.value, false)
-    legendTemplateContext.value = null
+    legendContext.value = null
     const ctrl = controller.value
     if (ctrl) {
       controller.value = null
@@ -1890,22 +1958,22 @@
       () => props.customMarkers,
       () => props.customData,
     ],
-    () => {
+    async () => {
       const ctrl = controller.value
-      if (ctrl) applyControlledChartProps(ctrl)
+      if (!ctrl) return
+      await loadControlledIndicators(ctrl)
+      // 同步时读取最新 props；加载期间被替换的控制器不再写入。
+      if (controller.value === ctrl) applyControlledChartProps(ctrl)
     },
     { deep: true },
   )
 
-  // 受控设置：外部 settings 变化时重新分层解析（prop 显式 key > 存量 > 默认）
+  // 受控设置只覆盖显式声明的 key，未声明部分保留活动布局值。
   watch(
     () => props.settings,
     (next) => {
       if (next === undefined || !controller.value) return
-      const resolved = resolveSettings(next)
-      chartSettings.value = resolved
-      controller.value.updateSettingsFacade(resolved)
-      applyThemeFromSettings(resolved.theme as string)
+      controller.value.updateSettingsFacade(declaredSettings(next))
     },
     { deep: true },
   )
@@ -1928,21 +1996,23 @@
     display: flex;
     align-items: stretch;
     width: var(--kmap-width);
-    height: calc(var(--kmap-height) - 32px);
+    height: var(--kmap-height);
     min-height: 300px;
     flex-direction: row;
-    margin: 16px 0;
+    margin: 0;
     padding: 0;
     box-sizing: border-box;
-    gap: 4px;
+    gap: 0;
   }
 
   .chart-workspace {
+    --chart-frame-radius: 3px;
     min-width: 0;
     flex: 1 1 auto;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 0;
+    border-radius: var(--chart-frame-radius);
     /* 图表内部存在高 z-index 的叠加层，隔离为独立层叠上下文，
        避免它们越过自选股面板滑出动画（后者靠 DOM 顺序天然在上层）。 */
     isolation: isolate;
@@ -1953,16 +2023,37 @@
     min-height: 255px;
     display: flex;
     align-items: stretch;
-    gap: 4px;
+    gap: 0;
   }
 
   .chart-main {
     flex: 1 1 auto;
     min-width: 0;
+    /* 截图区域独立绘制完整外框，子容器只负责坐标轴分隔线。 */
+    border: 1px solid var(--chart-border);
+    /* 截图克隆按外框尺寸设置宽高，避免边框额外撑大后被裁掉。 */
+    box-sizing: border-box;
+    border-bottom-right-radius: var(--chart-frame-radius);
     display: flex;
     align-items: stretch;
     gap: 0;
     position: relative;
+  }
+
+  .chart-brand {
+    position: absolute;
+    /* 品牌锚定绘图区左边缘，随分时左轴或左侧价格轴的宽度移动。 */
+    left: calc(var(--chart-brand-axis-width) + 12px);
+    /* Canvas 叠层最高为 3；品牌位于其上，低于 tooltip 等交互浮层。 */
+    z-index: 4;
+    color: var(--klc-color-ui-text);
+    opacity: 0.3;
+    font-family: Outfit, sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1;
+    text-decoration: none;
+    cursor: pointer;
   }
 
   .pane-separator-layer {
@@ -2047,28 +2138,6 @@
     overflow-y: hidden;
     scrollbar-width: none;
     -ms-overflow-style: none;
-    border: 1px solid var(--chart-border);
-    border-right: 0;
-    border-left: 0;
-    border-radius: 0;
-  }
-
-  .chart-container {
-    border-radius: 3px 0 0 3px;
-    border-left: 1px solid var(--chart-border);
-  }
-
-  .chart-container--axis-left {
-    border-radius: 0 3px 3px 0;
-    border-left: 0;
-    border-right: 1px solid var(--chart-border);
-  }
-
-  /* 双轴分隔线由各自轴容器绘制，行情区不再叠加侧边框。 */
-  .chart-container--dual-axis {
-    border-left: 0;
-    border-right: 0;
-    border-radius: 0;
   }
 
   .drawing-line-label-editor {
@@ -2148,25 +2217,19 @@
 
   .right-axis-host {
     flex: 0 0 auto;
-    border: 1px solid var(--chart-border);
+    border-left: 1px solid var(--chart-border);
+    border-bottom-right-radius: var(--chart-frame-radius);
   }
 
   /* 分时左轴独立占据 flex 宽度，容器缩放由 Core 的 ResizeObserver 感知。 */
   .left-axis-host {
     position: relative;
     flex: 0 0 auto;
-    border: 1px solid var(--chart-border);
-    border-top-left-radius: 3px;
-    border-bottom-left-radius: 3px;
+    border-right: 1px solid var(--chart-border);
   }
 
   .left-axis-host :deep(> canvas) {
     display: block;
-  }
-
-  .right-axis-host {
-    border-top-right-radius: 3px;
-    border-bottom-right-radius: 3px;
   }
 
   .pane-axis-controls-host {
@@ -2182,10 +2245,9 @@
 
   .price-axis-host--left {
     order: -1;
-    border-top-left-radius: 3px;
-    border-bottom-left-radius: 3px;
-    border-top-right-radius: 0;
-    border-bottom-right-radius: 0;
+    border-left: 0;
+    border-right: 1px solid var(--chart-border);
+    border-radius: 0;
   }
 
   /* 轴画布由 Core 动态创建，定位与叠层由 Core 管理，Vue 只负责显示样式。 */
@@ -2236,7 +2298,7 @@
     pointer-events: none;
     font-size: 12px;
     line-height: 18px;
-    color: var(--klc-color-ui-text, #111);
+    color: var(--klc-color-ui-text);
   }
 
   .canvas-layer {
@@ -2269,15 +2331,6 @@
     anchor-name: --marker-tooltip-anchor;
   }
 
-  @media (max-width: 768px), (max-height: 640px) {
-    .chart-stage {
-      gap: 4px;
-    }
-
-    .watchlist-panel {
-      --watchlist-panel-expanded-width: 132px;
-    }
-  }
 </style>
 
 <style>
@@ -2300,53 +2353,5 @@
 <style>
   * {
     -webkit-tap-highlight-color: transparent;
-  }
-
-  .kline-tooltip {
-    position: absolute;
-    z-index: 10;
-    min-width: 200px;
-    max-width: 260px;
-    padding: 10px 12px;
-    border-radius: 8px;
-    background: var(--klc-color-tooltip-bg);
-    border: 1px solid var(--klc-color-tooltip-border);
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
-    color: var(--klc-color-tooltip-text);
-    font-size: 12px;
-    line-height: 1.4;
-    pointer-events: none;
-    backdrop-filter: blur(6px);
-    user-select: none;
-  }
-  .kline-tooltip.is-draggable,
-  .kline-tooltip-host.is-draggable {
-    pointer-events: auto;
-    cursor: grab;
-  }
-  .kline-tooltip.is-draggable:active,
-  .kline-tooltip-host.is-draggable:active {
-    cursor: grabbing;
-  }
-  .kline-tooltip__title {
-    display: flex;
-    justify-content: space-between;
-    gap: 10px;
-    font-weight: 600;
-    margin-bottom: 6px;
-  }
-  .kline-tooltip__grid {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 2px;
-  }
-  .kline-tooltip__grid .row {
-    display: flex;
-    justify-content: space-between;
-    gap: 10px;
-  }
-  .kline-tooltip__grid .row span:first-child {
-    color: var(--klc-color-tooltip-text);
-    opacity: 0.56;
   }
 </style>

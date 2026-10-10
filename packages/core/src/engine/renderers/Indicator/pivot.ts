@@ -4,7 +4,7 @@ import type { ColorTokens } from '@/foundation/tokens/index.js'
 import { resolveThemeColors } from '@/foundation/tokens/index.js'
 import type { Layer } from '@/rendering/scene/types.js'
 import { calcPivotData } from '../../indicators/calculators/index.js'
-import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { Indicator } from '../../indicators/indicatorDecorator.js'
 import type {
   GetTitleInfoFn,
   TitleInfo,
@@ -23,7 +23,7 @@ function createPivotLayer(
 ): Layer<RenderContext> {
   const { paneId = 'main', instanceId } = options
   return createIndicatorRendererLayer({
-    name: `pivot_${paneId}`,
+    definitionId: 'pivot',
     paneId,
     z: RENDERER_PRIORITY.INDICATOR,
     draw(context) {
@@ -153,7 +153,6 @@ const getPivotTitleInfo: GetTitleInfoFn = (
   defaultPaneId: 'main',
   allowMainPane: true,
   mainPane: {
-    rendererName: 'pivot_main',
     toActiveConfig: (params, active) => ({
       ...params,
       showPP: active,

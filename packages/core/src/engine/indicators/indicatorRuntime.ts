@@ -4,6 +4,9 @@
  * Worker 通过 computeKey 解析到具体 calculator；inline 路径直接使用各指标
  * metadata 的 runtime.compute，不经过本模块。
  */
+
+import { createFootprintCalculator } from '../../components/footprint/impl/calculateFootprint.js'
+import type { TradeSnapshot } from '../../data/trades/types.js'
 import type { KLineData } from '../../foundation/types/price.js'
 
 import {
@@ -67,7 +70,7 @@ import {
 } from './calculators/index.js'
 
 /** Worker 端 computeKey → calculator 的映射。 */
-export const CALCULATOR_MAP: Record<string, (data: KLineData[], config: any) => unknown> = {
+const CALCULATOR_MAP: Record<string, (data: KLineData[], config: any) => unknown> = {
   calcCCIData: (data, c) => calcCCIData(data, c.period),
   calcMACDData: (data, c) => calcMACDData(data, c.fastPeriod, c.slowPeriod, c.signalPeriod),
   calcMAData: (data, c) => {
@@ -146,7 +149,8 @@ export const CALCULATOR_MAP: Record<string, (data: KLineData[], config: any) => 
 
 export function createWorkerCompute(descriptor: {
   computeKey: string
-}): (data: KLineData[], config: any) => unknown {
+}): (data: KLineData[], config: any, trades?: TradeSnapshot) => unknown {
+  if (descriptor.computeKey === 'calcFootprint') return createFootprintCalculator()
   return (
     CALCULATOR_MAP[descriptor.computeKey] ??
     ((_data: KLineData[], _config: any) => {

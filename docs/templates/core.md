@@ -44,7 +44,7 @@ const data: KLineData[] = [
   },
 ]
 
-const chart = createChartController({
+const chart = await createChartController({
   container,
   data,
   initialZoomLevel: 3,
@@ -57,6 +57,8 @@ const unsubscribe = chart.viewport.subscribe(() => {
   console.log(viewport.visibleFrom, viewport.visibleTo)
 })
 
+// Indicator implementations load on demand; the catalog is available synchronously.
+await chart.loadIndicators(['MA'])
 chart.addIndicator('MA', 'main')
 chart.zoomIn()
 
@@ -65,7 +67,7 @@ unsubscribe()
 chart.dispose()
 ```
 
-`createChartController` currently creates synchronously. Its factory type also permits an asynchronous implementation, so framework adapters should support `ChartController | Promise<ChartController>` when accepting a configurable factory.
+`createChartController` is asynchronous: it resolves once the chart's system indicators and the indicators of the restored layout are loaded. Other indicator implementations load on demand through `loadIndicators`, layout switches and Agent tools; pass `indicatorLoading: 'all'` to load every built-in indicator up front. Framework adapters that accept a configurable factory should support `ChartController | Promise<ChartController>`.
 
 ## State Kernel
 
@@ -146,10 +148,28 @@ Use `data` for immediately available K-line data. Use `symbols` to drive the reg
 | Viewport | `viewport`, `data`, `dataLoading`, `dataError`, `symbols`, `symbolCatalog` |
 | Appearance and runtime | `theme`, `settings`, `rendererRuntime` |
 | Chart model | `chartMode`, `lastBarPeriod`, `paneRatios`, `paneLayout` |
-| Indicators and drawings | `indicators`, `subPanes`, `drawingTool`, `drawings`, `selectedDrawingId`, `legendTemplateContext` |
+| Indicators and drawings | `indicators`, `subPanes`, `drawingTool`, `drawings`, `selectedDrawingId`, `legend.context`, `legend.rows` |
 | Interaction and comparison | `interactionState`, `comparisonColors`, `comparisonLoading` |
 
 `theme` is the effective `light` or `dark` theme. It is derived from the user preference in `settings.theme` and the value supplied through `setSystemTheme()` when the preference is `auto`.
+
+### Legend Management
+
+`chart.legend` manages indicator, comparison and custom legend entries. Creation returns a stable legend ID used by subsequent queries and mutations.
+
+```typescript
+const id = chart.legend.create({ kind: 'indicator', definitionId: 'MA', role: 'main' })
+if (id) {
+  chart.legend.update(id, { hidden: true })
+  chart.legend.get(id)
+  chart.legend.remove(id)
+}
+chart.legend.list()
+chart.legend.context.peek() // Main-pane market data, indicators, comparisons and rows
+chart.legend.rows.peek() // All pane rows, including button capabilities in actions
+```
+
+Comparison legends expose the real price, change relative to the comparison baseline and the raw bar matched to the current timestamp. Missing values display `—`. Buttons execute through `legend.execute`; settings and replacement UI requests use `LEGEND_UI_EVENT`.
 
 ### Data and Modes
 
@@ -190,6 +210,7 @@ When Core owns the default DOM scaffold, its interaction bindings are installed 
 ### Indicators, Panes, and Drawings
 
 ```typescript
+await chart.loadIndicators(['MACD', 'RSI'])
 const id = chart.addIndicator('MACD', 'sub', { fast: 12, slow: 26, signal: 9 })
 if (id) chart.updateIndicatorParams(id, { fast: 10, slow: 20, signal: 7 })
 

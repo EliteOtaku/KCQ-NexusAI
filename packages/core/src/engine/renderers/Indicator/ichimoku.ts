@@ -8,11 +8,11 @@ import { createRetainedGeometry } from '@/rendering/scene/retainedGeometry.js'
 import type { Layer } from '@/rendering/scene/types.js'
 import {
   createProjectionRevision,
-  type ProjectionRevision,
   sameProjectionRevision,
-} from '../../frame/index.js'
+} from '../../frame/impl/retainedProjection.js'
+import type { ProjectionRevision } from '../../frame/types.js'
 import { calcIchimokuData } from '../../indicators/calculators/index.js'
-import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { Indicator } from '../../indicators/indicatorDecorator.js'
 import type { TitleInfo, TitleValueItem } from '../../indicators/indicatorMetadata.js'
 import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
 import type { IchimokuRenderState } from '../../indicators/state/ichimokuState.js'
@@ -143,7 +143,7 @@ function createIchimokuLayer(options: IchimokuRendererOptions = {}): Layer<Rende
     ProjectionRevision
   >(sameProjectionRevision)
   return createIndicatorRendererLayer({
-    name: `ichimoku_${paneId}`,
+    definitionId: 'ichimoku',
     paneId,
     z: RENDERER_PRIORITY.INDICATOR,
     draw(context) {
@@ -279,7 +279,6 @@ function getIchimokuTitleInfo(
   defaultPaneId: 'main',
   allowMainPane: true,
   mainPane: {
-    rendererName: 'ichimoku_main',
     toActiveConfig: (params, active) => ({
       ...params,
       showTenkan: active,

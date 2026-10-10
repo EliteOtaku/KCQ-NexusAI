@@ -1,10 +1,10 @@
 <template>
   <div ref="rootRef" class="compare-chip-wrap">
+    <BaseTooltip content="比较商品" placement="bottom" trigger-display="contents" :disabled="showPopup">
     <button
       type="button"
       class="control-button compare-chip"
       :class="{ 'is-open': showPopup }"
-      title="比较商品"
       :aria-expanded="showPopup"
       aria-haspopup="dialog"
       @click="togglePopup"
@@ -16,6 +16,7 @@
       <span v-if="comparisonLoading" class="compare-chip__spinner" />
       <span v-if="selected.length > 0" class="compare-chip__badge">{{ selected.length }}</span>
     </button>
+    </BaseTooltip>
     <SymbolPopover
       v-model:search="searchQuery"
       :show="showPopup"
@@ -48,7 +49,7 @@
             >
               <span
                 class="compare-selected__color"
-                :style="{ background: comparisonColors?.get(symbolIdentityKey(item)) ?? '#888' }"
+                :style="{ background: comparisonColors?.get(symbolIdentityKey(item)) ?? 'var(--klc-color-ui-muted)' }"
               />
               <span class="compare-selected__code">{{ item.symbol }}</span>
               <span class="compare-selected__desc">{{ item.name }}</span>
@@ -78,7 +79,7 @@
 
         <div class="compare-list" role="listbox" aria-label="商品列表">
           <div v-if="searchLoading" class="compare-list__empty">
-            <span class="compare-chip__spinner" aria-hidden="true" />
+            <LoadingSpinner :size="32" class="compare-list__spinner" />
             <span>正在搜索</span>
           </div>
           <div v-else-if="comparisonSymbols.length === 0" class="compare-list__empty">
@@ -117,7 +118,7 @@
               <span class="compare-list__desc">{{ item.name }}</span>
             </span>
             <span class="compare-list__right">
-              <span class="compare-list__exchange">{{ formatSymbolMeta(item) }}</span>
+              <SymbolMetaBadge :symbol="item" />
               <span v-if="isSelected(item)" class="compare-list__check" aria-hidden="true">
                 <svg
                   viewBox="0 0 24 24"
@@ -158,6 +159,9 @@
   } from '../composables/useSymbolSearch.js'
 
   import BaseTabs from './BaseTabs.vue'
+  import BaseTooltip from './common/BaseTooltip.vue'
+  import SymbolMetaBadge from './common/SymbolMetaBadge.vue'
+  import LoadingSpinner from './LoadingSpinner.vue'
   import SymbolPopover from './SymbolPopover.vue'
   import type { SymbolItem } from './SymbolSelector.vue'
 
@@ -248,14 +252,6 @@
     emit('remove', symbolIdentityKey(item))
   }
 
-  /** 展示交易所、品种类别和会话，便于区分同代码多语义。 */
-  function formatSymbolMeta(item: SymbolItem): string {
-    const parts = [item.exchange]
-    if (item.assetClass !== 'unknown') parts.push(item.assetClass)
-    if (item.sessionId) parts.push(item.sessionId)
-    return parts.join(' · ')
-  }
-
   function togglePopup() {
     showPopup.value = !showPopup.value
   }
@@ -281,6 +277,7 @@
 </script>
 
 <style scoped src="./common/control-button.css"></style>
+<style scoped src="./common/symbol-list.css"></style>
 
 <style scoped>
   .compare-chip-wrap {
@@ -338,7 +335,7 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
-    padding-bottom: 10px;
+    padding: 12px;
     border-bottom: 1px solid var(--klc-color-ui-border);
   }
 
@@ -365,7 +362,7 @@
     align-items: center;
     gap: 6px;
     padding: 4px 8px;
-    border: 1px solid var(--klc-color-ui-border);
+    border: 0;
     border-radius: 6px;
     background: var(--klc-color-ui-hover);
     font-size: 12px;
@@ -417,45 +414,16 @@
     color: var(--klc-color-ui-accent);
   }
 
-  .compare-list {
-    max-height: 220px;
-    overflow-y: auto;
-    overflow-x: hidden;
-    display: flex;
-    flex-direction: column;
-    margin: 0 -4px;
-  }
-
-  .compare-list::-webkit-scrollbar {
-    width: 6px;
-  }
-
-  .compare-list::-webkit-scrollbar-thumb {
-    background: var(--klc-color-ui-border);
-    border-radius: 999px;
-  }
-
-  .compare-list__empty {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 28px 0;
-    color: var(--klc-color-ui-muted);
-    font-size: 13px;
-    text-align: center;
-    gap: 2px;
-  }
-
   .compare-list__item {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    padding: 9px 10px;
-    margin: 0 4px;
+    padding: 10px 12px;
+    margin: 0;
     border: none;
-    border-radius: 7px;
+    border-bottom: 1px solid var(--klc-color-ui-border);
+    border-radius: 0;
     background: transparent;
     color: var(--klc-color-ui-text);
     font: inherit;
@@ -469,54 +437,11 @@
     background: var(--klc-color-ui-hover);
   }
 
-  .compare-list__left {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    min-width: 0;
-    flex: 1 1 0;
-  }
-
-  .compare-list__code {
-    font-size: 13px;
-    font-weight: 700;
-    line-height: 1.2;
-    letter-spacing: 0.01em;
-    color: var(--klc-color-ui-text);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .compare-list__desc {
-    font-size: 11px;
-    font-weight: 400;
-    line-height: 1.2;
-    color: var(--klc-color-ui-muted);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
   .compare-list__right {
     display: flex;
     align-items: center;
     gap: 6px;
     flex: 0 0 auto;
-  }
-
-  .compare-list__exchange {
-    flex: 0 0 auto;
-    padding: 2px 7px;
-    border-radius: 4px;
-    background: var(--klc-color-ui-hover);
-    color: var(--klc-color-ui-muted);
-    font-size: 10px;
-    font-weight: 600;
-    line-height: 1.4;
-    letter-spacing: 0.03em;
-    text-transform: uppercase;
-    white-space: nowrap;
   }
 
   .compare-list__check {
@@ -529,7 +454,7 @@
 
   @media (max-width: 768px), (max-height: 640px) {
     .compare-list {
-      max-height: 180px;
+      max-height: 320px;
     }
   }
 </style>

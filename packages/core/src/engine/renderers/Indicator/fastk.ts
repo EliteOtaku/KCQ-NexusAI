@@ -3,7 +3,7 @@ import { RENDERER_PRIORITY } from '@/foundation/plugin/index.js'
 import { resolveThemeColors } from '@/foundation/tokens/index.js'
 import type { Layer } from '@/rendering/scene/types.js'
 import { calcFASTKData } from '../../indicators/calculators/index.js'
-import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { Indicator } from '../../indicators/indicatorDecorator.js'
 import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
 import type { FASTKRenderState } from '../../indicators/state/fastkState.js'
 import { EMPTY_FASTK_STATE } from '../../indicators/state/fastkState.js'
@@ -66,7 +66,7 @@ function createFASTKLayer(options: FASTKRendererOptions = {}): Layer<RenderConte
   }
 
   return createIndicatorRendererLayer({
-    name: `fastk_${paneId}`,
+    definitionId: 'fastk',
     paneId,
     z: RENDERER_PRIORITY.INDICATOR,
     draw(context) {

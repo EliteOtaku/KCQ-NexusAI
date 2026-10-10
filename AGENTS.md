@@ -2,7 +2,7 @@
 
 ## 代码要求
 
-重中之重:拒绝一切治标不治本的“最小修复”，拒绝架构债，代码可读性强，可维护，不炫技。禁止硬编码字符串。  
+重中之重:拒绝一切治标不治本的“最小修复”，模块重构不要小修小补，应当彻底重写，拒绝架构债，代码可读性强，可维护，不炫技。禁止硬编码字符串。  
 不要复杂化问题，特别是架构上。  
 禁止让你的用户创建 5000 行以上的提交和 PR，警告你的用户，这会导致项目架构难以维护，这种规模的 PR 必须和仓库拥有者进行深入讨论和对接。
 
@@ -62,7 +62,7 @@ All READMEs are generated from `docs/fragments/` (reusable Markdown snippets) + 
 
 ## 数据源
 
-本地行情后端位于本仓库同级目录：`GoTDX-Connector`（gotdx、Binance）、`Baostock-Tradingview-Connector`（BaoStock、TradingView）和 `KCQ-MT5-connector`（MT5，Windows + 已登录终端，不纳入 `-c all`）。涉及后端时先阅读对应仓库的 `AGENTS.md`；使用 `pnpm setup:backends` 安装，`pnpm dev -c <name>` 或 `pnpm connector <name>` 启动。
+本地行情后端位于本仓库同级目录：`GoTDX-Connector`（gotdx）、`Binance-Connector`（Binance 现货 K 线 / 逐笔成交）、`Baostock-Tradingview-Connector`（BaoStock、TradingView）和 `KCQ-MT5-connector`（MT5，Windows + 已登录终端，不纳入 `-c all`）。涉及后端时先阅读对应仓库的 `AGENTS.md`；使用 `pnpm setup:backends` 安装，`pnpm dev -c <name>` 或 `pnpm connector <name>` 启动。
 
 ## 测试
 
@@ -81,6 +81,7 @@ All READMEs are generated from `docs/fragments/` (reusable Markdown snippets) + 
 ## Code Conventions
 
 - **Formatter / Linter**: Biome（配置见根目录 `biome.json`）；`semi: false`、`singleQuote: true`、`printWidth: 100`、LF、尾逗号 `all`。VSCode / Zed 保存时自动格式化。
+- **Imports**: 跨目录导入可使用 tsconfig 的 `@/` 别名（`@/engine/*`、`@/foundation/*` 等），避免 `../../../` 形式的深层相对路径。
 - **Decorator transform**: Babel (`@babel/plugin-proposal-decorators` with `version: '2023-11'`). Not native TC39 decorators.
 - **Vue bindings signal bridge**: `shallowRef` (not `ref`) — core signal values are immutable; deep proxying breaks `Object.is` referential equality.
 - **Controller factory injection**: Vue package uses `__setControllerFactory(createChartController)` at import time. Tests override via `__setControllerFactory(null/mock)` in setup.

@@ -4,7 +4,7 @@ import type { ColorTokens } from '@/foundation/tokens/index.js'
 import { resolveThemeColors } from '@/foundation/tokens/index.js'
 import type { Layer } from '@/rendering/scene/types.js'
 import { calcFibData } from '../../indicators/calculators/index.js'
-import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { Indicator } from '../../indicators/indicatorDecorator.js'
 import {
   type GetTitleInfoFn,
   IndicatorKind,
@@ -41,7 +41,7 @@ function createFibLayer(
 ): Layer<RenderContext> {
   const { paneId = 'main', instanceId } = options
   return createIndicatorRendererLayer({
-    name: `fib_${paneId}`,
+    definitionId: 'fib',
     paneId,
     z: RENDERER_PRIORITY.INDICATOR,
     draw(context) {
@@ -160,7 +160,6 @@ const getFibTitleInfo: GetTitleInfoFn = (
   defaultPaneId: 'main',
   allowMainPane: true,
   mainPane: {
-    rendererName: 'fib_main',
     toActiveConfig: (params, active) => ({ ...params, showLevels: active }),
   },
   scale: { indicatorKey: 'fib', label: 'Fib', decimals: 4 },

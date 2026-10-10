@@ -332,13 +332,19 @@ export interface IndicatorRenderStateReader {
   get<T = unknown>(instanceId: string): T | undefined
 }
 
+/** 当前帧读取指标实例异步可用性的只读接口；缺省视为全部就绪。 */
+export interface IndicatorAvailabilityReader {
+  /** 指定实例是否仍在等待任一异步来源（计算 / 网络等）完成。 */
+  isLoading(instanceId: string): boolean
+}
+
 /** 渲染数据子契约：序列数据、数据视图与时间解析。 */
 export interface RenderDataContext {
   /** 主序列提交版本；直接绘制的调用方缺省时不保留跨帧几何。 */
   dataRevision?: number
   /** 当前帧的序列数据：K 线视图为 KLineData，分时视图为 TimeShareData。 */
   data: ReadonlyArray<ChartSeriesDatum>
-  /** K线级别，如 'daily'、'5min'、'15min' */
+  /** 级别，如 'daily'、'5min'、'15min' */
   period: string
   /** 当前图表数据视图。 */
   dataView: ChartDataView
@@ -428,6 +434,8 @@ export interface RenderOverlayContext {
 export interface RenderIndicatorContext {
   /** 当前帧绑定的指标渲染快照，所有指标 renderer 共用同一版本。 */
   indicatorStateReader?: IndicatorRenderStateReader
+  /** 当前帧指标实例的异步可用性；缺省视为全部就绪。 */
+  indicatorAvailability?: IndicatorAvailabilityReader
   /**
    * Scene 本帧 Renderer（Scene.paint 注入）。
    * 业务绘制经 drawInstances / drawLines；失败 fail-closed 走 2D。
@@ -496,13 +504,7 @@ export interface RenderContext
     RenderIndicatorContext,
     RenderOverlayContext,
     RenderSurfaceContext,
-    RenderThemeContext {
-  /** 发布标题展示行给独立 DOM renderer，不参与指标计算。 */
-  publishLegendRows?: (
-    paneId: string,
-    rows: ReadonlyArray<import('../../engine/renderers/legend/types.js').LegendRow>,
-  ) => void
-}
+    RenderThemeContext {}
 
 /** 绘图渲染 primitive 契约：仅保留 `RenderContext`/`DrawingFrameProjection` 依赖的屏幕原语。 */
 

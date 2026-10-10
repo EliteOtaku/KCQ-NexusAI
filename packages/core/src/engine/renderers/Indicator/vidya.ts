@@ -8,7 +8,7 @@ import { resolveThemeColors } from '@/foundation/tokens/index.js'
 import type { KLineData } from '@/foundation/types/price.js'
 import type { Layer } from '@/rendering/scene/types.js'
 import { calcVIDYAData } from '../../indicators/calculators/vidya.js'
-import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { Indicator } from '../../indicators/indicatorDecorator.js'
 import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
 import type { VIDYARenderState } from '../../indicators/state/vidyaState.js'
 import { EMPTY_VIDYA_STATE } from '../../indicators/state/vidyaState.js'
@@ -30,7 +30,7 @@ interface VIDYARendererOptions {
 function createVIDYALayer(options: VIDYARendererOptions = {}): Layer<RenderContext> {
   const { paneId = 'main', instanceId } = options
   return createIndicatorRendererLayer({
-    name: `vidya_${paneId}`,
+    definitionId: 'vidya',
     paneId,
     z: RENDERER_PRIORITY.INDICATOR,
     draw(context) {
@@ -96,7 +96,6 @@ const getVIDYATitleInfo = createSingleLineTitleInfo({
   defaultPaneId: 'main',
   allowMainPane: true,
   mainPane: {
-    rendererName: 'vidya_main',
     toActiveConfig: (params, active) => ({ ...params, showVIDYA: active }),
   },
   visibleState: { compose: createSparseVisibleStateComposer('vidya', EMPTY_VIDYA_STATE) },

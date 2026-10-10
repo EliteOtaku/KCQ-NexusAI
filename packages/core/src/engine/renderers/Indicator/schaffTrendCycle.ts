@@ -8,7 +8,7 @@ import { resolveThemeColors } from '@/foundation/tokens/index.js'
 import { alignToPhysicalPixelCenter } from '@/foundation/utils/pixelAlign.js'
 import type { Layer } from '@/rendering/scene/types.js'
 import { calcSchaffTrendCycleData } from '../../indicators/calculators/schaffTrendCycle.js'
-import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { Indicator } from '../../indicators/indicatorDecorator.js'
 import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
 import type { SchaffTrendCycleRenderState } from '../../indicators/state/schaffTrendCycleState.js'
 import { EMPTY_SCHAFF_TREND_CYCLE_STATE } from '../../indicators/state/schaffTrendCycleState.js'
@@ -164,7 +164,7 @@ function createSchaffTrendCycleLayer(
   }
 
   return createIndicatorRendererLayer({
-    name: `schaffTrendCycle_${paneId}`,
+    definitionId: 'schaffTrendCycle',
     paneId,
     z: RENDERER_PRIORITY.INDICATOR,
     draw(context) {

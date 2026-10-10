@@ -13,6 +13,7 @@ import {
   createFrameTransaction,
   type FrameTransaction,
 } from '../../../foundation/reactivity/frameTransaction.js'
+import { resolveThemeColors } from '../../../foundation/tokens/index.js'
 import type { ChartSeriesDatum, KLineData } from '../../../foundation/types/price.js'
 import { ScaleType } from '../../../foundation/types/scaleType.js'
 import { systemClock } from '../../../foundation/utils/clock.js'
@@ -39,12 +40,11 @@ import type { PaneRenderer } from '../../pane/index.js'
 import { UpdateLevel } from '../../pane/index.js'
 import { createCandleLayer } from '../../renderers/candle.js'
 import { createComparisonLineLayer } from '../../renderers/comparisonLine.js'
-import { createCrosshairLayer } from '../../renderers/crosshair.js'
+import { CrosshairOverlay } from '../../renderers/crosshair/impl/crosshairOverlay.js'
 import { createCustomMarkersLayer } from '../../renderers/customMarkers.js'
 import { createExtremaMarkersLayer } from '../../renderers/extremaMarkers.js'
 import { createFiveDayTimeShareLayer } from '../../renderers/fiveDayTimeShare.js'
 import { createGridLinesLayer } from '../../renderers/gridLines.js'
-import { createMainIndicatorLegendLayer } from '../../renderers/Indicator/mainIndicatorLegend/impl/createMainIndicatorLegendLayer.js'
 import {
   createAxisLabelsFrame,
   formatLastPriceCountdown,
@@ -150,6 +150,7 @@ export class ChartRenderer {
   readonly drawingStore: DrawingStore
   private readonly drawingDefinitions = new DrawingDefinitionRegistry()
   private xAxisCtx: CanvasRenderingContext2D | null = null
+  private readonly crosshairOverlay: CrosshairOverlay
 
   private cachedDrawFrame: {
     viewport: Viewport
@@ -165,7 +166,6 @@ export class ChartRenderer {
   private scene: Scene<RenderContext>
   private frameCount = 0
   private paneCtxMap = new Map<string, RenderContext>()
-  private currentPaneId = 'main'
   private timeAxisLayer: Layer<RenderContext> | null = null
   private displayTimeZoneSetting: DisplayTimeZoneSetting = 'UTC'
   private displayTimeFormatter: DisplayTimeFormatter = createDisplayTimeFormatter('UTC')
@@ -201,6 +201,7 @@ export class ChartRenderer {
       ...this.deps.getDataManager().getComparisonContentInputs(),
       this.deps.getDataManager().currentPeriod,
       this.deps.dataView$.peek(),
+      this.deps.primaryRenderer$?.peek(),
       vp?.scrollLeft,
       vp?.plotWidth,
       vp?.plotHeight,
@@ -258,6 +259,7 @@ export class ChartRenderer {
       interaction.tooltipAnchorPlacement,
       this.deps.drawings$.peek(),
       this.deps.selectedDrawingIds$.peek(),
+      this.deps.getLegendConfiguration(),
       // getOverlay 会新建数组，按图元引用比较才能同时捕获移动和避免空数组误失效。
       ...(this.deps.getOverlay?.() ?? []),
       this.deps.getSelectionMarquee?.(),
@@ -267,6 +269,7 @@ export class ChartRenderer {
 
   constructor(deps: RendererDependencies) {
     this.deps = deps
+    this.crosshairOverlay = new CrosshairOverlay(deps.getDom().canvasLayer)
     this.markerManager = new MarkerManager({ customMarkers$: deps.customMarkers$ })
     this.drawingStore = new DrawingStore({
       drawings$: deps.drawings$,
@@ -402,30 +405,6 @@ export class ChartRenderer {
       this.scene.addLayer(createExtremaMarkersLayer())
     }
     {
-      this.scene.addLayer(
-        createMainIndicatorLegendLayer(
-          {
-            yPaddingPx: opt.yPaddingPx,
-            onContext: this.deps.onLegendContext,
-            getVisibleIndicatorIds: () => this.deps.getVisibleMainIndicatorIds(),
-            getLegendOptions: () => this.deps.getOption().legend,
-          },
-          this.deps.getPluginHost,
-        ),
-      )
-    }
-    {
-      const layer = createCrosshairLayer({
-        getCrosshairState: () => ({
-          pos: interaction.crosshairPos,
-          activePaneId: interaction.activePaneId,
-          isDragging: interaction.isDraggingState(),
-          price: interaction.crosshairPrice,
-        }),
-      })
-      this.scene.addLayer(layer)
-    }
-    {
       const yAxisOpts = {
         axisWidth,
         getCrosshair: () => {
@@ -454,10 +433,6 @@ export class ChartRenderer {
 
   getPaneCtxMap(): Map<string, RenderContext> {
     return this.paneCtxMap
-  }
-
-  getCurrentPaneId(): string {
-    return this.currentPaneId
   }
 
   getMarkerManager(): MarkerManager {
@@ -643,6 +618,7 @@ export class ChartRenderer {
       requiresRightAxisWidthMeasurement,
       frame.countdown.text,
     )
+    this.renderCrosshair(vp)
 
     // 画底部时间轴（独立 layer，不进 scene）
     this.renderXAxis(
@@ -657,6 +633,29 @@ export class ChartRenderer {
       renderData,
       fiveDayTimeShareGeometry,
     )
+  }
+
+  /** 在 pane 范围与绘制完成后，向整张图表的独立表面提交一次十字线。 */
+  private renderCrosshair(viewport: Viewport): void {
+    const interaction = this.deps.getInteraction()
+    const renderers = this.deps.getPaneRenderers()
+    const firstPane = renderers[0]?.getPane()
+    const context = firstPane ? this.paneCtxMap.get(firstPane.id) : undefined
+    if (!context) {
+      this.crosshairOverlay.clear()
+      return
+    }
+    const activePane = renderers
+      .find((renderer) => renderer.getPane().id === interaction.activePaneId)
+      ?.getPane()
+    this.crosshairOverlay.paint({
+      viewport,
+      pos: interaction.crosshairPos,
+      price: interaction.crosshairPrice,
+      activePane: activePane ? wrapPaneInfo(activePane) : null,
+      color: resolveThemeColors(context.theme, context.isAsiaMarket, context.colorPresetSettings)
+        .crosshairLine,
+    })
   }
 
   /** 停止本根 K 线倒计时的刷新计时器。 */
@@ -796,7 +795,8 @@ export class ChartRenderer {
   }
 
   clearAllCanvases(): void {
-    this.deps.onClearLegendRows?.()
+    this.crosshairOverlay.clear()
+    this.deps.clearLegendFrame()
     this.paintedMainVersion = null
     this.paintedOverlayVersion = null
     this.paintedDrawingVersion = null
@@ -885,6 +885,7 @@ export class ChartRenderer {
       data: renderData,
       range,
     })
+    const indicatorAvailability = indicatorManager.createAvailabilityReader()
 
     const dataManager = this.deps.getDataManager()
     const mode = this.deps.getActiveMode()
@@ -896,7 +897,7 @@ export class ChartRenderer {
       ? dataManager.getComparisonProjection(range, kLineCenters, vp.scrollLeft, vp.plotWidth)
       : null
 
-    // 正式图元保存到独立 canvas，会话图元与十字线共用动态覆盖 canvas。
+    // 正式图元保存到独立 canvas，会话图元使用 pane 动态覆盖 canvas。
     const MAIN_CANVAS_ROLES: readonly LayerRole[] = [
       'background',
       'primary',
@@ -910,6 +911,7 @@ export class ChartRenderer {
 
     // 本帧所有 pane 的绘制输入；全部 pane 构建完成后再一次性交给 Scene。
     const framePanes: Array<FramePaint & { paneId: string }> = []
+    const legendContexts: RenderContext[] = []
     const sceneRenderer = this.deps.getSceneRenderer()
 
     // 遍历主图 pane 和所有子图 pane，每个 pane 有一组独立 canvas 以及对应更新级别（main/overlay/yAxis）
@@ -1049,7 +1051,6 @@ export class ChartRenderer {
       // 构造本 pane 的 RenderContext，供所有 layer 读取
       const opt = this.deps.getOption()
       const context: RenderContext = {
-        publishLegendRows: this.deps.onLegendRows,
         countdown: countdown ?? undefined,
         ctx: mainCtx!,
         overlayCtx: overlayCtx ?? undefined,
@@ -1084,6 +1085,7 @@ export class ChartRenderer {
           dataManager.getLogicalIndexAtTimestamp(timestamp),
         getTimestampAtLogicalIndex: (index) => dataManager.getAxisTimestampAtLogicalIndex(index),
         indicatorStateReader,
+        indicatorAvailability,
         markerManager: this.markerManager,
         crosshairIndex: this.deps.getInteraction().getCrosshairIndex(),
         yAxisCtx: yAxisCtx ?? undefined,
@@ -1123,6 +1125,15 @@ export class ChartRenderer {
           'committed',
         )
         this.drawingAxisLabels.set(renderer, labels)
+        // 正式图元表面在 pane 首次出现图元时创建；新表面为空白，只需与清除路径相同的 DPR 变换。
+        if (!context.drawingCtx && (context.drawingProjection?.primitives.length ?? 0) > 0) {
+          const createdDrawingCtx = renderer.ensureDrawingContext()
+          if (createdDrawingCtx) {
+            createdDrawingCtx.setTransform(1, 0, 0, 1, 0, 0)
+            createdDrawingCtx.scale(vp.dpr, vp.dpr)
+            context.drawingCtx = createdDrawingCtx
+          }
+        }
       } else {
         context.drawingProjection = previousContext?.drawingProjection
       }
@@ -1155,7 +1166,7 @@ export class ChartRenderer {
       })
 
       this.paneCtxMap.set(pane.id, context)
-      this.currentPaneId = pane.id
+      legendContexts.push(context)
 
       const region = { x: 0, y: pane.top, width: vp.plotWidth, height: pane.height, dpr: vp.dpr }
       // 画 main canvas（非 overlay 角色 layer）
@@ -1194,6 +1205,7 @@ export class ChartRenderer {
     // 所有 pane 绘制完成后统一提交 GPU（WebGPU 单次 queue.submit，WebGL 单次 flush）
     this.deps.getSceneRenderer().endFrame()
 
+    this.deps.projectLegendFrame(legendContexts)
     return { axisLabelsFrame, sharedXAxisRanges }
   }
 
@@ -1326,6 +1338,7 @@ export class ChartRenderer {
     this.stopScheduling()
     this.cachedDrawFrame = null
     this.xAxisCtx = null
+    this.crosshairOverlay.dispose()
     this.scene.dispose()
     this.paneCtxMap.clear()
   }

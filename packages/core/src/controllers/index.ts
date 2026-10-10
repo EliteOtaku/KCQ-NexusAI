@@ -24,12 +24,12 @@ export {
   allIndicatorDefinitions,
   toIndicatorDefinition,
 } from './indicatorDefinitionCatalog.js'
+export type { ActiveIndicator, IndicatorSelectorController } from './indicatorSelector/index.js'
 export { createIndicatorSelectorController } from './indicatorSelector/index.js'
 export type { ChartRendererAccess } from './renderers/index.js'
 export { getChartRenderers } from './renderers/index.js'
 export type { ChartFrameCaptureContext } from './screenshot/types.js'
 export type {
-  ActiveIndicator,
   ChartController,
   ChartControllerFactory,
   ChartIndicatorConfig,
@@ -52,10 +52,10 @@ export type {
   DrawingViewportPort,
   IndicatorDefinition,
   IndicatorInstance,
+  IndicatorLoadingMode,
   IndicatorPaneRole,
   IndicatorParamDef,
   IndicatorRole,
-  IndicatorSelectorController,
   InteractionSnapshot,
   KLineData,
   PaneLayoutInfo,
@@ -113,12 +113,20 @@ export type {
   MarketDataSourceConfig,
   MarketDataSourceConfigPatch,
   MarketDataSourceStatus,
+  MarketTrade,
   ProviderRef,
   RealtimeBarsSink,
   SourceProbeResult,
   TimeShareDataSource,
   TimeShareQuery,
   TimeShareSeries,
+  TradeBatch,
+  TradeDataSource,
+  TradeFrame,
+  TradeRange,
+  TradeSnapshot,
+  TradeStatus,
+  TradeStream,
   TradingDate,
   VolumeUnit,
 } from '../data/index.js'
@@ -127,11 +135,9 @@ export {
   ALIGNED_BAR_AGGREGATION,
   BAR_AGGREGATIONS,
   BarsLiveSource,
-  BarsLiveSubscription,
-  BinanceSSESource,
   baostockMarketDataProvider,
+  binanceMarketDataProvider,
   DataBuffer,
-  DEFAULT_BINANCE_SSE_URL,
   DepthConnector,
   dataSourceRegistry,
   EUROPE_TRADITIONAL_BAR_AGGREGATION,
@@ -176,10 +182,33 @@ export {
   getBuiltinIndicatorTypeLabel,
   getBuiltinIndicatorTypeOrder,
 } from '../engine/indicators/indicatorMetadata.js'
-export {
-  isBuiltinIndicatorsLoaded,
-  loadBuiltinIndicators,
-} from '../engine/indicators/registerBuiltins.js'
+export { loadBuiltinIndicators } from '../engine/indicators/registerBuiltins.js'
+export type {
+  LayoutApi,
+  LayoutDocument,
+  LayoutSummary,
+  NamedLayoutDocument,
+} from '../engine/layout/index.js'
+// Main-pane legend template context (Vue #legend slot)
+export type {
+  CreateLegendInput,
+  LegendAction,
+  LegendActionButton,
+  LegendApi,
+  LegendComparisonRow,
+  LegendCurrentBar,
+  LegendEntry,
+  LegendIndicatorRow,
+  LegendLayout,
+  LegendOptions,
+  LegendPatch,
+  LegendRow,
+  LegendTemplateContext,
+  LegendText,
+  LegendTimeshareRow,
+  LegendUiRequest,
+} from '../engine/legend/types.js'
+export { LEGEND_UI_EVENT } from '../engine/legend/types.js'
 // Indicator types & config
 export type { SubIndicatorType } from '../engine/renderers/Indicator/index.js'
 export type { Indicator } from '../engine/renderers/Indicator/indicatorCatalog.js'
@@ -189,18 +218,6 @@ export {
   findIndicator,
   isSubIndicatorId,
 } from '../engine/renderers/Indicator/indicatorCatalog.js'
-// Main-pane legend template context (Vue #legend slot)
-export type {
-  LegendComparisonRow,
-  LegendCurrentBar,
-  LegendIndicatorRow,
-  LegendLayout,
-  LegendOptions,
-  LegendTemplateContext,
-  LegendTimeshareRow,
-} from '../engine/renderers/Indicator/mainIndicatorLegend/types.js'
-export type { LegendActionDetail } from '../engine/renderers/legend/types.js'
-export { LEGEND_ACTION_EVENT } from '../engine/renderers/legend/types.js'
 export { getPhysicalKLineConfig } from '../engine/viewport/klineConfig.js'
 // Utility functions
 export { kGapFromKWidth, zoomLevelToKWidth } from '../engine/viewport/zoom.js'

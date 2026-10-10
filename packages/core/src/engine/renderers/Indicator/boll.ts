@@ -6,7 +6,7 @@ import { alignToPhysicalPixelCenter } from '@/foundation/utils/pixelAlign.js'
 import type { Layer } from '@/rendering/scene/types.js'
 import { ChartDataViewId } from '../../chartModel/index.js'
 import { calcBOLLData } from '../../indicators/calculators/index.js'
-import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { Indicator } from '../../indicators/indicatorDecorator.js'
 import type {
   GetTitleInfoFn,
   IndicatorPriceRangeComputer,
@@ -141,7 +141,6 @@ const getBOLLTitleInfo: GetTitleInfoFn = (
   scale: { indicatorKey: 'boll', label: 'BOLL', decimals: 2 },
   getRendererName: ({ paneId }) => (paneId === 'main' ? 'boll' : `boll_${paneId}`),
   mainPane: {
-    rendererName: 'boll',
     toActiveConfig: (params, active) =>
       active ? params : { ...params, showUpper: false, showMiddle: false, showLower: false },
     computePriceRange: computeBOLLPriceRange,
@@ -178,7 +177,7 @@ export function createBOLLLayer(options: BOLLRendererOptions = {}): Layer<Render
   }
 
   return createIndicatorRendererLayer({
-    name: paneId === 'main' ? 'boll' : `boll_${paneId}`,
+    definitionId: 'boll',
     paneId,
     z: RENDERER_PRIORITY.INDICATOR,
     draw(context) {

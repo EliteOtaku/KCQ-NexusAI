@@ -13,7 +13,6 @@ import type {
 
 /** Renderer 侧的单一 Agent 工作区视图状态，由事件回放与实时事件共同投影得到。 */
 export interface AgentWorkspaceState {
-  lastSequence: number
   sessions: AgentSessionView[]
   activeSessionId: string | null
   messages: AgentMessageView[]
@@ -27,6 +26,12 @@ export interface AgentWorkspaceState {
   canUndoTurn: boolean
   announcement: string
 }
+
+/** Agent 工作区运行时可用性；与单次运行错误相互独立。 */
+export type AgentWorkspaceAvailability =
+  | { readonly status: 'initializing' }
+  | { readonly status: 'ready' }
+  | { readonly status: 'unavailable'; readonly error: AgentErrorView }
 
 /** Agent 面板宽度的持久化读写端口。 */
 export interface AgentPanelWidthStorage {

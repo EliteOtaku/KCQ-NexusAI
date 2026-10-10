@@ -6,9 +6,10 @@
 import { formatTimeInTimeZone } from '@363045841yyt/klinechart-core'
 import type { ChartController, KLineData } from '@363045841yyt/klinechart-core/controllers'
 import { type ComputedRef, computed, onBeforeUnmount, type Ref, ref, watch } from 'vue'
+import { readElementSize } from '../../utils/elementSize.js'
 
 /** 默认 tooltip 中性的文字颜色。 */
-const NEUTRAL_COLOR = '#6b7280'
+const NEUTRAL_COLOR = 'var(--klc-color-ui-muted)'
 
 /** 默认 tooltip 内容各字段对应的 DOM 节点。 */
 interface TooltipDomRefs {
@@ -47,6 +48,8 @@ export interface UseKLineTooltipOptions {
   timezone: () => string
   /** adaptive 模式下允许拖拽 */
   isDraggable: () => boolean
+  /** 数据悬浮框是否启用；false 时保持隐藏 */
+  isEnabled: () => boolean
 }
 
 /** 格式化成交量，按亿 / 万分级。 */
@@ -183,7 +186,7 @@ function updateTooltipDom(
  */
 export function useKLineTooltip(options: UseKLineTooltipOptions) {
   const { controller, contentRef, containerRef, colors, hasExternalSlot } = options
-  const { isMobile, isIntraday, timezone, isDraggable } = options
+  const { isMobile, isIntraday, timezone, isDraggable, isEnabled } = options
 
   /** 拖拽后的 tooltip 位置；null 表示跟随交互快照。 */
   const dragPos = ref<{ x: number; y: number } | null>(null)
@@ -194,6 +197,8 @@ export function useKLineTooltip(options: UseKLineTooltipOptions) {
   let visibilityEl: HTMLDivElement | null = null
   let hiddenState = false
   let dragOffset = { x: 0, y: 0 }
+  /** 当前生效的订阅刷新函数；设置切到启用/不显示时调用。 */
+  let refresh: (() => void) | null = null
 
   /** 返回 tooltip layer 相对 chart container 的固定偏移。 */
   function getLayerOffset(): { x: number; y: number } {
@@ -272,7 +277,7 @@ export function useKLineTooltip(options: UseKLineTooltipOptions) {
         const data = ctrl.getData()
         const kline =
           typeof idx === 'number' && idx >= 0 && idx < data.length ? data[idx] : undefined
-        const hidden = !kline || isMobile
+        const hidden = !kline || isMobile || !isEnabled()
         if (visibilityEl !== el) {
           visibilityEl = el
           hiddenState = true
@@ -299,13 +304,11 @@ export function useKLineTooltip(options: UseKLineTooltipOptions) {
           if (!resizeObserver) {
             resizeObserver = new ResizeObserver((entries) => {
               for (const entry of entries) {
-                const target = entry.target as HTMLDivElement
-                if (!target.isConnected) continue
-                const w = entry.borderBoxSize[0]?.inlineSize ?? entry.contentRect.width
-                const h = entry.borderBoxSize[0]?.blockSize ?? entry.contentRect.height
+                const size = readElementSize(entry)
+                if (!size) continue
                 ctrl.setTooltipSize({
-                  width: Math.max(180, Math.round(w)),
-                  height: Math.max(80, Math.round(h)),
+                  width: Math.max(180, size.width),
+                  height: Math.max(80, size.height),
                 })
               }
             })
@@ -316,6 +319,7 @@ export function useKLineTooltip(options: UseKLineTooltipOptions) {
 
       const unsubInteraction = ctrl.interactionState.subscribe(update)
       const unsubData = ctrl.data.subscribe(update)
+      refresh = update
       update()
 
       onCleanup(() => {
@@ -326,10 +330,14 @@ export function useKLineTooltip(options: UseKLineTooltipOptions) {
         domRefs = null
         previousIndex = null
         visibilityEl = null
+        refresh = null
       })
     },
     { immediate: true },
   )
+
+  // 数据悬浮框启用状态变化时立即重算显隐（如设置切到“不显示”）
+  watch(isEnabled, () => refresh?.())
 
   // 组件卸载时若仍在拖拽，移除文档级监听
   onBeforeUnmount(onDragPointerUp)

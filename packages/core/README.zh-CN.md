@@ -44,7 +44,7 @@ const data: KLineData[] = [
   },
 ]
 
-const chart = createChartController({
+const chart = await createChartController({
   container,
   data,
   initialZoomLevel: 3,
@@ -57,6 +57,8 @@ const unsubscribe = chart.viewport.subscribe(() => {
   console.log(viewport.visibleFrom, viewport.visibleTo)
 })
 
+// 指标实现按需加载；目录可同步读取。
+await chart.loadIndicators(['MA'])
 chart.addIndicator('MA', 'main')
 chart.zoomIn()
 
@@ -65,7 +67,7 @@ unsubscribe()
 chart.dispose()
 ```
 
-当前 `createChartController` 同步创建图表。工厂类型同时允许异步实现，因此接收可配置 factory 的框架适配器应支持 `ChartController | Promise<ChartController>`。
+`createChartController` 是异步的：图表的系统指标与恢复布局引用的指标加载完成后才返回。其余指标实现通过 `loadIndicators`、布局切换与 Agent 工具按需加载；传入 `indicatorLoading: 'all'` 可在创建时加载全部内置指标。接收可配置 factory 的框架适配器应支持 `ChartController | Promise<ChartController>`。
 
 ## 状态内核
 
@@ -146,10 +148,28 @@ import {
 | 视口与数据 | `viewport`, `data`, `dataLoading`, `dataError`, `symbols`, `symbolCatalog` |
 | 外观与运行时 | `theme`, `settings`, `rendererRuntime` |
 | 图表模型 | `chartMode`, `lastBarPeriod`, `paneRatios`, `paneLayout` |
-| 指标与绘图 | `indicators`, `subPanes`, `drawingTool`, `drawings`, `selectedDrawingId`, `legendTemplateContext` |
+| 指标与绘图 | `indicators`, `subPanes`, `drawingTool`, `drawings`, `selectedDrawingId`, `legend.context`, `legend.rows` |
 | 交互与对比 | `interactionState`, `comparisonColors`, `comparisonLoading` |
 
 `theme` 是生效后的 `light` 或 `dark` 主题。它由用户偏好 `settings.theme` 推导；偏好为 `auto` 时，使用 `setSystemTheme()` 注入的系统主题。
+
+### 图例管理
+
+`chart.legend` 统一管理指标、比较品种与自定义图例。创建返回稳定图例 ID，后续查询和修改使用同一 ID。
+
+```typescript
+const id = chart.legend.create({ kind: 'indicator', definitionId: 'MA', role: 'main' })
+if (id) {
+  chart.legend.update(id, { hidden: true })
+  chart.legend.get(id)
+  chart.legend.remove(id)
+}
+chart.legend.list()
+chart.legend.context.peek() // 主图行情、指标、比较品种及展示行
+chart.legend.rows.peek() // 所有 Pane 的展示行，包含按钮能力 actions
+```
+
+比较品种图例包含真实价格、比较基准涨幅和当前时间戳匹配的原始行情。没有匹配行情时显示 `—`。主副图按钮通过 `legend.execute` 执行，设置和替换界面请求使用 `LEGEND_UI_EVENT`。
 
 ### 数据与模式
 
@@ -190,6 +210,7 @@ Core 创建默认 DOM scaffold 时会在挂载期间安装交互绑定。由框�
 ### 指标、面板与绘图
 
 ```typescript
+await chart.loadIndicators(['MACD', 'RSI'])
 const id = chart.addIndicator('MACD', 'sub', { fast: 12, slow: 26, signal: 9 })
 if (id) chart.updateIndicatorParams(id, { fast: 10, slow: 20, signal: 7 })
 

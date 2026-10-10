@@ -22,6 +22,7 @@ import { createDrawingAdapter, createTrendLine } from '../drawing/__tests__/help
 import { DrawingInteractionController, DrawingTool } from '../drawing/index'
 import { getRegisteredIndicatorDefinition } from '../indicators/indicatorDefinitionRegistry'
 import { loadBuiltinIndicators } from '../indicators/registerBuiltins'
+import { LAYOUT_DOCUMENT_VERSION } from '../layout/types'
 import { MAIN_PANE_ID } from '../pane/types'
 
 const defaultOptions: ChartOptions = {
@@ -524,7 +525,7 @@ describe('Chart DPR pipeline', () => {
         chart.drawing.setSelectedIds(['dragged', 'stationary'])
         chart.draw()
         // 点选线身会维持多选，整组图元进入会话层。
-        const x = adapter.getScreenXAtLogicalIndex(50)
+        const x = adapter.getXAtLogicalIndex(50)
         if (x === null) throw new Error('Expected a visible drawing midpoint')
         const y = adapter.priceToY(MAIN_PANE_ID, 10)
         const event = (type: string, dy = 0) =>
@@ -593,7 +594,7 @@ describe('Chart DPR pipeline', () => {
       ])
       chart.drawing.setSelectedIds(['selected'])
       chart.draw()
-      const x = adapter.getScreenXAtLogicalIndex(50)
+      const x = adapter.getXAtLogicalIndex(50)
       if (x === null) throw new Error('Expected a visible preview position')
       const y = adapter.priceToY(MAIN_PANE_ID, 10)
       expect(
@@ -885,9 +886,53 @@ describe('Chart DPR pipeline', () => {
     vi.restoreAllMocks()
   })
 
+  it('retains one chart crosshair surface across pane rebuilds, DPR changes and disposal', async () => {
+    const chart = mountChart()
+    const host = chart.getDom().canvasLayer
+    let canvas: HTMLCanvasElement | null = null
+    try {
+      chart.applyCustomData({ symbol: 'PRIMARY', market: 'CN', data: makeBars(100) })
+      chart.draw()
+      // 十字线首次出现前不分配整幅表面。
+      expect(host.querySelector('canvas.crosshair-canvas')).toBeNull()
+      chart.handlePointerEvent(
+        pointerEvent('pointermove', chart.getDom().container, { pointerType: 'mouse' }),
+      )
+      chart.draw()
+      canvas = host.querySelector<HTMLCanvasElement>('canvas.crosshair-canvas')
+      expect(canvas).not.toBeNull()
+      chart.updateOptions({
+        panes: [
+          { id: 'main', ratio: 0.7 },
+          { id: 'sub', ratio: 0.3 },
+        ],
+      })
+      chart.draw()
+      expect(host.querySelectorAll('canvas.crosshair-canvas')).toHaveLength(1)
+      expect(host.querySelector('canvas.crosshair-canvas')).toBe(canvas)
+      emitResize(ResizeObserverMock.instances[0]!, {
+        width: 1000,
+        height: 600,
+        devicePixelWidth: 2000,
+        devicePixelHeight: 1200,
+      })
+      chart.draw()
+      const viewport = chart.getViewport()!
+      expect(canvas?.width).toBe(Math.round(viewport.plotWidth * viewport.dpr))
+      expect(canvas?.height).toBe(Math.round(viewport.plotHeight * viewport.dpr))
+    } finally {
+      await chart.destroy()
+    }
+    expect(canvas?.isConnected).toBe(false)
+    expect(host.querySelector('canvas.crosshair-canvas')).toBeNull()
+  })
+
   it('mounts renderer layers for restored sub-pane indicators', async () => {
-    const chart = mountChart(1000, 600, {
-      initialViewWorkspaces: {
+    const chart = mountChart()
+    chart.kernel.applyLayout({
+      version: LAYOUT_DOCUMENT_VERSION,
+      panePriceAxisModes: {},
+      workspaces: {
         kline: {
           instances: [
             {
@@ -1261,11 +1306,15 @@ describe('Chart pane layout regressions', () => {
   it('can turn off a restored main log axis when the settings preference is already linear', async () => {
     const source = mountChart()
     source.setPanePriceAxisScaleType(MAIN_PANE_ID, ScaleType.Log)
-    const initialViewWorkspaces = source.kernel.snapshotViewWorkspaces()
+    const workspaces = source.kernel.snapshotViewWorkspaces()
     await source.destroy()
     const chart = mountChart(1000, 600, {
       initialSettings: { mainRightAxisTypeSetting: ScaleType.Linear },
-      initialViewWorkspaces,
+    })
+    chart.kernel.applyLayout({
+      version: LAYOUT_DOCUMENT_VERSION,
+      workspaces,
+      panePriceAxisModes: {},
     })
     expect(chart.kernel.pane.readonly.paneScaleTypes.peek().get(MAIN_PANE_ID)).toBe(ScaleType.Log)
     chart.setPanePriceAxisScaleType(MAIN_PANE_ID, ScaleType.Linear)
@@ -1313,14 +1362,17 @@ describe('Chart pane layout regressions', () => {
     await chart.destroy()
   })
 
-  it('restores each pane range mode from the persisted snapshot over the settings preference', async () => {
+  it('restores each pane range mode from the layout document over the settings preference', async () => {
     const chart = mountChart(1000, 600, {
       initialSettings: { mainPriceAxisRangeMode: PRICE_AXIS_RANGE_MODE.AUTO },
-      initialPanePriceAxisModes: {
+    })
+    chart.kernel.applyLayout({
+      version: LAYOUT_DOCUMENT_VERSION,
+      panePriceAxisModes: {
         [MAIN_PANE_ID]: PRICE_AXIS_RANGE_MODE.HAND,
         RSI_0: PRICE_AXIS_RANGE_MODE.HAND,
       },
-      initialViewWorkspaces: {
+      workspaces: {
         kline: {
           instances: [
             {
@@ -1356,33 +1408,19 @@ describe('Chart pane layout regressions', () => {
     await chart.destroy()
   })
 
-  it('persists pane range modes through the injected adapter', async () => {
-    const chart = mountChart()
-    chart.setData(makeBars(10))
-    const schedule = vi.fn()
-    chart.setPanePriceAxisPersistence({ schedule, dispose: vi.fn() })
-
-    expect(chart.panes.create({ paneId: 'MACD_0', indicatorId: 'MACD', params: {} })).toBe(true)
-    chart.setPanePriceAxisRangeMode('MACD_0', PRICE_AXIS_RANGE_MODE.HAND)
-
-    expect(schedule).toHaveBeenCalled()
-    expect(chart.snapshotPanePriceAxisModes().MACD_0).toBe(PRICE_AXIS_RANGE_MODE.HAND)
-    await chart.destroy()
-  })
-
   it('clears stale canvases and cached geometry when switching data views', async () => {
     const chart = mountChart()
     const renderer = chart['renderer']
     const clearCanvases = vi.spyOn(renderer, 'clearAllCanvases')
     const clearCachedFrame = vi.spyOn(renderer, 'clearCachedFrame')
-    const setLegendContext = vi.spyOn(chart['_legendTemplateContext'], 'set')
+    const clearLegendFrame = vi.spyOn(chart.legend, 'clearFrame')
 
     chart.setActiveMode(getModeHandlers(chart).timeShare)
 
     expect(clearCanvases).toHaveBeenCalledOnce()
     expect(clearCachedFrame).toHaveBeenCalledOnce()
-    expect(setLegendContext).toHaveBeenCalledWith(null)
-    expect(chart.legendTemplateContext.peek()).toBeNull()
+    expect(clearLegendFrame).toHaveBeenCalled()
+    expect(chart.legend.context.peek()).toBeNull()
     await chart.destroy()
   })
 
@@ -1532,6 +1570,29 @@ describe('Chart pane layout regressions', () => {
     expect(chart['renderer'].getSettings().showGridLines).toBe(false)
     expect(chart['renderer'].getSettings().mainRightAxisTypeSetting).toBe('log')
     await chart.destroy()
+  })
+
+  it('restores layout settings into the actual renderer and cache resources', async () => {
+    const chart = mountChart()
+    try {
+      const switchBackend = vi.spyOn(chart['rendererHost'], 'switchTo')
+      const document = chart.kernel.exportLayout()
+      chart.kernel.applyLayout({
+        ...document,
+        settings: {
+          ...document.settings,
+          rendererBackend: 'canvas',
+          marketDataCacheMaxMiB: 200,
+        },
+      })
+      expect(switchBackend).toHaveBeenCalledWith('canvas')
+      expect(chart.getMarketDataCache().stats.peek().maxBytes).toBe(200 * 1024 * 1024)
+      chart.kernel.applyLayout({ ...document, settings: {} })
+      expect(chart.getMarketDataCache().stats.peek().maxBytes).toBe(50 * 1024 * 1024)
+      expect(chart.kernel.settings.readonly.settings.peek().rendererBackend).toBe('webgl')
+    } finally {
+      await chart.destroy()
+    }
   })
 
   it('normalizes only visible panes in imported layout', async () => {

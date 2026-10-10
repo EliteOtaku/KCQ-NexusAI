@@ -6,7 +6,7 @@ import type { KLineData } from '@/foundation/types/price.js'
 import { alignToPhysicalPixelCenter } from '@/foundation/utils/pixelAlign.js'
 import type { Layer } from '@/rendering/scene/types.js'
 import { calcMAData } from '../../indicators/calculators/index.js'
-import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { Indicator } from '../../indicators/indicatorDecorator.js'
 import type {
   IndicatorPriceRangeComputer,
   IndicatorRenderStateComposer,
@@ -132,7 +132,6 @@ function getMATitleInfo(
   indicatorType: 'moving-average',
   defaultPaneId: 'main',
   mainPane: {
-    rendererName: 'ma',
     toActiveConfig: (_params, active) => ({
       ma5: active,
       ma10: active,
@@ -177,7 +176,7 @@ export function createMALayer(options: { instanceId?: string } = {}): Layer<Rend
   }
 
   return createIndicatorRendererLayer({
-    name: 'ma',
+    definitionId: 'ma',
     paneId: 'main',
     z: RENDERER_PRIORITY.INDICATOR,
     draw(context) {

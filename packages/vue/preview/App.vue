@@ -2,13 +2,9 @@
   <div class="app-container" :data-theme="currentTheme">
     <DebugControls
       :custom-data-active="useCustomData"
-      :depth-demo-active="useDepthDemo"
-      :depth-status-text="depthStatusText"
-      :depth-status-class="depthStatusClass"
       @open-modal="showModal = true"
       @toggle-embed-size="toggleEmbedSize"
       @toggle-custom-data="onToggleCustomData"
-      @toggle-depth-demo="onToggleDepthDemo"
     />
 
     <!-- 嵌入场景：模拟组件库在父容器中的使用 -->
@@ -70,7 +66,7 @@
 </template>
 
 <script setup lang="ts">
-  import { ref, computed, provide, inject, type Ref, type InjectionKey } from 'vue'
+  import { ref, computed, provide, inject, onBeforeUnmount, type Ref, type InjectionKey } from 'vue'
   import DebugControls from './DebugControls.vue'
   import { useChartDocumentTitle } from './useChartDocumentTitle'
   import { AgentWorkbenchShell, createAgentPanelWidthStorage, KlineChart } from '../src/index'
@@ -79,13 +75,10 @@
     type KLineData,
     type CustomDataSource,
     type ChartController,
-    BinanceSSESource,
-    DepthConnector,
-    createHeatmapController,
   } from '@363045841yyt/klinechart-core/controllers'
   import { formatTimeInTimeZone } from '@363045841yyt/klinechart-core'
   import type { RegisteredChartTool, RendererPlugin } from '@363045841yyt/klinechart-core'
-  import { resolveSettings } from '@363045841yyt/klinechart-core/config'
+  import { normalizeSettings } from '@363045841yyt/klinechart-core/config'
 
   /** 硬编码演示数据：主品种 CUSTOM.DEMO（15 根日 K） */
   const DEMO_MAIN_DATA: KLineData[] = [
@@ -531,6 +524,7 @@
     getChartAgent: () => chartRef.value?.getController?.()?.agent,
     extraChartTools: () => externalChartTools.value,
   })
+  onBeforeUnmount(() => agentBridge.close())
   const webPanelWidthStorage = createAgentPanelWidthStorage()
   const showModal = ref(false)
 
@@ -552,8 +546,8 @@
   const isFullscreen = ref(false)
   const embedContainerRef = ref<HTMLElement | null>(null)
 
-  // 产品内不传 settings prop，图表内部以 localStorage 偏好 + 默认值自行接管
-  const themePreference = resolveSettings().theme
+  // 初始主题取默认值，控制器就绪后跟随活动布局的有效主题。
+  const themePreference = normalizeSettings().theme
   const currentTheme = ref<'light' | 'dark'>(
     themePreference === 'auto'
       ? window.matchMedia('(prefers-color-scheme: dark)').matches
@@ -676,43 +670,6 @@
       }
     } else {
       customData.value = undefined
-    }
-  }
-
-  // ── 深度行情 Pipeline Demo ──
-  const useDepthDemo = ref(false)
-  const depthStatusText = ref('')
-  const depthStatusClass = ref('')
-  let depthConnector: DepthConnector | null = null
-  let depthController: ReturnType<typeof createHeatmapController> | null = null
-  let depthUnsubState: (() => void) | null = null
-
-  function onToggleDepthDemo() {
-    useDepthDemo.value = !useDepthDemo.value
-    if (useDepthDemo.value) {
-      const source = new BinanceSSESource('btcusdt')
-      depthController = createHeatmapController({ tickSize: 0.01 })
-      depthConnector = new DepthConnector(source)
-      depthConnector.addController(depthController)
-      const ctrl = depthController
-      depthUnsubState = ctrl.state.subscribe(() => {
-        const s = ctrl.state.peek()
-        if (s.latestSnapshot) {
-          depthStatusText.value = `depth: ${s.snapshotCount} snapshots · ${s.deltaCount} deltas`
-          depthStatusClass.value = 'depth-connected'
-        } else {
-          depthStatusText.value = 'depth: awaiting data...'
-          depthStatusClass.value = 'depth-awaiting'
-        }
-      })
-      depthConnector.start()
-    } else {
-      depthUnsubState?.()
-      depthUnsubState = null
-      depthConnector?.destroy()
-      depthConnector = null
-      depthController = null
-      depthStatusText.value = ''
     }
   }
 </script>

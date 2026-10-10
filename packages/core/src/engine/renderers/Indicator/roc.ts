@@ -3,7 +3,7 @@ import { RENDERER_PRIORITY } from '@/foundation/plugin/index.js'
 import { resolveThemeColors } from '@/foundation/tokens/index.js'
 import type { Layer } from '@/rendering/scene/types.js'
 import { calcROCData } from '../../indicators/calculators/index.js'
-import { Indicator } from '../../indicators/indicatorDefinitionRegistry.js'
+import { Indicator } from '../../indicators/indicatorDecorator.js'
 import { IndicatorKind } from '../../indicators/indicatorMetadata.js'
 import type { ROCRenderState } from '../../indicators/state/rocState.js'
 import { EMPTY_ROC_STATE } from '../../indicators/state/rocState.js'
@@ -24,7 +24,7 @@ interface ROCRendererOptions {
 function createROCLayer(options: ROCRendererOptions = {}): Layer<RenderContext> {
   const { paneId = 'sub_ROC', instanceId } = options
   return createIndicatorRendererLayer({
-    name: `roc_${paneId}`,
+    definitionId: 'roc',
     paneId,
     z: RENDERER_PRIORITY.INDICATOR,
     draw(context) {
