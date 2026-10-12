@@ -284,7 +284,7 @@ export class ChartPointerBridge {
         }
         if (anchor.time === undefined) continue
         const index = this.ctrl.getLogicalIndexAtTimestamp(Number(anchor.time))
-        const screenX = index === null ? null : this.ctrl.getScreenXAtLogicalIndex(index)
+        const screenX = index === null ? null : this.ctrl.getXAtLogicalIndex(index)
         if (screenX === null) continue
         if (anchor.type === 'vertical') {
           if (Math.abs(localX - screenX) <= linePadding) return true

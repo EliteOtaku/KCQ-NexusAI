@@ -49,9 +49,9 @@ export function ChartStage() {
         return
       }
 
-      // 图例由壳 DOM 图例栏（LegendBar）接管，关闭引擎 canvas 图例绘制；
-      // legendTemplateContext 信号仍每帧更新，作为图例数据源。
-      ctrl.updateRendererConfig('mainIndicatorLegend', { visible: false })
+      // 图例由壳 DOM 图例栏（LegendBar）接管，关闭引擎图例绘制；
+      // legend.context 信号仍每帧更新，作为图例数据源（上游 #313 起经 ctrl.legend 暴露）。
+      ctrl.updateOptionsFacade({ legend: { visible: false } })
 
       const dic = new DrawingInteractionController(ctrl)
       ctrl.registerDrawingSession(dic)

@@ -1,5 +1,5 @@
-// 图例栏：替代引擎 canvas 图例（ChartStage 挂载时 updateRendererConfig 关闭）。
-// 行1 = 品种·周期·OHLC·量（值取 legendTemplateContext.currentBar，十字线联动）；
+// 图例栏：替代引擎图例（ChartStage 挂载时 updateOptionsFacade({legend:{visible:false}}) 关闭）。
+// 行1 = 品种·周期·OHLC·量（值取 ctrl.legend.context.currentBar，十字线联动）；
 // 行2+ = 主图指标行（值行与用户实例按序对齐）+ 副图指标行（引擎图例不覆盖副图，自建）。
 // 指标行 hover 出 眼睛/设置/删除：引擎无可见性 API，眼睛=移除并 stash（再点按 stash 恢复）。
 
@@ -68,7 +68,7 @@ function formatParams(
 export function LegendBar() {
   const shell = useNexusShell()
   const ctrl = shell.ctrl
-  const legend = useSignal(ctrl?.legendTemplateContext ?? null, NO_LEGEND)
+  const legend = useSignal(ctrl?.legend.context ?? null, NO_LEGEND)
   const instances = useSignal(ctrl?.indicators ?? null, EMPTY_INSTANCES)
 
   /** 眼睛隐藏的指标暂存（会话级：隐藏行保留在图例中，可再点恢复）。 */

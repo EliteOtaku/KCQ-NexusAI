@@ -77,8 +77,64 @@
     type ChartController,
   } from '@363045841yyt/klinechart-core/controllers'
   import { formatTimeInTimeZone } from '@363045841yyt/klinechart-core'
-  import type { RegisteredChartTool, RendererPlugin } from '@363045841yyt/klinechart-core'
+  import type { RegisteredChartTool } from '@363045841yyt/klinechart-core'
   import { normalizeSettings } from '@363045841yyt/klinechart-core/config'
+
+  /**
+   * 外部渲染器注册契约（本地结构化声明）。
+   *
+   * 上游已退役 `RendererPlugin`，改为 `useRenderer(layer: Layer)`；core dist 尚未导出
+   * `Layer` / `LayerPaint` 类型（import type 不可得），故与 fork 插件侧
+   * `kcq-plugins/src/kcqCoreCompat.ts` 同法本地声明。插件导出为双形态对象：
+   * `id/role/pane/z/paint`（新契约）与 `name/paneId/priority/draw`（旧契约）并存。
+   */
+  interface ExternalRendererLayer {
+    readonly id?: string
+    readonly name?: string
+    readonly role?: string
+    readonly pane?: string
+    readonly paneId?: string
+    readonly z?: number
+    readonly priority?: number
+    paint?(frame: unknown): void
+    draw?(context: unknown): void
+    dispose?(): void
+    onUninstall?(): void
+  }
+
+  /** useRenderer 的入参类型：从 ChartController 签名提取，避免重复声明 Layer。 */
+  type RendererLayerParam = Parameters<ChartController['useRenderer']>[0]
+
+  /**
+   * 旧契约（`name/paneId/priority/draw`）归一为新契约 Layer 字段。
+   *
+   * Scene 以 `layer.pane === paneId && layer.visible` 过滤候选层；旧契约对象没有
+   * `pane`/`visible`，直接注册会被**静默丢弃**（异常隔离只捕获 paint 抛错，过滤阶段
+   * 不报错），表现为「注册成功但永不绘制」。故此处按 kcqCoreCompat 记载的映射补齐：
+   * `id=name`、`pane=paneId`、`z=priority`、`paint=draw`、`dispose=onUninstall`。
+   * 已是新契约的对象原样透传（不复制，保留其自有 dispose 身份）。
+   */
+  function normalizeExternalRenderer(plugin: ExternalRendererLayer): RendererLayerParam {
+    if (typeof plugin.paint === 'function' && typeof plugin.pane === 'string') {
+      return plugin as unknown as RendererLayerParam
+    }
+    const draw = plugin.paint ?? plugin.draw
+    const source = plugin as unknown as Record<string, unknown>
+    const normalized: Record<string, unknown> = {
+      ...source,
+      id: plugin.id ?? plugin.name ?? 'external_renderer',
+      role: plugin.role ?? 'overlay',
+      pane: plugin.pane ?? plugin.paneId ?? 'main',
+      z: plugin.z ?? plugin.priority ?? 0,
+      // 旧契约未声明 visible；Scene 要求显式 true 才会绘制。
+      visible: source.visible ?? true,
+      paint: (frame: unknown) => draw?.call(plugin, frame),
+    }
+    if (normalized.dispose === undefined && typeof plugin.onUninstall === 'function') {
+      normalized.dispose = () => plugin.onUninstall?.()
+    }
+    return normalized as unknown as RendererLayerParam
+  }
 
   /** 硬编码演示数据：主品种 CUSTOM.DEMO（15 根日 K） */
   const DEMO_MAIN_DATA: KLineData[] = [
@@ -575,7 +631,8 @@
   // 宿主声明外部渲染器插件模块 URL 列表（站点内路径或 http/https）：
   //   1) localStorage['kcq_external_renderers'] = JSON 数组
   //   2) URL 查询参数 ?externalRenderers=url1,url2
-  // 模块契约：default / renderers / renderer 命名导出 RendererPlugin 或其数组。
+  // 模块契约：default / renderers / renderer 命名导出渲染器（新契约 Layer 或
+  // 旧契约 RendererPlugin 双形态，见上方 ExternalRendererLayer）或其数组。
   // 动态 import 加载；单模块失败仅告警，不影响工作台与其它插件（互相隔离）。
   // Demo：?externalRenderers=/external-demo-renderer.js（preview/public 原样服务）。
   async function loadExternalRenderers(controller: ChartController) {
@@ -605,8 +662,8 @@
         const href = /^https?:\/\//i.test(url) ? url : new URL(url, window.location.href).href
         const mod: Record<string, unknown> = await import(/* @vite-ignore */ href)
         let exported = mod.default ?? mod.renderers ?? mod.renderer
-        // 工厂形态：default 为 (host: { controller, agent }) => RendererPlugin | RendererPlugin[]
-        // （或 Layer 形态），供插件读取品种（controller.symbols）/订阅信号等宿主能力。
+        // 工厂形态：default 为 (host: { controller, agent }) => 渲染器 | 渲染器[]
+        // （新契约 Layer 或旧契约 RendererPlugin 双形态），供插件读取品种（controller.symbols）/订阅信号等宿主能力。
         // agent = 事件→Agent 通知的最小窄面（下游 app 壳自有代码，同 #266 99a2a23a
         // 形态；startRun 触发一轮模型运行——readOnly 语义由调用方经入参控制，
         // listSessions 供插件解析目标会话；刻意不暴露整个 bridge，会话/Provider
@@ -623,12 +680,20 @@
         }
         const list = Array.isArray(exported) ? exported : exported ? [exported] : []
         for (const item of list) {
-          const plugin = item as RendererPlugin | undefined
-          if (plugin && typeof plugin.name === 'string' && typeof plugin.draw === 'function') {
-            controller.useRenderer(plugin)
-            console.info(`[preview] external renderer registered: ${plugin.name} (${url})`)
+          const plugin = item as ExternalRendererLayer | undefined
+          // 双形态判定：新契约以 id/paint 标识，旧契约以 name/draw 标识。
+          const isNew = typeof plugin?.id === 'string' && typeof plugin?.paint === 'function'
+          const isLegacy = typeof plugin?.name === 'string' && typeof plugin?.draw === 'function'
+          if (plugin && (isNew || isLegacy)) {
+            // useRenderer 现接收 Layer<RenderContext>；core dist 未导出该类型，
+            // 故按参数位取类型转交。旧契约先归一为新契约字段，否则会被 Scene
+            // 的 pane/visible 过滤静默丢弃（注册成功但不绘制）。
+            controller.useRenderer(normalizeExternalRenderer(plugin))
+            console.info(
+              `[preview] external renderer registered: ${plugin.id ?? plugin.name} (${url})`,
+            )
           } else {
-            console.warn(`[preview] external renderer module has no valid RendererPlugin export: ${url}`)
+            console.warn(`[preview] external renderer module has no valid renderer export: ${url}`)
           }
         }
         // Agent 工具契约（两形态）：①工厂返回值带 chartTools 属性；②模块命名导出 chartTools
