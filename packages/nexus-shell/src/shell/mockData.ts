@@ -1,8 +1,14 @@
 // 壳层 demo 数据：确定性（固定种子）多品种多周期 K 线生成器。
 // fork 自洽要求——不依赖任何后端；真数据联调属宿主侧职责。
-// 通过 applyCustomData 注入引擎，符号/周期切换即重新生成重放。
+// 以 MarketDataSource 形式注册进 MarketDataContext，与真实数据源共用路由和缓存。
 
-import type { CustomDataSource, KLineData } from '@363045841yyt/klinechart-core/controllers'
+import type { KLineData } from '@363045841yyt/klinechart-core/controllers'
+import {
+  type DataSourceInstrument,
+  KLinePeriod,
+  type MarketDataSource,
+  OLDER_DATA_STATUS,
+} from '@363045841yyt/klinechart-core/market-data'
 
 /** 品种目录条目。 */
 export interface MockSymbol {
@@ -24,7 +30,7 @@ export const MOCK_SYMBOLS: ReadonlyArray<MockSymbol> = [
 ]
 
 /** 支持的周期（与 core KLinePeriod 对齐；4h 为 fork 补丁能力）。 */
-export const MOCK_PERIODS: ReadonlyArray<string> = [
+export const MOCK_PERIODS: ReadonlyArray<KLinePeriod> = [
   '1min',
   '5min',
   '15min',
@@ -100,11 +106,6 @@ function isWeekend(ts: number): boolean {
 }
 
 /** 推进到下一个非周末时间戳；分钟级数据同样跳过周末以留出间隙。 */
-function nextTimestamp(ts: number, stepMs: number): number {
-  let next = ts + stepMs
-  while (isWeekend(next)) next += stepMs
-  return next
-}
 
 /**
  * 生成一段确定性 K 线：围绕 basePrice 的均值回归随机游走。
@@ -163,16 +164,66 @@ function round2(value: number): number {
   return Math.round(value * 100) / 100
 }
 
-/** 构造 applyCustomData 所需的完整数据包。 */
-export function buildMockBundle(symbol: string, period: string): CustomDataSource {
-  const spec = MOCK_SYMBOLS.find((item) => item.symbol === symbol) ?? MOCK_SYMBOLS[0]!
-  return {
-    market: 'mock',
+/** 壳层 mock 数据源 ID；SymbolSpec.source 与品种目录的 sourceId 都用它。 */
+export const MOCK_SOURCE_ID = 'mock'
+
+/** 壳层 mock 数据源：确定性 K 线 + 品种目录，注册后与真实数据源共用路由与缓存。 */
+export function createMockDataSource(): MarketDataSource {
+  const instruments: ReadonlyArray<DataSourceInstrument> = MOCK_SYMBOLS.map((spec) => ({
+    id: spec.symbol,
     symbol: spec.symbol,
-    period,
-    description: spec.name,
+    name: spec.name,
+    instrumentType: 'stock',
     exchange: 'MOCK',
-    source: 'MOCK',
-    data: generateMockBars(spec.symbol, period),
+    sessionId: MOCK_SOURCE_ID,
+    timezone: 'Asia/Shanghai',
+    tickSize: spec.tick,
+    capabilities: { bars: { periods: MOCK_PERIODS, adjustments: ['none'] } },
+  }))
+
+  return {
+    id: MOCK_SOURCE_ID,
+    name: '演示数据',
+    capabilities: {
+      instrumentTypes: ['stock'],
+      bars: { periods: MOCK_PERIODS, adjustments: ['none'] },
+    },
+    instruments: {
+      /** 关键词为空时返回全部品种，供自选/搜索列表消费。 */
+      async search(query) {
+        const keyword = query.keyword.trim().toUpperCase()
+        const matched = instruments.filter(
+          (item) =>
+            keyword === '' ||
+            item.symbol.includes(keyword) ||
+            item.name.includes(query.keyword.trim()),
+        )
+        return matched.slice(0, query.limit)
+      },
+      /** 按稳定 ID 解析品种；找不到即报错，不做兜底猜测。 */
+      async resolve(id, signal) {
+        signal.throwIfAborted()
+        const instrument = instruments.find((item) => item.id === id)
+        if (instrument === undefined) throw new Error(`演示数据源没有该品种：${id}`)
+        return instrument
+      },
+    },
+    bars: {
+      /** 按品种与周期确定性生成；游标之前的份额按 limit 截取。 */
+      async fetch(request) {
+        const generated = generateMockBars(request.instrument.symbol, request.period)
+        const available =
+          request.beforeTimestamp === undefined
+            ? generated
+            : generated.filter((bar) => bar.timestamp < request.beforeTimestamp!)
+        return {
+          bars: available.slice(-request.limit),
+          olderData:
+            available.length > request.limit
+              ? OLDER_DATA_STATUS.AVAILABLE
+              : OLDER_DATA_STATUS.EXHAUSTED,
+        }
+      },
+    },
   }
 }

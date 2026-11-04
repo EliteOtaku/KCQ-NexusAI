@@ -7,7 +7,7 @@
         :max-rows="6"
         :placeholder="text.composerPlaceholder"
         :aria-label="text.composerPlaceholder"
-        @update:model-value="$emit('update:draft', $event)"
+        @update:model-value="emit('update:draft', $event)"
         @keydown="onKeydown"
       />
       <div class="composer__footer">
@@ -19,7 +19,7 @@
             :empty-text="text.noModelsInPool"
             :disabled="running || !provider.configured"
             placement="top"
-            @open="$emit('models-open')"
+            @open="emit('models-open')"
             @select="selectModel"
           >
             <template #trigger>
@@ -32,19 +32,21 @@
               </span>
             </template>
           </DropMenu>
-          <Dropdown
+          <DropMenu
             v-if="provider.reasoningEfforts?.length"
             class="composer__reasoning"
-            allow-empty
-            size="sm"
+            density="compact"
             placement="top"
-            :model-value="provider.reasoningEffort"
-            :options="reasoningOptions"
-            :placeholder="text.reasoning"
-            :title="text.reasoningEffort"
+            :groups="reasoningGroups"
+            :label="text.reasoningEffort"
             :disabled="running"
-            @update:model-value="$emit('reasoning-effort', $event)"
-          />
+            @select="(_groupId, value) => emit('reasoning-effort', value)"
+          >
+            <template #trigger>
+              <span class="composer__reasoning-value">{{ provider.reasoningEffort || text.reasoning }}</span>
+              <IconChevronDown class="composer__model-chevron" aria-hidden="true" />
+            </template>
+          </DropMenu>
         </div>
         <BaseTooltip
           v-if="contextUsage"
@@ -64,7 +66,7 @@
             type="button"
             class="composer__primary composer__primary--stop agent-primary-button"
             :aria-label="text.stop"
-            @click="$emit('stop')"
+            @click="emit('stop')"
           >
             <span class="composer__primary-background agent-primary-button__background" aria-hidden="true"></span>
             <IconPlayerStopFilled aria-hidden="true" />
@@ -76,7 +78,7 @@
             class="composer__primary agent-primary-button"
             :disabled="!draft.trim()"
             :aria-label="text.send"
-            @click="$emit('send')"
+            @click="emit('send')"
           >
             <span class="composer__primary-background agent-primary-button__background" aria-hidden="true"></span>
             <IconArrowUp aria-hidden="true" />
@@ -87,6 +89,7 @@
 </template>
 
 <script setup lang="ts">
+  import DropMenu, { type DropMenuGroup } from '@vue-src/components/common/DropMenu.vue'
   import { computed } from 'vue'
   import IconArrowUp from '~icons/tabler/arrow-up'
   import IconCheck from '~icons/tabler/check'
@@ -94,8 +97,6 @@
   import IconPlayerStopFilled from '~icons/tabler/player-stop-filled'
   import BaseTextarea from '../../../components/common/BaseTextarea.vue'
   import BaseTooltip from '../../../components/common/BaseTooltip.vue'
-  import Dropdown from '../../../components/Dropdown.vue'
-  import DropMenu, { type DropMenuGroup } from '../../../components/DropMenu.vue'
   import type { AgentUsageView, ProviderModelView, ProviderStatusView } from '../agent-contracts.js'
   import { type AgentLocale, getAgentCopy } from '../agent-copy.js'
 
@@ -130,9 +131,17 @@
     if (selected) return selected.name
     return props.modelsLoading ? text.value.loadingModels : text.value.modelPlaceholder
   })
-  const reasoningOptions = computed(() =>
-    (props.provider.reasoningEfforts ?? []).map((effort) => ({ value: effort, label: effort })),
-  )
+  const reasoningGroups = computed<DropMenuGroup[]>(() => [
+    {
+      id: 'reasoning',
+      label: '',
+      items: (props.provider.reasoningEfforts ?? []).map((effort) => ({
+        id: effort,
+        label: effort,
+        active: effort === props.provider.reasoningEffort,
+      })),
+    },
+  ])
   const contextUsage = computed(() => {
     const used = props.usage?.contextTokens
     const window = props.usage?.contextWindow ?? props.provider.contextWindow
@@ -173,8 +182,9 @@
     background: var(--klc-color-agent-composer-input-background);
   }
 
-  /* BaseTextarea 负责自增高（field-sizing）与无拖拽手柄；这里只定制外观。 */
-  .composer__textarea {
+  /* BaseTextarea 负责自增高（field-sizing）与无拖拽手柄；这里只定制外观。
+     覆盖必须带父类：primitive 默认值同为无层的单类规则，只靠加载顺序会翻转。 */
+  .composer__input .composer__textarea {
     --base-textarea-padding-block: var(--composer-inset);
     --base-textarea-border: 0px;
 
@@ -187,14 +197,8 @@
     line-height: 1.5;
   }
 
-  .composer__textarea::placeholder {
+  .composer__input .composer__textarea::placeholder {
     color: var(--agent-text-soft);
-  }
-
-  .composer__textarea:focus,
-  .composer__textarea:focus-visible {
-    box-shadow: none;
-    outline: none;
   }
 
   .composer__footer {
@@ -241,7 +245,7 @@
     min-width: 0;
   }
 
-  .composer__reasoning :deep(.dropdown__trigger) {
+  .composer__reasoning :deep(.drop-menu__trigger) {
     max-width: 160px;
     height: 26px;
     box-sizing: border-box;
@@ -262,20 +266,20 @@
     max-width: 160px;
   }
 
-  .composer__reasoning :deep(.dropdown__trigger:hover:not(:disabled)),
-  .composer__reasoning :deep(.dropdown__trigger[aria-expanded='true']:not(:disabled)) {
+  .composer__reasoning :deep(.drop-menu__trigger:hover:not(:disabled)),
+  .composer__reasoning :deep(.drop-menu__trigger[aria-expanded='true']:not(:disabled)) {
     border-color: var(--klc-color-agent-composer-control-hover);
     background: var(--klc-color-agent-composer-control-hover);
   }
 
-  .composer__reasoning :deep(.dropdown__trigger:focus-visible) {
+  .composer__reasoning :deep(.drop-menu__trigger:focus-visible) {
     outline: none;
     border-color: var(--agent-focus);
     background: var(--klc-color-agent-composer-control-hover);
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--agent-focus) 24%, transparent);
   }
 
-  .composer__reasoning :deep(.dropdown__trigger:disabled) {
+  .composer__reasoning :deep(.drop-menu__trigger:disabled) {
     color: var(--agent-text-soft);
     background: transparent;
     cursor: not-allowed;
@@ -293,7 +297,7 @@
     transform: rotate(180deg);
   }
 
-  .composer__reasoning :deep(.dropdown__value) {
+  .composer__reasoning-value {
     min-width: 0;
     overflow: hidden;
     color: var(--agent-text);

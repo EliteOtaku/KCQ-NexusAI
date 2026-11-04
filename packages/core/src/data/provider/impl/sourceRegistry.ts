@@ -2,6 +2,8 @@
  * 内置行情数据源集中注册表
  * 数据源的展示元数据与出厂默认地址的单一事实来源，UI 面板与 Provider 装配共用
  */
+
+import { DataSource } from '@363045841yyt/klinechart-plot-contracts'
 import type { MarketSessionConfig } from '@/foundation/utils/sessionTimeLabels.js'
 
 /** 本地默认行情服务地址，可通过数据源运行时配置覆盖 */
@@ -10,6 +12,7 @@ export const DEFAULT_V1_BASE_URL = 'http://127.0.0.1:8080'
 /** 数据源注册声明：集中承载展示信息与出厂默认地址，运行时覆盖由注册表配置层负责 */
 export interface DataSourceRegistration {
   id: string
+  connectionId?: string
   displayName: string
   description?: string
   defaultBaseUrl?: string
@@ -19,45 +22,41 @@ export interface DataSourceRegistration {
 /** 内置数据源注册表 */
 export const dataSourceRegistry = {
   binance: {
-    id: 'binance',
+    id: DataSource.Binance,
     displayName: 'Binance Spot',
     description: 'Binance 现货 K 线与真实逐笔成交',
     defaultBaseUrl: 'http://127.0.0.1:8091',
     marketSessions: { BINANCE_SPOT: { timeZone: 'UTC', sessions: [{ open: 0, close: 24 * 60 }] } },
   },
   gotdx: {
-    id: 'gotdx',
+    id: DataSource.Gotdx,
     displayName: 'GOTDX',
     description: 'TDX data connector, source: https://github.com/363045841/GoTDX-Connector',
     defaultBaseUrl: DEFAULT_V1_BASE_URL,
   },
   mock: {
-    id: 'mock',
+    id: DataSource.Mock,
     displayName: 'Mock',
-    description: 'Provides two test rendering instruments: MOCK-100 and MOCK-10000',
+    description: 'Provides one on-demand infinite daily series (MOCK) for local rendering',
   },
   baostock: {
-    id: 'baostock',
+    id: DataSource.BaoStock,
+    connectionId: 'baostock-tradingview',
     displayName: 'BaoStock',
     description:
       'BaoStock data connector, source: https://github.com/363045841/Baostock-Tradingview-Connector',
     defaultBaseUrl: 'http://127.0.0.1:8000',
   },
-  finshare: {
-    id: 'finshare',
-    displayName: 'FinShare Futures',
-    description: 'China futures data via FinShare SDK and Baostock-Tradingview-Connector',
-    defaultBaseUrl: 'http://127.0.0.1:8000',
-  },
   tradingview: {
-    id: 'tradingview',
+    id: DataSource.TradingView,
+    connectionId: 'baostock-tradingview',
     displayName: 'TradingView',
     description:
       'Tradingview data connector, source: https://github.com/363045841/Baostock-Tradingview-Connector',
     defaultBaseUrl: 'http://127.0.0.1:8000',
   },
   mt5: {
-    id: 'mt5',
+    id: DataSource.MT5,
     displayName: 'MT5 (Exness)',
     description:
       'MT5 local terminal connector (Exness), source: https://github.com/EliteOtaku/KCQ-MT5-connector',
@@ -68,7 +67,7 @@ export const dataSourceRegistry = {
     },
   },
   ths: {
-    id: 'ths',
+    id: DataSource.THS,
     displayName: '同花顺 THS',
     description:
       '同花顺(fuyao) A股/指数/ETF/期货/期权日线连接器, source: https://github.com/EliteOtaku/KCQ-THS-connector',

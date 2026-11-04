@@ -1,22 +1,20 @@
 ## 📐 系统架构
 
-KLineChartQuant 是一个 pnpm monorepo。核心引擎不依赖任何 UI 框架，通过统一的
-`ChartController`（只读信号 + 命令方法）对外暴露能力；Vue / React / Angular 绑定层只负责
-挂载、事件转发与响应式桥接。AI Agent 通过与 UI 相同的 `@Tool` 原语直接驱动图表，
-共享同一状态源，而非桥接层。
+KLineChartQuant 是一个 pnpm monorepo，只发布一个产品包 `@363045841yyt/klinechart`。核心引擎不依赖
+任何 UI 框架，通过统一的 `ChartController`（只读信号 + 命令方法）对外暴露能力；Vue 层只负责挂载、
+事件转发与响应式桥接。AI Agent 通过与 UI 相同的 `@Tool` 原语直接驱动图表，共享同一状态源，而非
+桥接层。Vue 层以下的全部模块都随产品 tarball 交付。
 
 ```mermaid
 flowchart TB
-    subgraph app["UI 层 / 框架绑定"]
+    subgraph app["产品 @363045841yyt/klinechart"]
         UI["UI 层"]
-        VuePkg["@363045841yyt/klinechart<br/>Vue 3 组件 + useChart"]
-        ReactPkg["@363045841yyt/klinechart-react<br/>KLineChart（直连 Core）· KLineChartWC（Vue Web Component）"]
-        AngularPkg["@363045841yyt/klinechart-angular"]
+        VuePkg["Vue 3 组件<br/>KlineWorkbench · useChart"]
         Agent["AI Agent"]
-        AgentRt["@363045841yyt/klinechart-agent-runtime"]
+        AgentRt["Agent 运行时"]
     end
 
-    subgraph core["核心引擎 @363045841yyt/klinechart-core"]
+    subgraph core["核心引擎"]
         Ctl["ChartController<br/>只读信号 + 命令方法"]
         Chart["Chart 门面"]
         Kernel["StateKernel<br/>Reactive SSOT"]
@@ -32,17 +30,11 @@ flowchart TB
         Bn["Binance-Connector<br/>Binance 现货 K 线 / 逐笔成交 :8091"]
         Bs["Baostock-Tradingview-Connector<br/>BaoStock / TradingView :8000"]
         Mt["KCQ-MT5-connector<br/>MT5（Exness）:8090"]
-        Th["KCQ-THS-connector<br/>同花顺日线 :8092"]
     end
 
     UI --> VuePkg
-    UI --> ReactPkg
-    UI --> AngularPkg
-    VuePkg -->|"Web Component 接入"| ReactPkg
     Agent --> AgentRt
     VuePkg --> Ctl
-    ReactPkg --> Ctl
-    AngularPkg --> Ctl
     AgentRt -->|"@Tool 原语（与 UI 同路径）"| Ctl
     Ctl --> Chart
     Chart --> Kernel
@@ -56,7 +48,6 @@ flowchart TB
     Bn -->|行情数据| Data
     Bs -->|行情数据| Data
     Mt -->|"行情数据 + SSE"| Data
-    Th -->|"行情数据（日线）"| Data
     Kernel --> Data
     Kernel --> Pipe
 ```
@@ -67,13 +58,10 @@ flowchart TB
 - **渲染** — 图元一次提交，WebGPU / WebGL2 / Canvas2D 三后端渲染，自动降级
   （WebGPU → WebGL → Canvas2D）。
 - **数据层** — 统一 `SeriesRepository` + 增量缓冲 + 拉取调度；多数据源聚合
-  （gotdx / BaoStock / TradingView / MT5 / 同花顺 THS / mock）与 Binance 现货 K 线 / 逐笔成交。
+  （gotdx / BaoStock / TradingView / MT5 / mock）与 Binance 现货 K 线 / 逐笔成交。
 - **插件子系统** — PluginHost / HookSystem / EventBus / RendererPluginManager；
   指标、标记、画图以 Scene Layer 形式接入。
-- **React 绑定** — `@363045841yyt/klinechart-react` 的 `KLineChart` 直接挂载 Core（仅客户端加载，
-  不含 Vue 运行时）；`KLineChartWC` 渲染由 Vue 包打包、带完整 UI 的 `<kline-chart>` 自定义元素
-  （`@363045841yyt/klinechart/web-component`）。
-- **Agent 原生** — `@363045841yyt/klinechart-agent-runtime` 编排 Agent，直接调用核心
-  `@Tool` 注册的原语——与 UI 使用同一入口。
+- **Agent 原生** — 随包交付的 Agent 运行时编排 Agent，直接调用核心 `@Tool` 注册的原语——
+  与 UI 使用同一入口。
 
 完整架构文档见 [docs/architecture/architecture.md]({{root}}docs/architecture/architecture.md)。

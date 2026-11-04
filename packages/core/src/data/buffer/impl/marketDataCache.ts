@@ -5,12 +5,10 @@ import { createSignal, type ReadonlySignal } from '@/foundation/reactivity/signa
 import type { MarketDataProviderRegistry } from '../../provider/impl/registry.js'
 import { SourceRouter } from '../../provider/impl/router.js'
 import type {
-  AssetClass,
   BarAggregation,
   BarSeries,
   InstrumentDescriptor,
-  KLineAdjustment,
-  KLinePeriod,
+  InstrumentType,
   OlderDataStatus,
   TimeShareRange,
   TimeShareSeries,
@@ -18,6 +16,10 @@ import type {
 } from '../../provider/types.js'
 import {
   AUTO_SOURCE_ID,
+  KLINE_ADJUSTMENTS,
+  KLINE_PERIODS,
+  KLineAdjustment,
+  KLinePeriod,
   OLDER_DATA_STATUS,
   ORIGINAL_BAR_AGGREGATION,
 } from '../../provider/types.js'
@@ -63,7 +65,7 @@ export interface BarsCacheQuery {
   readonly sourceId?: string
   readonly instrument?: InstrumentDescriptor
   readonly exchange?: string
-  readonly assetClass?: AssetClass
+  readonly instrumentType?: InstrumentType
   /** 请求的根数；拉多少就请求多少，不按时间范围外推。 */
   readonly limit: number
   /** 排他上界时间戳；省略表示从数据源最新一根开始。 */
@@ -84,7 +86,7 @@ export interface TimeShareCacheQuery {
   readonly resolveTradingDate?: (instrument: InstrumentDescriptor) => TradingDate
   readonly sourceId?: string
   readonly exchange?: string
-  readonly assetClass?: AssetClass
+  readonly instrumentType?: InstrumentType
   readonly signal?: AbortSignal
 }
 
@@ -96,7 +98,7 @@ export interface TimeShareRangeCacheQuery {
   readonly days: number
   readonly sourceId?: string
   readonly exchange?: string
-  readonly assetClass?: AssetClass
+  readonly instrumentType?: InstrumentType
   readonly signal?: AbortSignal
 }
 
@@ -228,13 +230,13 @@ function cacheKey(query: {
   readonly sourceId?: string
   readonly instrument?: InstrumentDescriptor
   readonly exchange?: string
-  readonly assetClass?: AssetClass
+  readonly instrumentType?: InstrumentType
 }): string {
   return [
     query.sourceId ?? AUTO_SOURCE_ID,
     query.instrument?.id ?? '',
-    query.assetClass ?? '',
-    query.exchange ?? '',
+    query.instrument?.instrumentType ?? query.instrumentType ?? '',
+    query.instrument?.exchange ?? query.exchange ?? '',
     query.symbol,
     query.period,
     query.adjustment,
@@ -282,6 +284,7 @@ export class MarketDataCache {
   private usedBytes = 0
   private maxBytes = DEFAULT_MARKET_DATA_CACHE_MAX_BYTES
   private destroyed = false
+  private readonly unsubscribeRegistry: () => void
 
   /** 供设置界面观察的缓存近似内存使用量。 */
   readonly stats: ReadonlySignal<MarketDataCacheStats> = this.statsSignal
@@ -290,6 +293,27 @@ export class MarketDataCache {
   constructor(registry: MarketDataProviderRegistry) {
     this.router = new SourceRouter(registry)
     this.registry = registry
+    let previous = registry.state.peek()
+    this.unsubscribeRegistry = registry.state.subscribe(() => {
+      const next = registry.state.peek()
+      const changedSources = [...previous.providers]
+        .filter(([id, provider]) => {
+          const connectionId = provider.source.connectionId ?? id
+          return (
+            next.providers.get(id) !== provider ||
+            previous.connections.get(connectionId) !== next.connections.get(connectionId)
+          )
+        })
+        .map(([id]) => id)
+      previous = next
+      if (changedSources.length) {
+        this.clear()
+        for (const [instrumentKey] of this.repository.snapshot.peek()) {
+          for (const sourceId of changedSources)
+            this.repository.deleteSource(instrumentKey, sourceId)
+        }
+      }
+    })
   }
 
   /** 返回仓库中唯一的成交实例，并纳入公共缓存的内存统计与淘汰。 */
@@ -456,7 +480,82 @@ export class MarketDataCache {
     }
   }
 
+  /** 实时帧回写所有指向同一事实序列的查询条目，后续历史查询不会覆盖最新尾部。 */
+  acceptBars(
+    selection: import('./seriesRepository.js').BarsSelection,
+    instrument: InstrumentDescriptor,
+    bars: readonly KLineData[],
+  ): void {
+    this.throwIfDestroyed()
+    for (const [key, entry] of this.bars) {
+      if (
+        entry.sourceId !== selection.sourceId ||
+        entry.instrument.id !== instrument.id ||
+        entry.series.period !== selection.period ||
+        entry.series.adjustment !== selection.adjustment ||
+        entry.series.barAggregation !== selection.barAggregation
+      )
+        continue
+      const value = { ...entry, data: mergeBars(entry.data, bars) }
+      this.bars.set(key, value)
+      this.recordEntry({ kind: 'bars', key, bytes: estimateBytes(value) })
+    }
+  }
+
   /** 查询单个交易日分时，命中后直接返回缓存快照。 */
+  /** 指定序列失效后重新请求，等待旧查询完成后再撤销其缓存事实。 */
+  async refreshBars(
+    query: BarsCacheQuery & { sourceId: string; instrument: InstrumentDescriptor },
+  ): Promise<BarsCacheResult> {
+    const key = cacheKey(query)
+    const keys = new Set([key])
+    for (const [candidate, entry] of this.bars) {
+      if (
+        entry.sourceId === query.sourceId &&
+        entry.instrument.id === query.instrument?.id &&
+        entry.series.period === query.period &&
+        entry.series.adjustment === query.adjustment &&
+        entry.series.barAggregation === query.barAggregation
+      )
+        keys.add(candidate)
+    }
+    await Promise.all(
+      [...keys].map((candidate) => this.pending.get(this.entryId('bars', candidate))),
+    )
+    query.signal?.throwIfAborted()
+    for (const candidate of keys) {
+      this.bars.delete(candidate)
+      const id = this.entryId('bars', candidate)
+      const metadata = this.entries.get(id)
+      if (metadata) {
+        this.usedBytes -= metadata.bytes
+        this.entries.delete(id)
+      }
+    }
+    this.publishStats()
+    // 重查覆盖原窗口，但每页仍遵守源声明的最大根数。
+    const maximum =
+      this.registry.getRequired(query.sourceId).source.capabilities?.bars?.maxBarsPerRequest ??
+      query.limit
+    let result = await this.queryBars({ ...query, limit: Math.min(query.limit, maximum) })
+    let data = [...result.series.data]
+    while (
+      data.length < query.limit &&
+      result.series.olderData !== OLDER_DATA_STATUS.EXHAUSTED &&
+      data.length > 0
+    ) {
+      const beforeTimestamp = data[0].timestamp
+      result = await this.queryBars({
+        ...query,
+        beforeTimestamp,
+        limit: Math.min(query.limit - data.length, maximum),
+      })
+      if (result.series.data.length === 0) break
+      data = [...result.series.data, ...data]
+    }
+    return { ...result, series: { ...result.series, data } }
+  }
+
   async queryTimeShare(query: TimeShareCacheQuery): Promise<TimeShareCacheResult> {
     this.throwIfDestroyed()
     if (!query.tradingDate && !query.resolveTradingDate) {
@@ -464,8 +563,8 @@ export class MarketDataCache {
     }
     const key = `${cacheKey({
       ...query,
-      period: 'daily',
-      adjustment: 'none',
+      period: KLinePeriod.Daily,
+      adjustment: KLineAdjustment.None,
       barAggregation: ORIGINAL_BAR_AGGREGATION,
     })}:${query.tradingDate ?? LATEST_TRADING_DATE}`
     const cached = this.timeShares.get(key)
@@ -478,7 +577,7 @@ export class MarketDataCache {
       instrument: query.instrument,
       symbol: query.symbol,
       exchange: query.exchange,
-      assetClass: query.assetClass,
+      instrumentType: query.instrumentType,
       tradingDate: query.tradingDate,
       resolveTradingDate: query.resolveTradingDate,
       signal: this.requestSignal(query.signal),
@@ -502,8 +601,8 @@ export class MarketDataCache {
     }
     const key = `${cacheKey({
       ...query,
-      period: 'daily',
-      adjustment: 'none',
+      period: KLinePeriod.Daily,
+      adjustment: KLineAdjustment.None,
       barAggregation: ORIGINAL_BAR_AGGREGATION,
     })}:${query.endTradingDate ?? LATEST_TRADING_DATE}:${query.days}`
     const cached = this.timeShareRanges.get(key)
@@ -520,7 +619,7 @@ export class MarketDataCache {
       instrument: query.instrument,
       symbol: query.symbol,
       exchange: query.exchange,
-      assetClass: query.assetClass,
+      instrumentType: query.instrumentType,
       endTradingDate: query.endTradingDate,
       resolveEndTradingDate: query.resolveEndTradingDate,
       days: query.days,
@@ -567,6 +666,7 @@ export class MarketDataCache {
   /** 销毁图表实例缓存，中止请求并阻止异步响应回写。 */
   destroy(): void {
     if (this.destroyed) return
+    this.unsubscribeRegistry()
     this.destroyed = true
     this.lifecycleAbortController.abort()
     this.clear()
@@ -650,8 +750,17 @@ export class MarketDataCache {
     const result = await this.requestPage(query, entry)
     this.throwIfDestroyed()
     query.signal?.throwIfAborted()
-    const previous = entry?.data ?? []
-    const merged = mergeBars(previous, result.series.data)
+    const current = this.bars.get(key)
+    const previous = current?.data ?? []
+    let merged = mergeBars(previous, result.series.data)
+    // 只重放请求期间发生的变更；普通历史页仍允许上游修正重叠数据。
+    if (current !== entry) {
+      const before = new Map(entry?.data.map((bar) => [bar.timestamp, bar]))
+      merged = mergeBars(
+        merged,
+        previous.filter((bar) => before.get(bar.timestamp) !== bar),
+      )
+    }
     const progressed = merged.length > previous.length || previous.length === 0
     const value: CacheEntry = {
       sourceId: result.sourceId,
@@ -688,7 +797,7 @@ export class MarketDataCache {
         instrument: entry?.instrument ?? query.instrument,
         symbol: query.symbol,
         exchange: query.exchange,
-        assetClass: query.assetClass,
+        instrumentType: query.instrumentType,
         period: query.period,
         adjustment: query.adjustment,
         barAggregation: query.barAggregation,

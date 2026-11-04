@@ -8,7 +8,9 @@
     "**/dist",
     "**/out",
     "**/*.config.*",
-    "packages/mobile/**"
+    "packages/mobile/**",
+    "packages/script/scripts/*.ts",
+    "packages/script/src/quickjs/runtime/**"
   ],
   "compilerOptions": {
     "incremental": true,
@@ -24,6 +26,7 @@
       "@/plugin": ["./packages/core/src/foundation/plugin"],
       "@/utils/*": ["./packages/core/src/foundation/utils/*"],
       "@/*": ["./packages/core/src/*"],
+      "@vue-src/*": ["./packages/vue/src/*"],
       "@363045841yyt/klinechart-agent-runtime": ["./packages/agent-runtime/src/index.ts"],
       "@363045841yyt/klinechart-agent-runtime/browser": ["./packages/agent-runtime/src/browser.ts"],
       "@363045841yyt/klinechart-agent-runtime/testing": [
@@ -31,7 +34,8 @@
       ],
       "@363045841yyt/klinechart-agent-runtime/contracts/ui": [
         "./packages/agent-runtime/src/contracts/ui.ts"
-      ]
+      ],
+      "@363045841yyt/klinechart-script-server": ["./packages/script-server/src/index.ts"]
     },
     "plugins": [{ "name": "@effect/language-service/tsconfig-plugin" }],
     "types": ["vite/client", "unplugin-icons/types/vue"]

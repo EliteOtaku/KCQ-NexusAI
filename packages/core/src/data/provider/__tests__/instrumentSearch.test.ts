@@ -13,7 +13,7 @@ function instrument(sourceId: string, id: string): InstrumentDescriptor {
     sourceId,
     symbol: '600519',
     name: '贵州茅台',
-    assetClass: 'stock',
+    instrumentType: 'stock',
     exchange: 'SH',
     capabilities: {},
   }
@@ -47,6 +47,17 @@ describe('searchInstruments', () => {
     ).resolves.toEqual([instrument('second', 'stock:600519')])
     expect(firstSearch).not.toHaveBeenCalled()
     expect(secondSearch).toHaveBeenCalledOnce()
+  })
+
+  it('treats an explicit empty source list as no searchable source', async () => {
+    const registry = new MarketDataProviderRegistry()
+    const search = vi.fn()
+    registry.register(createMockMarketDataProvider({ sourceId: 'first', search }))
+
+    await expect(
+      searchInstruments(registry, { keyword: '600519', limit: 10, sourceIds: [] }),
+    ).resolves.toEqual([])
+    expect(search).not.toHaveBeenCalled()
   })
 
   it('rejects unavailable source IDs with the enabled catalog source IDs needed to retry', async () => {

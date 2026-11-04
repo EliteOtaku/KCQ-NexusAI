@@ -37,7 +37,7 @@ export function IndicatorPanel() {
       // 主图实例的移除按 definitionId 寻址（引擎不接受 'main:*' 实例 id，见 LegendBar 注记）。
       ctrl.removeIndicator(existing.role === 'main' ? existing.definitionId : existing.id)
     } else {
-      ctrl.addIndicator(definition.id, definition.role)
+      ctrl.addIndicator(definition.id)
     }
   }
 

@@ -1,0 +1,295 @@
+# 指标脚本
+
+指标脚本是一份完整的 JavaScript 文件，通过 `defineIndicator` 声明。
+注册到图表后即可在“添加指标 - 用户自定义脚本”中找到并启用。
+
+## 示例脚本
+
+以下脚本计算 (开盘价 + 收盘价) / n，并画成一条折线：
+
+```js
+defineIndicator({
+  name: 'OC Average',
+  position: Position.Sub,
+  onBar() {
+    const n = input.float(2, { title: '除数' })
+    const a = input.float(0, { title: '偏移量' })
+    const average = (open + close) / n + a
+    plot.Line(average, 'oc-average', { color: '#26a69a' })
+    plot.Line(high, 'oc-high')
+    plot.Line(low, 'oc-low')
+  },
+})
+```
+
+输出的 `oc-average` 自动按默认折线绘制，类型、标签和样式都由绘图方法的参数决定。
+
+宿主通过脚本服务加载这份文件，源码、修订号和派生定义一起提交：
+
+```ts
+import { createScriptService } from '@363045841yyt/klinechart-script-chart'
+import source from './open-close-average.js?raw'
+
+const scripts = await createScriptService()
+await scripts.create(source)
+```
+
+`OC Average` 随即出现在指标选择弹窗的**用户自定义脚本**分组中。
+用户通过现有指标 API 添加实例，参数、显隐和删除行为与内置指标一致。
+
+## 脚本声明
+
+一个文件通过 `defineIndicator` 声明一个指标，由以下字段组成。
+
+| 字段 | 作用 |
+| --- | --- |
+| `name` | 指标显示名称；用户脚本可通过修改名称并保存来重命名，同名脚本拒绝重复创建。稳定 ID 由框架自动分配并持久化，重命名保留实例和配置 |
+| `position` | 指标渲染位置，必填：`Position.Main` 主图 / `Position.Sub` 副图 |
+| `onBar` | 每根 K 线执行一次的计算函数，读取全局序列与参数，输出 Plot |
+
+`onBar` 不需要参数：行情序列和库由宿主注入，输入参数通过局部变量读取。
+`close[0]` 是当前 K 线，`close[1]` 是前一根；历史不足返回 `NaN`，永远不能访问未来。
+
+在数值运算、比较、条件判断，以及要求数值的参数位置，可以省略 `[0]`。
+例如 `high - low`、`close > close[1]`、`Math.max(open, close)` 和 `plot.Line(close, 'close')`。
+`open`、`high`、`low`、`close`、`volume`、`time` 和 `ta` 返回的派生序列都遵循同一规则。
+
+需要完整序列的位置仍然保留序列，例如 `ta.sma(close, 20)`。
+未标注类型的 `const src = close` 是序列别名，可继续使用 `src[1]` 或 `ta.sma(src, 20)`；
+需要保存当前数值时使用 `const current: number = close` 或显式的 `close[0]`。
+编译器和编辑器共用这套规则，转换仅发生在源码变化时，逐 bar 计算不进行类型分析。
+
+参数直接在 `onBar` 顶层用 `const` 声明，返回值就是用户设置的参数值，无需 `inputs` 或 `params`：
+
+| 写法 | 面板编辑项 |
+| --- | --- |
+| `const period = input.int(20, { min: 1 })` | 整数输入，默认步长为 1 |
+| `const n = input.float(2, { title: '除数', step: 0.1 })` | 小数输入 |
+| `const show = input.bool(true, { title: '显示' })` | 开关 |
+| `const label = input.string('MA', { title: '名称' })` | 文本输入 |
+| `const type = input.string('SMA', { options: ['SMA', 'EMA'] })` | 下拉选择 |
+
+数值输入支持 `min`、`max`、`step`；布尔输入只接受标题；字符串输入支持 `options`。默认值和选项使用常量字面量，变量名作为内部参数身份，标题缺省显示变量名。输入声明不能放在分支、循环或辅助函数中；注册时只提取配置，不执行 `onBar`。
+
+### 跨 bar 记忆
+
+一次运行只在开始时执行一遍顶层代码，`onBar` 随后逐根调用。因此**文件顶层声明的变量跨 K 线保留**，用来维护需要记忆状态的指标（等价于 Pine 的 `var`）：
+
+```js
+let obv = 0 // 顶层：整轮运行只初始化一次，逐 bar 累加
+
+defineIndicator({
+  name: 'OBV',
+  position: Position.Sub,
+  onBar() {
+    const previous = close[1]
+    if (!Number.isNaN(previous)) {
+      if (close > previous) obv += volume
+      else if (close < previous) obv -= volume
+    }
+    plot.Line(obv, 'obv')
+  },
+})
+```
+
+写进 `onBar` 内部会变成逐 bar 重置的局部变量，累加不起来。只有需要跨 bar 记忆时才用顶层变量，能表达成序列组合的计算优先交给 `ta` 与 `derive`；每次重算都从第一根按序执行，状态随之重建，不依赖上一次运行。
+
+参数与状态声明位置不同：`input.*` 必须在 `onBar` 顶层（配置），跨 bar 状态在文件顶层（运行态）。
+
+脚本按 bar 下标顺序执行。某一根 K 线没有输出时，该位置留空，不会影响其他位置。
+输出 `NaN` 同样表示留空。
+
+## Plot
+
+Plot 是脚本与图表之间的绘图数据通道。`onBar` 通过 `plot.Line(value, name)` 输出数据点，
+引擎按 `name` 收集为按 K 线下标对齐的序列，再交给通用绘图、坐标轴和图例链路。
+
+`name` 区分不同的 Plot，同一根 K 线上可以输出多个不同 name 的点。
+使用 `plot.Line`、`plot.Point` 等方法选择图形：第一个参数是绘图值，第二个参数是必填的绘图名称，
+第三个参数是可选的样式对象。
+也可通过 `globalThis.plot` 访问。绘图类型由方法名决定。
+同一个 name 在一次运行中必须使用同一种类型，整列样式也必须保持一致。
+
+### Plot 类型
+
+| 方法 | 形状 | 额外样式 |
+| --- | --- | --- |
+| `plot.Line` | 折线 | `dash` 虚线 |
+| `plot.Columns` | 柱宽随 K 线间距缩放，不支持 `size` | `baseline` 基准值 |
+| `plot.Histogram` | 固定像素柱宽，不随缩放变化 | `baseline` 基准值，`size` 为正数像素或 `ShapeSize` 枚举 |
+| `plot.Point` | 圆形散点 | — |
+| `plot.Shape` | 形状标记 | `style`、`location`、`text`、`textColor` |
+| `plot.Char` | 字符标记 | `char`、`location`、`text`、`textColor` |
+| `plot.Arrow` | 数值箭头 | `colorUp`、`colorDown` |
+| `plot.Candle` | 蜡烛图，接收 OHLC 四个价格 | `wickColor`、`borderColor`、`showLast` |
+| `plot.Bar` | 美国线，接收 OHLC 四个价格 | `showLast` |
+
+所有方法接受 `number | null`，`null` 主动留空。`plot.Shape` 和 `plot.Char` 也接受布尔条件，`false` 留空。
+
+```ts
+plot.Columns(volume, 'volume') // 柱宽随缩放变化
+plot.Histogram(close - open, 'body', { size: 3 }) // 固定 3px
+plot.Histogram(close - open, 'body-size', { size: ShapeSize.Large }) // 固定 3px
+```
+
+Histogram 的 Auto、Tiny、Small 为 1px，Normal 为 2px，Large 为 3px，Huge 为 4px。
+
+### 蜡烛图和美国线
+
+`plot.Candle(open, high, low, close, name, options?)` 和 `plot.Bar(open, high, low, close, name, options?)`
+接收当前 bar 的四个价格，名称必填，返回 `void`，不能作为 `fill` 边界。四价格输入可直接使用行情或派生序列。
+
+```ts
+onBar() {
+  const color = close >= open ? Color.Green : Color.Red
+  plot.Candle(open, high, low, close, 'candles', {
+    color,
+    wickColor: Color.Gray,
+    borderColor: color,
+  })
+  plot.Bar(open, high, low, close, 'bars', { color, showLast: 100 })
+}
+```
+
+蜡烛的实体色 `color`、影线色 `wickColor` 和边框色 `borderColor` 可以逐 bar 变化；
+显式传 `null` 隐藏对应部分。实体为 `null` 且边框有色时绘制空心蜡烛。
+默认实体色沿用 Plot 默认蓝色，影线与边框默认跟随实体色，不自动按市场规则区分涨跌。
+美国线只有整体 `color`，绘制高低竖线、左侧开盘短横线和右侧收盘短横线。
+
+任一价格为 `null`、`NaN` 或无穷值时整根留空；0 有效。按 Pine 语义，四个输入的最大值作为 high，
+最小值作为 low，open/close 保持原值。自动缩放包含归一化后的高低价，图例展示 O/H/L/C。
+
+两者接受 `label`、`visible` 和整数 `offset`，宽度跟随 K 线间距，不接受 `size`。
+`showLast` 为正整数，表示整个数据序列最后 N 根，先按源下标裁剪再应用 offset；不按当前可视窗口计数。
+除颜色外，同名 Plot 的选项在一次运行内必须保持一致。
+
+### Plot 调用选项
+
+单值 Plot 的第三个参数是调用选项对象，OHLC Plot 则是第六个参数，缺省值由采集器补齐：
+
+| 字段 | 作用 |
+| --- | --- |
+| `label` | 图例名称，缺省取 `name` |
+| `color` | CSS 颜色字符串，或逐点颜色 |
+| `offset` | 沿 K 线下标的偏移，用于前移或后移的序列 |
+| `visible` | 是否绘制，缺省为 `true` |
+| `size` | `ShapeSize` 尺寸档位，控制线宽、点径或标记大小 |
+
+### 颜色
+
+`color`、`textColor`、`colorUp` / `colorDown`、填充色都接受 CSS 颜色字符串。
+需要常用色时用全局 `Color` 枚举，省去记十六进制：
+
+色相取自 Material 400 色阶：`Color.Red`、`Color.DeepOrange`、`Color.Orange`、`Color.Amber`、
+`Color.Yellow`、`Color.Lime`、`Color.LightGreen`、`Color.Green`、`Color.Teal`、`Color.Cyan`、
+`Color.LightBlue`、`Color.Blue`、`Color.Indigo`、`Color.Purple`、`Color.Pink`、`Color.Brown`、
+`Color.BlueGray`；中性色为 `Color.Gray`、`Color.White`、`Color.Black`。
+
+前 18 个是主题色别名：脚本只声明要哪个色相，具体色值由图表按当前 light / dark 主题取，
+画布换主题后同一份输出自动换成对应的可读色值，不需要改脚本。
+`Color.White` / `Color.Black` 是绝对色，用于文字和彩色底块上的叠加，不随主题变化。
+需要透明度时在别名后拼两位十六进制 alpha，例如 `Color.Teal + '80'`；
+其他颜色直接写字符串，例如 `color: '#808080'`。
+
+### 填充
+
+`fill(from, to, color, title)` 声明两个已在 `onBar` 中输出的 Plot 之间的填充区域，不复制序列数据。
+`from` / `to` 是 `plot.*` 返回的句柄；`color` 在每根 bar 求值，`null` 表示该 bar 不填充。
+填充按 `title` 标识，同一对边界可以用不同 title 声明多层填充。边界和 `visible` 在一次运行内固定。
+相邻两个点之间使用右端 bar 的颜色，交叉时不推导颜色，也不在交点切色。
+
+```js
+onBar() {
+  const fastValue = ta.sma(close, 5)
+  const slowValue = ta.sma(close, 20)
+  const fast = plot.Line(fastValue, 'fast')
+  const slow = plot.Line(slowValue, 'slow')
+  fill(fast, slow, fastValue > slowValue ? Color.Teal : Color.Red, '快慢云')
+}
+```
+
+| 参数 | 作用 |
+| --- | --- |
+| `from` / `to` | 填充的两个边界 Plot 句柄 |
+| `color` | 必填，当前 bar 的 CSS 颜色或 `null`；透明度直接写入颜色，例如 `'#00897b26'` |
+| `title` | 填充标识；不填则按 `from`/`to` 生成 |
+| `options.visible` | 是否绘制，缺省 `true` |
+
+`options` 是第 5 个可选参数。
+
+### 逐点颜色
+
+绘图方法的 `color` 覆盖该点颜色，缺省使用 Plot 的 `color`。
+柱状图常用它按数值正负或涨跌着色。
+
+```js
+onBar() {
+  plot.Histogram(close - open, 'change', {
+    color: close >= open ? Color.Teal : Color.Red,
+  })
+}
+```
+
+## 跨品种与跨周期取数
+
+`request.security(品种, 周期, 回调, options?)` 在目标行情上独立计算：
+
+```ts
+defineIndicator({
+  name: '高周期蜡烛',
+  position: Position.Main,
+  onBar() {
+    const timeframe = input.timeframe(Timeframe.Day, {
+      title: '目标周期',
+      options: [Timeframe.Hour1, Timeframe.Hour4, Timeframe.Day, Timeframe.Week],
+    })
+    const [o, h, l, c] = request.security(
+      syminfo.tickerid,
+      timeframe,
+      () => [open, high, low, close] as const,
+    )
+    const color = c >= o ? Color.Green : Color.Red
+    plot.Candle(o, h, l, c, 'higher-timeframe', { color, wickColor: color, borderColor: color })
+  },
+})
+```
+
+目标周期取 `Timeframe` 枚举，必须大于或等于主图周期。枚举取值是周期短写法，从 `Timeframe.Minute1`
+到 `Timeframe.Month12`，只登记图表已支持的周期。`input.timeframe` 是周期专用的输入，不填 options 时列出全部受支持周期。
+宿主侧仍按统一解析表处理，Provider 周期名（如 `'60min'`、`'daily'`）在运行时继续可用，未登记的写法直接报错。
+蜡烛宽度跟随主图 K 线间距。
+
+指定来源使用 options.source，例如在分钟图上：
+
+```ts
+const hourlyMA = request.security('BTCUSDT', Timeframe.Hour1, () => ta.sma(close, 20), {
+  source: DataSource.Binance,
+  calcBarsCount: 300,
+  gaps: 'off',
+})
+```
+
+DataSource 包含 Binance、Gotdx、BaoStock、TradingView、MT5、THS、Mock。
+请求品种与图表品种相同时继承图表来源；请求其他品种时必须显式指定 source，否则直接报错。
+指定来源不可用时也直接报错，不在数据源之间自动切换。
+calcBarsCount 表示主图历史之前额外加载的目标周期预热根数，默认 300。
+gaps='off' 延续最近可用结果；gaps='on' 只在新目标结果出现时输出，其余点留空。
+
+请求必须在 onBar 顶层声明。回调内的行情、历史索引和 ta 都属于目标周期，可使用 input 参数；
+其他局部计算请写入回调内。不支持嵌套请求或逐 bar 动态改变品种。
+返回元组只读，不暴露 Data Buffer。末根使用最新目标快照，数据更新后指标重算；
+当前不提供“只读取已确认收盘”的模式。
+
+## 库
+
+脚本通过全局 `defineLibrary(name, members)` 声明库，`importLibrary(name)` 使用库。
+内置 `ta` 库提供 `sma`、`ema`、`wma`、`vwma`、`rsi`、`highest`、`lowest`、`crossover`、`crossunder`，
+使用同一协议加载，用户库也可以这样加入。
+
+```js
+onBar() {
+  const period = input.int(20, { title: '周期', min: 1 })
+  const ma = ta.sma(close, period)
+  plot.Line(ma, 'sma')
+}
+```

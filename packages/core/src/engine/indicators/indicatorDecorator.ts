@@ -6,6 +6,8 @@
  */
 import { GENERIC_ERROR_CODES, KLineChartError } from '../../errors.js'
 import type { ChartDataView } from '../chartModel/index.js'
+import { createPlotTitleInfo } from '../plots/impl/plotTitleInfo.js'
+import type { IndicatorPlotDefinition } from '../plots/types.js'
 import type { IndicatorName } from './indicatorContracts.js'
 import type {
   GetTitleInfoFn,
@@ -16,7 +18,6 @@ import type {
   IndicatorPresentationDescriptor,
   IndicatorRendererNameResolver,
   IndicatorRuntimeDescriptor,
-  IndicatorType,
   RendererFactory,
   ScaleRendererFactory,
 } from './indicatorMetadata.js'
@@ -26,15 +27,20 @@ export const definitionMetadata = Symbol('Indicator.definition')
 
 /** @Indicator 装饰器的定义配置。 */
 export type IndicatorDefinitionConfig<T = unknown> = {
+  source?: IndicatorMetadata['source']
+  document?: IndicatorMetadata['document']
+  plots?: IndicatorPlotDefinition
   /** 指标定义名称，允许第三方扩展；注册定义后仍须添加指标实例。 */
   name: IndicatorName
   aliases?: readonly string[]
   displayName: string
+  /** 指标选择器/图例显示的长名称；缺省用 displayName。 */
+  title?: string
+  /** 指标选择器里的说明文本；缺省不展示说明。 */
+  info?: string
   /** 定义身份：系统渲染器或用户可添加的指标。所有定义必须显式声明。 */
   kind: IndicatorKind
   category: IndicatorCategory
-  indicatorType: IndicatorType
-  indicatorTypeLabel?: string
   defaultPaneId: string
   /** 指标可参与渲染的数据视图；未声明时仅支持 K 线。 */
   dataViews?: readonly ChartDataView[]
@@ -47,7 +53,6 @@ export type IndicatorDefinitionConfig<T = unknown> = {
   getRendererName?: IndicatorRendererNameResolver
   /** 覆盖默认的副图坐标轴 plugin 命名规则。 */
   getScaleRendererName?: IndicatorAuxiliaryRendererNameResolver
-  visibleState?: IndicatorMetadata['visibleState']
   runtime?: IndicatorRuntimeDescriptor<T>
   presentation?: IndicatorPresentationDescriptor
   getTitleInfo?: GetTitleInfoFn
@@ -65,15 +70,15 @@ export type IndicatorDefinitionClass = {
  * 标准类装饰器：只声明元数据，类初始化不修改全局目录；装配入口负责注册。
  *
  * 使用方式：
- * @Indicator({ name: 'ma', ... })
- * class MADefinition {
- *   static rendererFactory = createMALayer
+ * @Indicator({ name: 'customOverlay', ... })
+ * class CustomOverlayDefinition {
+ *   static rendererFactory = createOverlayLayer
  * }
  */
 export function Indicator<C>(config: IndicatorDefinitionConfig<C>) {
   return function <T extends IndicatorDefinitionClass>(
     value: T,
-    _context: ClassDecoratorContext<T>,
+    _context?: ClassDecoratorContext<T>,
   ): T {
     let metadata: IndicatorMetadata | undefined
     Object.defineProperty(value, definitionMetadata, {
@@ -101,21 +106,18 @@ export function Indicator<C>(config: IndicatorDefinitionConfig<C>) {
               ? `${config.scale?.indicatorKey ?? config.name}Scale_${paneId}`
               : null)
 
-        // runtime.configKey 默认等于 name
-        const runtime = config.runtime && {
-          ...config.runtime,
-          configKey: config.runtime.configKey ?? config.name,
-        }
-
         metadata = {
           ...config,
           getRendererName,
           getScaleRendererName,
-          runtime,
+          runtime: config.runtime,
           rendererFactory,
           scaleRendererFactory: value.scaleRendererFactory ?? config.scaleRendererFactory,
           paneIdField: config.paneIdField,
           allowMainPane: config.allowMainPane,
+          getTitleInfo:
+            config.getTitleInfo ??
+            (config.plots ? createPlotTitleInfo(config.displayName) : undefined),
         }
         return metadata
       },

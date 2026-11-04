@@ -3,12 +3,10 @@
  * 后端只要实现该契约即可接入数据，接入方仅需提供 source 元信息与可选的本地规则
  */
 import type { KLineData, TimeShareData } from '@/controllers/types.js'
-import type { LiveBarsDataSource } from '@/data/live/types.js'
 import { createMissingSessionError, ERROR_CODES, KLineChartError } from '@/errors.js'
 import { MarketSessionRegistry } from '@/foundation/config/marketSession/marketSessionRegistry.js'
 
 import type {
-  AssetClass,
   BarQuery,
   BarSeries,
   DataSourceDescriptor,
@@ -20,7 +18,7 @@ import type {
   TimeShareSeries,
   VolumeUnit,
 } from '../../types.js'
-import { isFilterableAssetClass } from '../../types.js'
+import { InstrumentType, isFilterableInstrumentType } from '../../types.js'
 import type {
   MarketDataTransport,
   ProtocolInstrumentDescriptor,
@@ -34,8 +32,6 @@ export interface MarketDataProviderOptions {
   source: DataSourceDescriptor
   // 传输实现，负责 wire 语义
   transport: MarketDataTransport
-  /** 数据源自有的实时 K 线流装配。 */
-  liveBars?: LiveBarsDataSource
   // 成交量单位兜底推断；后端未返回 volumeUnit 时使用
   resolveVolumeUnit?: (instrument: InstrumentDescriptor) => VolumeUnit | undefined
 }
@@ -45,7 +41,8 @@ const CN_SESSION_ID = 'CN'
 
 // 默认成交量单位兜底：CN 市场非指数品种按手计，其余保持未知
 function defaultResolveVolumeUnit(instrument: InstrumentDescriptor): VolumeUnit | undefined {
-  return instrument.sessionId === CN_SESSION_ID && instrument.assetClass !== 'index'
+  return instrument.sessionId === CN_SESSION_ID &&
+    instrument.instrumentType !== InstrumentType.Index
     ? 'lot'
     : undefined
 }
@@ -57,7 +54,7 @@ function mapInstrument(item: ProtocolInstrumentDescriptor): InstrumentDescriptor
     sourceId: item.sourceId,
     symbol: item.symbol,
     name: item.name,
-    assetClass: item.assetClass,
+    instrumentType: item.instrumentType,
     exchange: item.exchange,
     sessionId: item.sessionId,
     currency: item.currency,
@@ -135,7 +132,6 @@ export function createMarketDataProvider(options: MarketDataProviderOptions): Ma
 
   return {
     source: runtimeSource,
-    liveBars: options.liveBars,
     trades: options.trades,
 
     // 通过 probe endpoint 探测数据源可用性，失败时返回 offline 而非抛错
@@ -168,17 +164,17 @@ export function createMarketDataProvider(options: MarketDataProviderOptions): Ma
             sourceId: source.id,
             keyword: query.keyword,
             limit: query.limit,
-            assetClasses: query.assetClasses,
+            instrumentTypes: query.instrumentTypes,
           },
           query.signal,
         )
         const instruments = result.items.map(mapInstrument)
         // unknown 不参与筛选：请求携带 unknown 时按无条件处理，避免误杀已归一化的同代码品种。
-        const allowed = new Set<AssetClass>(
-          (query.assetClasses ?? []).filter(isFilterableAssetClass),
+        const allowed = new Set<InstrumentType>(
+          (query.instrumentTypes ?? []).filter(isFilterableInstrumentType),
         )
         if (allowed.size === 0) return instruments
-        return instruments.filter((instrument) => allowed.has(instrument.assetClass))
+        return instruments.filter((instrument) => allowed.has(instrument.instrumentType))
       },
     },
 
@@ -187,6 +183,16 @@ export function createMarketDataProvider(options: MarketDataProviderOptions): Ma
       async fetch(query: BarQuery) {
         assertCapability(query.instrument, 'bars')
         const timeZone = getInstrumentTimeZone(query.instrument)
+        let limit = query.limit
+        // 源探测约束也覆盖旧布局中的品种快照；品种可进一步收紧单页上限。
+        for (const capability of [
+          runtimeSource.capabilities?.bars,
+          query.instrument.capabilities.bars,
+        ]) {
+          if (capability?.maxBarsPerRequest !== undefined) {
+            limit = Math.min(limit, capability.maxBarsPerRequest)
+          }
+        }
         const result = await transport.fetchBars(
           {
             sourceId: source.id,
@@ -199,7 +205,7 @@ export function createMarketDataProvider(options: MarketDataProviderOptions): Ma
             period: query.period,
             adjustment: query.adjustment,
             barAggregation: query.barAggregation,
-            limit: query.limit,
+            limit,
             ...(query.beforeTimestamp === undefined
               ? {}
               : { beforeTimestamp: query.beforeTimestamp }),

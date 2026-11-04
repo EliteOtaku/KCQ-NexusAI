@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import type { SymbolSpec } from '@/controllers/types'
 import { ComparisonCommands } from '@/engine/data/comparisonCommands'
 import { ToolInputValidationError } from '@/foundation/agent/chartToolRegistry'
+import { AGENT_DRAWING_COLOR_VALUES } from '@/foundation/tokens/agentDrawingColors'
 import { getRegisteredChartTools } from '../impl/chartAgentController'
 
 describe('Chart Agent @Tool registry', () => {
@@ -77,7 +78,12 @@ describe('Chart Agent @Tool registry', () => {
   it('rejects label maps whose keys are not rendered indices', () => {
     const create = getRegisteredChartTools().find((tool) => tool.config.name === 'drawing_create')!
 
-    const base = { kind: 'horizontal-line', paneId: 'main', anchors: [{ price: 222.02 }] } as const
+    const base = {
+      kind: 'horizontal-line',
+      paneId: 'main',
+      anchors: [{ price: 222.02 }],
+      style: { stroke: AGENT_DRAWING_COLOR_VALUES[0] },
+    } as const
 
     // 序号以外的键必须在校验层被拒，不能再让畸形标签进入领域层。
     expect(() =>
@@ -118,7 +124,7 @@ describe('Chart Agent @Tool registry', () => {
     }
   })
 
-  it('rejects unknown assetClass as a comparison routing filter', async () => {
+  it('rejects unknown instrumentType as a comparison routing filter', async () => {
     const create = getRegisteredChartTools().find(
       (tool) => tool.config.name === 'comparison_create',
     )!
@@ -126,10 +132,10 @@ describe('Chart Agent @Tool registry', () => {
     await expect(
       create.execute(
         {},
-        { symbol: '000012', assetClass: 'unknown' },
+        { symbol: '000012', instrumentType: 'unknown' },
         { signal: new AbortController().signal, progress: () => undefined },
       ),
-    ).rejects.toThrow('/assetClass')
+    ).rejects.toThrow('/instrumentType')
   })
 
   it('auto-records the real method name and owns its primitive host', async () => {
@@ -154,7 +160,7 @@ describe('Chart Agent @Tool registry', () => {
             sourceId: 'mock',
             symbol,
             name: symbol,
-            assetClass: 'stock',
+            instrumentType: 'stock',
             exchange: 'SSE',
             sessionId: 'CN',
             capabilities: {},

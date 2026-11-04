@@ -117,9 +117,7 @@ export function ChartContextMenu({
                   type="button"
                   className="nx-ctx-menu__item"
                   role="menuitem"
-                  onClick={() =>
-                    run(() => shell.ctrl?.addIndicator(definition.id, definition.role))
-                  }
+                  onClick={() => run(() => shell.ctrl?.addIndicator(definition.id))}
                 >
                   {definition.label}
                 </button>

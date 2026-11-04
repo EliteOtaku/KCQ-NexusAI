@@ -1,3 +1,5 @@
+/** Pane 表面布局：DOM 层序复用 Scene 合成目标契约。 */
+import { SCENE_TARGET_Z } from '@/rendering/scene/types.js'
 import { GENERIC_ERROR_CODES, KLineChartError } from '../../../../errors.js'
 import type { PaneRole } from '../../../../foundation/plugin/index.js'
 import { ScaleType } from '../../../../foundation/types/scaleType.js'
@@ -32,12 +34,8 @@ export interface PaneLayoutDependencies {
 /**
  * Pane DOM / PaneRenderer 投影器 + 布局算法。
  *
- * SSOT: kernel.pane（paneRatios / paneSpecs）。
- * 本地 _internalPaneRatios / _paneSpecs 仅是算法工作副本：
- * - 入站: projectState(kernel snapshot)
- * - 出站: 每次突变结束必须 commitLayout() → kernel
- * projectState 必须 layoutPanes({ commit: false })，禁止回写抖动。
- * 禁止在未 commit 的中间态对外暴露为业务真相。
+ * 配置只来自 kernel.pane；本地规格与比例仅供像素布局计算。
+ * 容器变化和内容加载均为单向投影，只有用户拖动边界才提交新权重。
  */
 export class ChartPaneLayout {
   private deps: PaneLayoutDependencies
@@ -108,18 +106,33 @@ export class ChartPaneLayout {
    */
   private createSurfaceFactory(
     spec: PaneSpec,
+    mainCanvas: HTMLCanvasElement,
     overlayCanvas: HTMLCanvasElement,
     isMain: boolean,
   ): PaneSurfaceFactory {
     const leftAxisHost = this.deps.getDom().leftAxisLayer
     return {
       leftAxisHostMeasurable: leftAxisHost !== undefined,
+      createMainGpuCanvas: () => {
+        // GPU 直接呈现主图带几何；2D 主画布在其上承载文字与 ctx 图层。
+        const gpuCanvas = document.createElement('canvas')
+        gpuCanvas.id = `${spec.id}-main-gpu`
+        gpuCanvas.className = 'main-canvas-gpu'
+        gpuCanvas.style.position = 'absolute'
+        gpuCanvas.style.left = '0'
+        gpuCanvas.style.top = '0'
+        gpuCanvas.style.pointerEvents = 'none'
+        gpuCanvas.style.zIndex = String(SCENE_TARGET_Z.main)
+        mainCanvas.before(gpuCanvas)
+        return gpuCanvas
+      },
       createDrawingCanvas: () => {
         // 正式图元与动态覆盖分开保存像素，同 z-index 按 DOM 顺序叠放在行情之上。
         const drawingCanvas = document.createElement('canvas')
         drawingCanvas.id = `${spec.id}-drawing`
         drawingCanvas.className = 'drawing-canvas'
         drawingCanvas.style.cssText = overlayCanvas.style.cssText
+        drawingCanvas.style.zIndex = String(SCENE_TARGET_Z.drawing)
         overlayCanvas.before(drawingCanvas)
         return drawingCanvas
       },
@@ -175,7 +188,7 @@ export class ChartPaneLayout {
       mainCanvas.style.position = 'absolute'
       mainCanvas.style.left = '0'
       mainCanvas.style.top = '0'
-      mainCanvas.style.zIndex = '0'
+      mainCanvas.style.zIndex = String(SCENE_TARGET_Z.main)
 
       overlayCanvas.id = `${spec.id}-overlay`
       overlayCanvas.className = 'overlay-canvas'
@@ -184,7 +197,7 @@ export class ChartPaneLayout {
       overlayCanvas.style.top = '0'
       overlayCanvas.style.pointerEvents = 'none'
       overlayCanvas.style.backgroundColor = 'transparent'
-      overlayCanvas.style.zIndex = '2'
+      overlayCanvas.style.zIndex = String(SCENE_TARGET_Z.overlay)
 
       return new PaneRenderer(
         { mainCanvas, overlayCanvas, yAxisCanvas, yAxisOverlayCanvas },
@@ -195,7 +208,7 @@ export class ChartPaneLayout {
           yPaddingPx: this.deps.getOption().yPaddingPx,
           priceLabelWidth: this.deps.getOption().priceLabelWidth,
         },
-        this.createSurfaceFactory(spec, overlayCanvas, isMain),
+        this.createSurfaceFactory(spec, mainCanvas, overlayCanvas, isMain),
       )
     })
 
@@ -214,23 +227,6 @@ export class ChartPaneLayout {
       ...spec,
       role: this.paneRenderers[index]?.getPane().role ?? spec.role,
     }))
-  }
-
-  private syncPaneRatiosToSpecs(): void {
-    const visible = this._paneSpecs.filter((p) => p.visible !== false)
-    const visibleSum = visible.reduce(
-      (s, p) => s + (this._internalPaneRatios.get(p.id) ?? p.ratio ?? 0),
-      0,
-    )
-    const safeVisibleSum = visibleSum > 0 ? visibleSum : 1
-
-    this._paneSpecs = this._paneSpecs.map((spec) => {
-      const ratio = this._internalPaneRatios.get(spec.id) ?? spec.ratio ?? 0
-      if (spec.visible === false) {
-        return { ...spec, ratio }
-      }
-      return { ...spec, ratio: ratio / safeVisibleSum }
-    })
   }
 
   private normalizeVisiblePaneRatios(specs: PaneSpec[]): void {
@@ -305,7 +301,7 @@ export class ChartPaneLayout {
     return this.deps.viewport.readonly.viewport.peek()
   }
 
-  layoutPanes(options?: { commit?: boolean }) {
+  layoutPanes() {
     this.syncRatiosFromKernel()
 
     const vp = this.peekViewport()
@@ -340,7 +336,8 @@ export class ChartPaneLayout {
       const h = paneHeights[i] ?? 1
 
       pane.setLayout(y, h)
-      pane.setPadding(opt.yPaddingPx, opt.yPaddingPx)
+      // 图例以半透明背景叠加显示，价格坐标只保留配置的视觉留白。
+      pane.setContentInsets(opt.yPaddingPx, opt.yPaddingPx)
 
       renderer.resize(vp.plotWidth, h, vp.dpr, y)
       this.syncLeftAxis(renderer)
@@ -350,17 +347,6 @@ export class ChartPaneLayout {
 
       y += h + gap
     }
-
-    const finalAvailable = Math.max(1, availableH)
-    for (const spec of visibleSpecs) {
-      const renderer = this.paneRenderers.find((r) => r.getPane().id === spec.id)
-      if (!renderer) continue
-      const h = renderer.getPane().height
-      this._internalPaneRatios.set(spec.id, h / finalAvailable)
-    }
-    this.normalizeVisiblePaneRatios(visibleSpecs)
-    this.syncPaneRatiosToSpecs()
-    if (options?.commit !== false) this.commitLayout()
   }
 
   /** 将 kernel pane snapshot 单向投影到 DOM/renderer，不反向写 state。 */
@@ -385,7 +371,7 @@ export class ChartPaneLayout {
     }))
     this._internalPaneRatios = new Map(Object.entries(ratios))
     if (definitionsChanged) this.initPanes()
-    this.layoutPanes({ commit: false })
+    this.layoutPanes()
   }
 
   /**

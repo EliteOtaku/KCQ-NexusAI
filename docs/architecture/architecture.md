@@ -1,6 +1,6 @@
 # 系统架构
 
-> 更新日期：2026-09-12 | 适用范围：整个 monorepo（`packages/*`）与外部行情后端
+> 更新日期：2026-11-03 | 适用范围：整个 monorepo（`packages/*`）与外部行情后端
 
 本文描述 KLineChartQuant 的整体架构：包边界、核心引擎的分层、运行时数据流，
 以及外部行情后端的接入方式。渲染主链路的细节以
@@ -13,16 +13,17 @@ UI 框架，通过统一的 `ChartController` 对外暴露只读信号（Readonl
 Vue / React / Angular 绑定层只负责容器挂载、输入事件转发与响应式桥接。AI Agent 通过与 UI
 相同的 `@Tool` 原语直接驱动图表，共享同一状态源，是项目的一等公民。
 
-React 绑定（`@363045841yyt/klinechart-react`）的 `KLineChartWC` 直接封装由 Vue 包打包的
-`<kline-chart>` Web Component（`@363045841yyt/klinechart/web-component`），因此 React 的
-UI 接入路径是 Vue → Web Component → 控制器，而不是独立的原生 UI。
+React 绑定（`@363045841yyt/klinechart-react`）的 `KLineChartWC` 直接封装由
+`@363045841yyt/klinechart-web-component` 提供的 `<kline-chart>` 自定义元素（独立发布的单文件产物），
+因此 React 的 UI 接入路径是 Web Component → 控制器，而不是独立的原生 UI。
 
 ```mermaid
 flowchart TB
     subgraph app["UI 层 / 框架绑定"]
         UI["UI 层"]
         VuePkg["@363045841yyt/klinechart<br/>Vue 3 组件 + useChart"]
-        ReactPkg["@363045841yyt/klinechart-react<br/>KLineChartWC（Vue Web Component 封装）"]
+        WCPkg["@363045841yyt/klinechart-web-component<br/>&lt;kline-chart&gt; 自定义元素"]
+        ReactPkg["@363045841yyt/klinechart-react<br/>KLineChartWC（Web Component 封装）"]
         AngularPkg["@363045841yyt/klinechart-angular"]
         Agent["AI Agent"]
         AgentRt["@363045841yyt/klinechart-agent-runtime"]
@@ -50,7 +51,8 @@ flowchart TB
     UI --> VuePkg
     UI --> ReactPkg
     UI --> AngularPkg
-    VuePkg -->|"Web Component 接入"| ReactPkg
+    VuePkg -->|"源码是 WC 的构建输入"| WCPkg
+    WCPkg --> ReactPkg
     Agent --> AgentRt
     VuePkg --> Ctl
     ReactPkg --> Ctl
@@ -89,16 +91,53 @@ flowchart TB
 | 插件子系统 | 插件注册、钩子、事件总线、渲染器插件管理 | 业务绘制 |
 | 行情后端（外部） | 行情数据服务 | 前端逻辑 |
 
+### 1.2 适配层边界与设计理由
+
+框架绑定只负责容器挂载与卸载、输入事件转发、core Signal 到框架响应式的桥接（Vue `shallowRef`、React `useSyncExternalStore`、Angular signal）。业务状态与绘制归 core，适配层不持有状态副本。
+
+**Signal + Controller，而不是单一 Reactive 类**
+
+- 框架无关：core 不 import 任何框架。
+- SSR 安全：模块作用域不访问 DOM，挂载推迟到 `onMounted` / `useEffect` / `isPlatformBrowser`。
+- 可测试：Signal 可脱离 DOM 创建，`ChartController` 可用 mock 工厂替换。
+- 分层清晰：适配层拥有响应式桥接，core 拥有业务逻辑。
+
+**`_chart` 逃生舱已删除**
+
+`ChartController` 曾用 `_chart: unknown` 把内部 `Chart` 暴露给绘图交互。现在由窄接口 `DrawingChartAdapter`（`DrawingDocumentPort & DrawingViewportPort & DrawingSessionPort`）承担：只包含绘图需要的方法，不暴露 renderer、PluginHost 或引擎内部状态；`ChartController` 实现该接口并委托到 `chart.*`。
+
+**部分引擎工具从 controllers 再导出**
+
+`zoomLevelToKWidth()`、`kGapFromKWidth()` 在控制器创建前就要用于计算初始布局。统一从 `@363045841yyt/klinechart-core/controllers` 导出，避免各适配器深入 `engine/*` 内部路径。
+
+**SSR 约束**
+
+- core 在模块求值期会访问浏览器全局（config 读取 `localStorage`；有 DOM 时创建 canvas 并 `getContext`），静态 `import` 会进入服务端求值路径。
+- 直连 core 的适配器必须在客户端动态 `import()` core；服务端只输出空容器，挂载前返回 `null`。
+- 控制器创建是异步的：卸载或 StrictMode 双挂载时，迟到的控制器在 resolve 后立即 `dispose()`。挂载参数只在首次挂载读取，之后通过控制器方法增量同步。
+
+**适配器契约测试**
+
+适配器只测桥接，不实例化完整引擎：用 mock `ChartControllerFactory` 验证生命周期、signal 桥接与错误处理。
+
+- Vue：`__setControllerFactory(factory)` 覆盖，测试后重置为 `null`；生产入口在 import 时注入 `createChartController`。
+- React：`<KLineChart factory={mockFactory} />` 或 `useKLineChart(ref, { factory })`。
+- Angular：`provideKLineChart({ factory: mockFactory })`。
+
+测试文件：`packages/vue/src/__tests__/contract.test.ts`、`packages/angular/src/__tests__/contract.test.ts`、`packages/react/src/__tests__/KLineChart.test.tsx`。
+
 ## 2. 包与依赖
 
 | 包 | 路径 | 说明 | 发布名 |
 |---|---|---|---|
 | Core engine | `packages/core` | 无头图表引擎 + 控制器 | `@363045841yyt/klinechart-core` |
 | Vue bindings | `packages/vue` | Vue 3 组件 + 组合式函数 | `@363045841yyt/klinechart` |
-| React bindings | `packages/react` | React 绑定：`KLineChartWC` 经 Vue 打包的 `<kline-chart>` Web Component 接入 | `@363045841yyt/klinechart-react` |
+| Web Component | `packages/web-component` | 单文件 `<kline-chart>` 自定义元素，供非 Vue 宿主使用 | `@363045841yyt/klinechart-web-component` |
+| Script editor page | `packages/script-editor` | 独立编辑器窗口的自包含页面（AGPL），由图表包按需加载 | `@363045841yyt/klinechart-script-editor` |
+| React bindings | `packages/react` | React 绑定：`KLineChartWC` 经 `<kline-chart>` Web Component 接入 | `@363045841yyt/klinechart-react` |
 | Angular bindings | `packages/angular` | Angular 绑定 | `@363045841yyt/klinechart-angular` |
 | Agent runtime | `packages/agent-runtime` | 框架无关的 Agent 运行时（Pi 编排 + 宿主契约） | `@363045841yyt/klinechart-agent-runtime` |
-| Desktop Electron | `packages/desktop-electron` | 本地桌面应用（不发布） | — |
+| Desktop Electron | `packages/desktop-electron` | 本地桌面应用（不发布），随包分发 gotdx / binance 两个 Go connector（ADR 0012） | — |
 
 依赖方向：各绑定包通过 `workspace:*` 依赖 core；core 不依赖任何框架。
 构建顺序遵循 `pnpm build:packages`（core → vue）。
@@ -179,11 +218,13 @@ flowchart TB
   非重入地推进帧快照。
 - `prepareFrameData` 从 viewport 派生可见范围与 K 线几何，`sealFrameGeometry` 在绘制前
   封存本帧几何，交互命中与屏幕图形同代。
-- `Scene` / `Layer` 按 paneRole / role / z 排序分发 paint；Layer role 分为
+- `Scene` / `Layer` 按 pane / role / z 排序分发 paint；Layer role 分为
   background、primary、indicator、component、drawing、overlay。
-- 业务层只依赖统一 `Renderer` 契约（`drawInstances` / `drawLines`），由
+- 业务层只依赖统一 `Renderer` 契约（`primitives` 原语后端），由
   `RendererHost` 决定实际后端：WebGPU → WebGL2 → Canvas2D 自动降级，
   GPU 返回 `false` 时业务层必须完整执行 Canvas2D fallback。
+- Layer 分两类：`draw-list` 拿不到 ctx，只提交原语，可与相邻图层合并成一次合成；
+  `context` 保留 ctx，Scene 在其前后立即合成。
 - DPR 以物理像素执行、逻辑像素输入，DPR 的唯一来源是 viewport state。
 
 ### 3.6 插件子系统
@@ -201,7 +242,7 @@ flowchart TB
 
 ### 4.1 数据加载
 
-1. 绑定层调用 `controller.setSymbols(spec)` 或注入 `customData`。
+1. 绑定层调用 `controller.setSymbols(spec)`，行情统一由 Provider 链路加载。
 2. `Chart` 通过 `ChartDataManager` 在 `SeriesRepository` 中定位 / 创建对应 Buffer。
 3. 图表与 Agent 共用图表实例级 `MarketDataCache`；它根据 latest 或时间范围处理缓存覆盖、
    Provider cursor 分页、重试与请求去重。
@@ -212,9 +253,9 @@ flowchart TB
 
 1. 输入（缩放、滚动、数据变更）调用 `scheduleDraw(level)`。
 2. `FrameTransaction` 封存输入 → `prepareFrameData` 生成几何快照 → `sealFrameGeometry`。
-3. 按 pane 执行 `Scene.paintPane`，Layer 通过统一 `Renderer` 绘制；
-   GPU 路径失败时业务层回退 Canvas2D。
-4. `Renderer.endFrame()` 结束帧（WebGPU 每帧单次 `queue.submit`），随后绘制时间轴层。
+3. `Scene.paint` 按 pane 分发 Layer：每个绘制目标一个合成器，连续图层累积成一批，
+   帧末一次落盘；GPU 路径失败时整批回退 Canvas2D。
+4. 随后绘制时间轴层。
 
 ### 4.3 交互
 

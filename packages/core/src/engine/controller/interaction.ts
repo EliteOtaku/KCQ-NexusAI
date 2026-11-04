@@ -8,11 +8,9 @@ import { isTimeShareDataView } from '../../foundation/types/chartView.js'
 import type { KLineData } from '../../foundation/types/price.js'
 import { isOnRightHalf } from '../../foundation/utils/viewportSide.js'
 import type { Chart } from '../chart/index.js'
-import type { CustomMarkerEntity, MarkerEntity } from '../marker/registry.js'
 import { UpdateLevel } from '../pane/index.js'
 import type { ScaleXSnapshot } from '../scale/index.js'
 import type { InteractionSnapshot, InteractionStateModule } from '../state/interactionState.js'
-import { MarkerInteractionState } from './markerInteraction.js'
 import { PinchTracker } from './pinchTracker.js'
 import { computeTooltipPosition, type TooltipPositionMode } from './tooltipPosition.js'
 
@@ -81,7 +79,6 @@ export class InteractionController {
    * 仅 InteractionController hover 读取；绘制走 ChartRenderer FrameContext。
    */
   private frameView: ScaleXSnapshot | null = null
-  private markerState = new MarkerInteractionState()
   private lastHoverRenderKey = ''
   private useTooltipAnchorPositioning = false
   private tooltipPositionMode: TooltipPositionMode = 'crosshair'
@@ -161,9 +158,12 @@ export class InteractionController {
 
   /** 新输入、视图重置及销毁时立即取消惯性。 */
   stopInertia(): void {
+    const wasActive = this.inertiaFrame !== null
     if (this.inertiaFrame !== null) cancelAnimationFrame(this.inertiaFrame)
     this.inertiaFrame = null
     this.panSamples = []
+    // 惯性也属于持续交互；结束后让统一轴宽提交入口释放保留的宽度。
+    if (wasActive) this.chart.scheduleDraw(UpdateLevel.Overlay)
   }
 
   private samplePan(time: number): void {
@@ -253,8 +253,6 @@ export class InteractionController {
       this.activePaneId ?? 'n',
       this._state.readonly.hoveredRightAxisPaneId.peek() ?? 'n',
       this._state.readonly.hoveredSeparatorUpperPaneId.peek() ?? 'n',
-      this._state.readonly.hoveredMarkerId.peek() ?? 'n',
-      this._state.readonly.hoveredCustomMarker.peek()?.id ?? 'n',
       crosshairX,
       crosshairY,
     ].join('|')
@@ -285,17 +283,7 @@ export class InteractionController {
     const location = this.getPlotPointerLocation(e.clientX, e.clientY)
     if (!location) return
 
-    const { mouseX, mouseY } = location
-    const scrollLeft = this.chart.kernel.viewport.readonly.scrollLeftLogical.peek()
-
-    const markerManager = this.chart.markers.getManager()
-    const worldX = scrollLeft + mouseX
-    const hitMarker = markerManager.hitTest(worldX, mouseY, 3)
-
-    if (hitMarker) {
-      this.markerState.handleClick(hitMarker)
-      return
-    }
+    const { mouseY } = location
 
     const separatorUpperPaneId = this.hitTestPaneSeparator(mouseY)
     if (separatorUpperPaneId) {
@@ -514,7 +502,7 @@ export class InteractionController {
         const clamped = Math.min(Math.max(0, this.scrollStartX + deltaX), this._cachedMaxScrollLeft)
         const dpr = this.chart.getCurrentDpr()
         if (this.chart.kernel.viewport.actions.scrollTo(Math.round(clamped * dpr) / dpr)) {
-          // 平移期间隐藏十字线、tooltip 与 marker hover，但保留取值索引，Legend 数值不随视口变化。
+          // 平移期间隐藏十字线与 tooltip，但保留取值索引，Legend 数值不随视口变化。
           this.clearHover(true)
           // 程序化滚动不再依赖原生 scroll 回调驱动重绘；统一交给 ChartRenderer 帧事务。
           this.chart.scheduleDraw()
@@ -694,18 +682,6 @@ export class InteractionController {
     return this._state.readonly.isDragging.peek()
   }
 
-  setOnMarkerHover(callback: (marker: MarkerEntity | null) => void) {
-    this.markerState.setOnMarkerHover(callback)
-  }
-
-  setOnMarkerClick(callback: (marker: MarkerEntity) => void) {
-    this.markerState.setOnMarkerClick(callback)
-  }
-
-  setOnCustomMarkerHover(callback: (marker: CustomMarkerEntity | null) => void) {
-    this.markerState.setOnCustomMarkerHover(callback)
-  }
-
   /** 命中可拖拽分隔线（返回上方 paneId） */
   private hitTestPaneSeparator(mouseY: number): string | null {
     const paneRenderers = this.chart.getPaneRenderers()
@@ -797,6 +773,8 @@ export class InteractionController {
     if (releaseCapture && pointerId !== null && captureElement?.hasPointerCapture(pointerId)) {
       captureElement.releasePointerCapture(pointerId)
     }
+    // 即使松手后没有 hover 或数据变化，也需要一次帧提交来统一收缩纵轴。
+    this.chart.scheduleDraw(UpdateLevel.Overlay)
   }
 
   /**
@@ -809,9 +787,7 @@ export class InteractionController {
     this._state.actions.setRightAxisHover(null)
     this._state.actions.updateCrosshair(null, null, keepValueIndex ? undefined : null)
     this._state.actions.updateHover(null, null)
-    this._state.actions.updateMarkerHover(null, null, null)
     this.chart.clearDrawingHover()
-    this.markerState.clearAll(this.chart.markers.getManager())
   }
 
   private clearSeparatorState() {
@@ -850,7 +826,7 @@ export class InteractionController {
    * 指针悬停检测（coordinator）
    *
    * 每次指针移动时触发，按优先级依次检测：
-   * 边界 → pane 分隔器 → marker → K 线 bar → 十字线定位 → candle 命中 → tooltip。
+   * 边界 → pane 分隔器 → K 线 bar → 十字线定位 → candle 命中 → tooltip。
    * 每个步骤都可能提前 return，无需执行后续检测。
    */
   /** @internal 公开给外部在合适的时机触发十字线重算（如封存新视图快照之后） */
@@ -859,7 +835,6 @@ export class InteractionController {
     if (!ctx) return
 
     if (this.handleSeparatorHit(ctx)) return
-    if (this.handleMarkerHit(ctx)) return
 
     const bar = this.findNearestBar(ctx)
     if (!bar) {
@@ -945,32 +920,6 @@ export class InteractionController {
     if (separatorUpperPaneId) {
       this._state.actions.updateCrosshair(null, null, null)
       this._state.actions.updateHover(null, null)
-      return true
-    }
-    return false
-  }
-
-  /**
-   * 检测 marker 悬停
-   *
-   * 若指针悬浮在 marker 上，清除十字线状态并返回 true。
-   */
-  private handleMarkerHit(ctx: HoverContext): boolean {
-    const markerManager = this.chart.markers.getManager()
-    const result = this.markerState.updateHoverFromPoint(
-      ctx.worldX,
-      ctx.mouseX,
-      ctx.mouseY,
-      markerManager,
-    )
-    this._state.actions.updateMarkerHover(
-      result.hitMarkerId,
-      result.hitMarkerData,
-      result.hitCustomMarker,
-    )
-    if (result.hit) {
-      this._state.actions.updateCrosshair(null, null, null)
-      this._state.actions.setHoveredIndex(null)
       return true
     }
     return false
@@ -1147,7 +1096,6 @@ export class InteractionController {
     this.pinchTracker.reset()
     this._state.actions.updateCrosshair(null, null, null)
     this._state.actions.updateHover(null, null)
-    this.markerState.reset()
     this.frameView = null
     this.lastHoverRenderKey = ''
   }

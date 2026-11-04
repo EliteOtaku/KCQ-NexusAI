@@ -36,10 +36,11 @@ export async function searchInstruments(
   registry: MarketDataProviderRegistry,
   request: InstrumentSearchRequest,
 ): Promise<ReadonlyArray<InstrumentDescriptor>> {
+  // 省略 sourceIds 表示查询全部已启用源；显式空数组表示不查任何源。
   const selectedSourceIds = request.sourceIds?.map((sourceId) => sourceId.trim()).filter(Boolean)
-  const selectedSources = selectedSourceIds?.length ? new Set(selectedSourceIds) : undefined
+  const selectedSources = selectedSourceIds === undefined ? undefined : new Set(selectedSourceIds)
   const catalogProviders = registry
-    .getEnabledByPriority()
+    .getSearchableByPriority()
     .filter((provider) => provider.catalog !== undefined)
   const availableSourceIds = catalogProviders.map((provider) => provider.source.id)
   if (selectedSources) {
@@ -64,7 +65,7 @@ export async function searchInstruments(
       provider.catalog!.search({
         keyword: request.keyword,
         limit: request.limit,
-        assetClasses: request.assetClasses,
+        instrumentTypes: request.instrumentTypes,
         signal: request.signal,
       }),
     ),

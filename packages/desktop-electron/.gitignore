@@ -1,5 +1,6 @@
 out/
 dist/
 node_modules/
-playwright-report/
 test-results/
+# 由 scripts/build-backends.mjs 生成的 Go connector 二进制，不进版本库
+resources/backends/

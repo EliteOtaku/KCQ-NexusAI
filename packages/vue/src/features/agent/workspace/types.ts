@@ -23,7 +23,6 @@ export interface AgentWorkspaceState {
   previousRuns: AgentRunView[]
   provider: ProviderStatusView
   error: AgentErrorView | null
-  canUndoTurn: boolean
   announcement: string
 }
 
@@ -37,6 +36,15 @@ export type AgentWorkspaceAvailability =
 export interface AgentPanelWidthStorage {
   load(): number | null | undefined
   save(width: number): void
+}
+
+/** Agent 面板的停靠侧。 */
+export type AgentPanelSide = 'left' | 'right'
+
+/** Agent 面板停靠侧的持久化读写端口。 */
+export interface AgentPanelSideStorage {
+  load(): AgentPanelSide | null | undefined
+  save(side: AgentPanelSide): void
 }
 
 /** Agent 工作区的用户偏好。 */

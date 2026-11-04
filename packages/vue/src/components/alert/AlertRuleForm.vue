@@ -316,7 +316,7 @@
 
     <!-- 操作按钮 -->
     <div class="rule-form-actions">
-      <button type="button" class="rule-form-btn rule-form-btn--cancel" @click="$emit('cancel')">取消</button>
+      <button type="button" class="rule-form-btn rule-form-btn--cancel" @click="emit('cancel')">取消</button>
       <button type="button" class="rule-form-btn rule-form-btn--save" :disabled="!isValid" @click="handleSave">
         <svg
           viewBox="0 0 24 24"
@@ -340,13 +340,13 @@
     CrossDirection,
     IndicatorCrossPairDirection,
   } from '@363045841yyt/klinechart-core'
+  import ToggleSwitch from '@vue-src/components/common/ToggleSwitch.vue'
   import { computed, reactive, ref } from 'vue'
   import IconTablerArrowDown from '~icons/tabler/arrow-down'
   import IconTablerArrowUp from '~icons/tabler/arrow-up'
   import IconTablerArrowsUpDown from '~icons/tabler/arrows-up-down'
   import IconTablerMinus from '~icons/tabler/minus'
   import IconTablerPlus from '~icons/tabler/plus'
-  import ToggleSwitch from '../common/ToggleSwitch.vue'
   import AlertDirectionButtons from './AlertDirectionButtons.vue'
 
   const props = defineProps<{ rule?: AlertRule }>()
@@ -585,20 +585,12 @@
     font-size: 13px;
     outline: none;
     box-sizing: border-box;
-    transition:
-      border-color 0.15s,
-      box-shadow 0.15s;
     font-variant-numeric: tabular-nums;
   }
 
   .rule-form-input::placeholder {
     color: var(--klc-color-ui-muted);
     opacity: 0.7;
-  }
-
-  .rule-form-input:focus {
-    border-color: var(--klc-color-ui-accent);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--klc-color-ui-accent) 24%, transparent);
   }
 
   /* 隐藏原生 number 步进器，改由自定义 stepper 提供加减 */
@@ -624,14 +616,6 @@
     background: var(--klc-color-ui-input);
     overflow: hidden;
     box-sizing: border-box;
-    transition:
-      border-color 0.15s,
-      box-shadow 0.15s;
-  }
-
-  .rule-form-stepper:focus-within {
-    border-color: var(--klc-color-ui-accent);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--klc-color-ui-accent) 24%, transparent);
   }
 
   .rule-form-stepper-field {
@@ -652,11 +636,6 @@
     border-radius: 0;
     background: transparent;
     text-align: center;
-  }
-
-  .rule-form-stepper .rule-form-input:focus {
-    border-color: var(--klc-color-ui-border);
-    box-shadow: none;
   }
 
   .rule-form-stepper-field .rule-form-input {

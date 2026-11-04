@@ -10,24 +10,28 @@
  * 不是绘制管线的一部分。绘制由 ChartRenderer 完成，Chart 仅负责代理调用并维护 runtimeProjection（批量投影）屏障。
  */
 
+import type { Bar, IndicatorMarketContext } from '@363045841yyt/klinechart-plot-contracts'
+import { createFootprintRuntime } from '@/components/footprint/runtime/impl/createFootprintRuntime.js'
+
 import {
   CHART_RENDERERS_SERVICE,
   type ChartRendererAccess,
 } from '../../../controllers/renderers/index.js'
 import type { ChartFrameCaptureContext } from '../../../controllers/screenshot/types.js'
 import {
-  type CustomDataSource,
   isTimeSharePeriod,
   type SymbolInfo,
   type SymbolSpec,
   TIME_SHARE_PERIOD,
 } from '../../../controllers/types.js'
-import type { DataBuffer } from '../../../data/buffer/impl/dataBuffer.js'
 import type { MarketDataCache } from '../../../data/buffer/impl/marketDataCache.js'
 import { resolveMarketDataCacheMaxBytes } from '../../../data/buffer/impl/marketDataPolicy.js'
-import type { BarAggregation } from '../../../data/provider/types.js'
+import {
+  defaultMarketDataContext,
+  type MarketDataContext,
+} from '../../../data/management/impl/context.js'
 import { lookupInstrumentsBySymbol } from '../../../data/provider/impl/instrumentSearch.js'
-import { marketDataProviderRegistry } from '../../../data/provider/impl/registry.js'
+import type { MarketDataProviderRegistry } from '../../../data/provider/impl/registry.js'
 import { AUTO_SOURCE_ID } from '../../../data/provider/types.js'
 import { GENERIC_ERROR_CODES, KLineChartError } from '../../../errors.js'
 import { createAlertController } from '../../../features/alerts/impl/createAlertController.js'
@@ -56,19 +60,19 @@ import {
 } from '../../../foundation/plugin/index.js'
 import {
   batch,
+  computed,
   createSignal,
   effect,
   type ReadonlySignal,
   type Signal,
   type WritableSignal,
 } from '../../../foundation/reactivity/signal.js'
-import { getFont } from '../../../foundation/tokens/fonts.js'
-import type { KLineData, TimeShareData } from '../../../foundation/types/price.js'
+import { resolveThemeColors } from '../../../foundation/tokens/index.js'
+import type { KLineData } from '../../../foundation/types/price.js'
 import { AXIS_TYPE_NONE, ScaleType } from '../../../foundation/types/scaleType.js'
 import type { MarketSessionConfig } from '../../../foundation/utils/sessionTimeLabels.js'
 import {
   createDefaultRendererHostSync,
-  getVisibleCanvas,
   type RendererBackend,
   type RendererHost,
 } from '../../../rendering/render/index.js'
@@ -98,8 +102,8 @@ import {
 import { ChartRenderer, mergeUpdateLevel } from '../../frame/index.js'
 import { ChartIndicatorManager } from '../../indicators/chartIndicatorManager.js'
 import { getRegisteredIndicatorDefinition } from '../../indicators/indicatorDefinitionRegistry.js'
+import { toPlotBar } from '../../indicators/plotBars.js'
 import { LegendManager } from '../../legend/impl/LegendManager.js'
-import type { CustomMarkerEntity, MarkerManager } from '../../marker/registry.js'
 import { ChartPaneLayout, type PaneRenderer, UpdateLevel } from '../../pane/index.js'
 import { DEFAULT_PRICE_LABEL_WIDTH, MAIN_PANE_ID, type PaneSpec } from '../../pane/types.js'
 import { createLegendDomRenderer } from '../../renderers/legend/impl/createLegendDomRenderer.js'
@@ -119,15 +123,11 @@ import type {
 } from '../types.js'
 import { ChartDrawingFacade } from './facade/chartDrawingFacade.js'
 import { ChartIndicatorFacade } from './facade/chartIndicatorFacade.js'
-import { ChartMarkerFacade } from './facade/chartMarkerFacade.js'
 import { ChartPaneFacade } from './facade/chartPaneFacade.js'
 import { ChartThemeFacade } from './facade/chartThemeFacade.js'
 import { ChartZoomFacade } from './facade/chartZoomFacade.js'
 
 export type { InteractionSnapshot }
-
-const RIGHT_AXIS_FONT = getFont(12)
-const RIGHT_AXIS_TEXT_PADDING = 12
 
 /** 取指标投影序列的最后一个有限数值；支持数组与按周期/字段分组的对象。 */
 function lastSeriesValue(series: unknown): number | null {
@@ -146,6 +146,8 @@ function lastSeriesValue(series: unknown): number | null {
 export class Chart {
   private dom: ChartDom
   private dataManager: ChartDataManager
+  /** 创建时配置的初始缩放级别；`resetChart` 恢复到该档位。 */
+  private readonly initialZoomLevel: number
 
   /** StateKernel — single source of truth for all chart state */
   readonly kernel: ChartStateKernel
@@ -154,6 +156,8 @@ export class Chart {
   /** 唯一的 renderer 程序滚动与原生 scroll 回流协调器。 */
   private viewportScrollBridge: ViewportScrollBridge
   private layoutManager: ChartPaneLayout
+  /** ResizeObserver 只置位；会清空像素的表面尺寸变更由绘制帧统一提交。 */
+  private viewportResizePending = false
   private get paneRenderers(): PaneRenderer[] {
     return this.layoutManager.getPaneRenderers()
   }
@@ -192,9 +196,6 @@ export class Chart {
     return this.drawingCommands.history.redo()
   }
 
-  /** 标记领域公开 API。 */
-  readonly markers: ChartMarkerFacade
-
   /** Pane 领域公开 API。 */
   readonly panes: ChartPaneFacade
 
@@ -217,6 +218,8 @@ export class Chart {
   private disposeActiveRendererProjection: (() => void) | null = null
   private disposeLeftAxisProjection: (() => void) | null = null
   private disposeTradeDemand: (() => void) | null = null
+  private footprintRuntime: ReturnType<typeof createFootprintRuntime>
+  private disposeFootprintDraw: (() => void) | null = null
   private disposeSettingsProjection: (() => void) | null = null
   /** 图例领域操作与展示投影的唯一入口。 */
   readonly legend: LegendManager
@@ -229,11 +232,13 @@ export class Chart {
   private _kLineMode = new KLineMode()
   private _timeShareMode = new TimeShareMode()
   private readonly marketSessions: MarketSessionRegistry
+  private readonly marketDataProviderRegistry: MarketDataProviderRegistry
 
   /** 上次预警评估的最新 K 线时间戳（用于去重） */
   private _lastAlertTimestamp: number | null = null
   /** 右轴 host 当前生效的 CSS 宽度；仅在可视区极值变化时更新。 */
   private readonly _effectiveRightAxisWidth = createSignal(0)
+  private readonly _effectiveLeftAxisWidth = createSignal(0)
 
   /** 预警控制器 */
   readonly alertController: AlertController
@@ -253,14 +258,18 @@ export class Chart {
       rendererHost?: RendererHost
       initialSettings?: Partial<ChartSettings>
       marketSessions?: Readonly<Record<string, MarketSessionConfig>>
+      marketDataContext?: MarketDataContext
       /** 帧时间源，测试或宿主可注入 Unix 毫秒时钟。 */
       clock?: import('../../../foundation/utils/clock.js').Clock
     },
   ) {
     this.dom = dom
+    this.marketDataProviderRegistry = (
+      runtime?.marketDataContext ?? defaultMarketDataContext
+    ).registry
     this.legendDom = createLegendDomRenderer(
       dom.canvasLayer,
-      () => this.dataManager.symbols.peek().length > 0,
+      (collapsed) => this.legend.setMainCollapsed(collapsed),
       (id, action) => this.legend.execute(id, action),
     )
     this.viewportScrollBridge = new ViewportScrollBridge(() => this.dom.container)
@@ -269,7 +278,7 @@ export class Chart {
     this.pluginHost = createPluginHost()
     this.rendererHost = runtime?.rendererHost ?? createDefaultRendererHostSync()
 
-    const initialZoomLevel = opt.initialZoomLevel ?? 1
+    this.initialZoomLevel = opt.initialZoomLevel ?? 1
     const zoomLevelCount = Math.max(2, Math.round(opt.zoomLevels ?? DEFAULT_ZOOM_LEVEL_COUNT))
 
     // ── StateKernel: single composition root (owns options, zoom, data, viewport, pane, theme, drawing, interaction) ──
@@ -278,7 +287,7 @@ export class Chart {
         ...restOpt,
         zoomLevelCount,
       },
-      initialZoomLevel,
+      initialZoomLevel: this.initialZoomLevel,
       initialSettings: runtime?.initialSettings,
       initialRendererRuntime: this.rendererHost.runtime,
       marketSessions: this.marketSessions,
@@ -287,17 +296,14 @@ export class Chart {
     this.rendererHost.setListeners({
       onRuntimeChange: (rendererRuntime) => {
         this.kernel.renderer.actions.setRuntime(rendererRuntime)
-        this.syncGpuSceneCanvas()
       },
       requestRedraw: () => this.scheduleDraw(UpdateLevel.All),
     })
-    this.syncGpuSceneCanvas()
 
     // Inject DOM deps into kernel's viewportState (needed before init)
     this.kernel.setViewportDomDeps({
       getDom: () => this.dom,
-      resizeSharedWebGLSurface: (plotWidth, plotHeight, dpr) =>
-        this.rendererHost.resize(plotWidth, plotHeight, dpr),
+      onViewportResize: () => this.resize(),
     })
 
     // ── ViewportManager (DOM lifecycle: ResizeObserver + scroll events) ──
@@ -347,21 +353,16 @@ export class Chart {
 
     this.dataManager = new ChartDataManager(
       {
+        marketDataProviderRegistry: this.marketDataProviderRegistry,
         getOption: () => this.getRenderOptions(),
         getZoomLevel: () => this.kernel.zoom.readonly.zoomLevel.peek(),
         setZoomLevel: (level) => this.kernel.zoom.actions.setZoomLevel(level),
         getDom: () => this.dom,
         viewport: this.kernel.viewport,
         comparison: this.kernel.comparison,
-        needsTrades: () =>
-          this.kernel.indicator.readonly.instances
-            .peek()
-            .some((instance) =>
-              getRegisteredIndicatorDefinition(instance.indicatorId)?.runtime?.inputs?.includes(
-                'trades',
-              ),
-            ),
-        updateTradeInput: (input) => this.indicatorManager.updateTradeInput(input),
+        needsTrades: () => this.kernel.footprint.readonly.enabled.peek(),
+        updateTradeInput: (input) => this.kernel.data.actions.setTrades(input),
+        invalidateRequests: () => this.indicatorManager.invalidateMarketData(),
         scheduleDraw: (level) => this.scheduleDraw(level),
         onBarsReady: () => this.checkVisibleRangeGapWhenIdle(),
         resetInteraction: () => {
@@ -381,8 +382,15 @@ export class Chart {
         this.kernel.settings.readonly.settings.peek().marketDataCacheMaxMiB,
       ),
     )
-    this.disposeTradeDemand = this.kernel.indicator.readonly.instances.subscribe(() =>
+    this.disposeTradeDemand = this.kernel.footprint.readonly.enabled.subscribe(() =>
       this.dataManager.reconcileTradeInput(),
+    )
+    this.footprintRuntime = createFootprintRuntime({
+      input$: this.kernel.footprint.readonly.input,
+      commit: this.kernel.footprint.actions.commit,
+    })
+    this.disposeFootprintDraw = this.kernel.footprint.readonly.renderState.subscribe(() =>
+      this.scheduleDraw(),
     )
 
     // 对比品种唯一写原语；UI 与 Agent 共用同一实例。
@@ -393,11 +401,11 @@ export class Chart {
       resolveInstrument: async ({ symbol, source }) => {
         // 具体源才限定查询范围，auto/缺省时允许跨全部已启用数据源解析。
         const restrictedSourceIds = source && source !== AUTO_SOURCE_ID ? [source] : undefined
-        const matches = await lookupInstrumentsBySymbol(marketDataProviderRegistry, {
+        const matches = await lookupInstrumentsBySymbol(this.marketDataProviderRegistry, {
           symbol,
           sourceIds: restrictedSourceIds,
         })
-        const enabledSourceIds = marketDataProviderRegistry
+        const enabledSourceIds = this.marketDataProviderRegistry
           .getEnabled()
           .map((provider) => provider.source.id)
         // 候选不做挑选：歧义裁决属于 ComparisonCommands 的领域策略。
@@ -409,7 +417,9 @@ export class Chart {
           }
         }
         // 限定源未命中：跨全部已启用源再查一次，用于提示 Agent 换源重试。
-        const elsewhere = await lookupInstrumentsBySymbol(marketDataProviderRegistry, { symbol })
+        const elsewhere = await lookupInstrumentsBySymbol(this.marketDataProviderRegistry, {
+          symbol,
+        })
         return {
           candidates: [],
           searchedSourceIds: restrictedSourceIds,
@@ -460,6 +470,7 @@ export class Chart {
       zoom: this.kernel.zoom,
       options: this.kernel.options,
       viewport: this.kernel.viewport,
+      commitPendingLayout: () => this.commitPendingLayout(),
       commitViewportScroll: (targetScrollLeft) =>
         this.viewportScrollBridge.commit(
           targetScrollLeft,
@@ -475,34 +486,37 @@ export class Chart {
       getActiveMode: () => this.activeMode,
       dataView$: this.kernel.mode.readonly.dataView,
       primaryRenderer$: this.kernel.mode.readonly.effectivePrimaryRenderer,
+      footprintState$: this.kernel.footprint.readonly.renderState,
       settings$: this.kernel.settings.readonly.settings,
       mainPriceAxis: this.kernel.mainPriceAxis,
-      customMarkers$: this.kernel.marker.readonly.customMarkers,
       drawings$: this.kernel.drawing.readonly.drawings,
       selectedDrawingIds$: this.kernel.drawing.readonly.selectedDrawingIds,
       getOverlay: () => this.drawingSession?.getPaintOverlay() ?? [],
       getSelectionMarquee: () => this.drawingSession?.getSelectionMarquee() ?? null,
+      getSnapIndicator: () => this.drawingSession?.getSnapIndicator() ?? null,
       projectLegendFrame: (contexts) => {
         this.legend.projectFrame(contexts)
         const paneOrder = this.kernel.pane.readonly.paneSpecs.peek().map((pane) => pane.id)
         const rows = this.legend.rows.peek()
-        for (const paneId of paneOrder)
-          this.legendDom.update(
+        const mainVisible = this.getOption().legend?.visible !== false
+        this.legendDom.update({
+          rowsByPane: paneOrder.map((paneId) => ({
             paneId,
-            paneId === MAIN_PANE_ID && this.getOption().legend?.visible === false
-              ? []
-              : rows.filter((row) => row.paneId === paneId),
-            paneOrder,
-          )
+            rows:
+              paneId === MAIN_PANE_ID && !mainVisible
+                ? []
+                : rows.filter((row) => row.paneId === paneId),
+          })),
+          mainCollapsed: this.legend.mainCollapsed.peek(),
+          canCollapse: this.legend.canCollapse(),
+        })
       },
       getLegendConfiguration: () => this.legend.configuration.peek(),
       clearLegendFrame: () => {
         this.legend.clearFrame()
         this.legendDom.clear()
       },
-      commitRightAxisWidthMeasurement: (extrema) => {
-        this.commitRightAxisWidthMeasurement(extrema)
-      },
+      commitAxisWidths: (widths) => this.commitAxisWidths(widths),
     })
     this.pluginHost.registerService(CHART_RENDERERS_SERVICE, {
       useRenderer: (layer) => this.useRenderer(layer),
@@ -537,13 +551,17 @@ export class Chart {
         this.scheduleDraw()
       },
     })
-    this.markers = new ChartMarkerFacade({
-      kernel: this.kernel,
-      renderer: this.renderer,
-      scheduleDraw: () => this.scheduleDraw(),
-    })
 
     this.indicatorManager = new ChartIndicatorManager({
+      getMarketData: () => this.dataManager.indicatorMarketData,
+      plotColors$: computed(() => {
+        const settings = this.kernel.settings.readonly.settings()
+        return resolveThemeColors(
+          this.kernel.effectiveTheme$(),
+          settings.isAsiaMarket,
+          settings.colorPresetSettings,
+        )
+      }),
       getOption: () => this.getRenderOptions(),
       getPluginHost: () => this.pluginHost,
       getRenderer: (id) => this.getRenderer(id),
@@ -566,6 +584,8 @@ export class Chart {
       scheduleDraw: (level) => this.scheduleDraw(level),
       indicator: this.kernel.indicator,
       subPaneOps: {
+        reconcileDefinition: (indicatorId, role) =>
+          this.kernel.paneManager.reconcileDefinition(indicatorId, role),
         create: (entry) => this.kernel.paneManager.createFromIndicator(entry),
         remove: (paneId) => this.kernel.paneManager.actions.remove(paneId),
         replace: (paneId, indicatorId, params) =>
@@ -589,6 +609,10 @@ export class Chart {
       setComparisonHidden: (identity, hidden) => this.setComparisonHidden(identity, hidden),
       getOptions: () => this.getOption(),
       getVisibleIndicatorIds: () => this.kernel.visibleMainIndicatorIds$(),
+      hasPrimarySymbol: () => this.dataManager.symbols.peek().length > 0,
+      // 仅脚本指标提供代码编辑入口，普通指标不展示该按钮。
+      isScriptIndicator: (definitionId) =>
+        !!getRegisteredIndicatorDefinition(definitionId)?.document,
       requestRender: () => this.scheduleDraw(),
     })
 
@@ -659,7 +683,7 @@ export class Chart {
     this.legendDom.clear()
 
     if (isTimeShareDataView(nextDataView)) {
-      const percentMap = new Map(this.kernel.pane.readonly.paneScaleTypes.peek())
+      const percentMap = new Map(this.kernel.pane.getScalePreferences())
       for (const renderer of this.paneRenderers) {
         const pane = renderer.getPane()
         if (pane.role === 'price') percentMap.set(pane.id, ScaleType.Percent)
@@ -694,11 +718,6 @@ export class Chart {
     return this.kernel.viewport.readonly.dpr.peek()
   }
 
-  /** 获取当前周期 */
-  get currentPeriod(): string {
-    return this.dataManager.currentPeriod
-  }
-
   /** 获取插件宿主 */
   get plugin(): PluginHostImpl {
     return this.pluginHost
@@ -715,30 +734,27 @@ export class Chart {
     this.scheduleDraw()
   }
 
-  /** 声明非对比视图的缺省聚合口径（下游 MT5 品牌口径特性；须在 setSymbols 前调用生效）。 */
-  setDefaultBarAggregation(value: BarAggregation): void {
-    this.dataManager.setDefaultBarAggregation(value)
-  }
-
   /** 移除渲染器 Layer。 */
   removeRenderer(id: string): void {
     if (this.renderer.getScene().removeLayer(id)) this.scheduleDraw()
   }
 
   /** 获取已注册渲染器 Layer。 */
+  /** 当前 Pane 已提交层的图元线段，供绘图磁吸候选。 */
+  getSnapLines(paneId: string): ReadonlyArray<import('../../drawing/index.js').SnapLine> {
+    return this.renderer.getCommittedSnapLines(paneId)
+  }
+
+  /** 指定逻辑下标处该 Pane 的指标值，供绘图磁吸候选。 */
+  getIndicatorSnapValues(
+    paneId: string,
+    barIndex: number,
+  ): ReadonlyArray<import('../../drawing/index.js').SnapIndicatorValue> {
+    return this.renderer.getIndicatorSnapValues(paneId, barIndex)
+  }
+
   getRenderer(id: string): Layer<RenderContext> | undefined {
     return this.renderer.getScene().getLayer(id) ?? undefined
-  }
-
-  /** 启用/禁用渲染器（Scene Layer 显隐）。 */
-  setRendererEnabled(id: string, enabled: boolean): void {
-    this.renderer.getScene().setLayerVisibility(id, enabled)
-    this.scheduleDraw()
-  }
-
-  /** 获取所有渲染器 Layer。 */
-  getAllRenderers(): ReadonlyArray<Layer<RenderContext>> {
-    return this.renderer.getScene().layers.peek()
   }
 
   /** 外部 Layer 更新私有数据后请求完整重绘，不受帧内容缓存跳过。 */
@@ -747,24 +763,18 @@ export class Chart {
     this.scheduleDraw()
   }
 
-  /** 在完整帧完成后立即启动 GPU 快照，并让宿主同步捕获同帧的 Canvas2D 图层。 */
+  /** 完整 Scene 合成后捕获同一帧；可见目标均为已经合成完毕的 Canvas。 */
   captureFrame<T>(capture: (frame: ChartFrameCaptureContext) => T | Promise<T>): Promise<T> {
     return this.renderer.captureFrame(() => {
-      const surface = this.rendererHost.renderer.surface
-      const source = getVisibleCanvas(surface)
-      if (source && !surface.captureFrame) {
-        throw new KLineChartError(GENERIC_ERROR_CODES.INVALID_STATE, '当前 GPU 后端未提供取帧能力')
-      }
       return capture({
         dpr: this.kernel.viewport.readonly.dpr.peek(),
-        surface: source && surface.captureFrame ? { source, image: surface.captureFrame() } : null,
       })
     })
   }
 
   /** 将 kernel.paneScaleTypes 投影到各 pane PriceScale（runtime 非 SSOT） */
   private projectPaneScaleTypes(): void {
-    const types = this.kernel.pane.readonly.paneScaleTypes.peek()
+    const types = this.kernel.pane.getScalePreferences()
     for (const renderer of this.paneRenderers) {
       const pane = renderer.getPane()
       const t = types.get(pane.id) ?? ScaleType.Linear
@@ -774,7 +784,7 @@ export class Chart {
 
   /** 按用户坐标偏好生成各 pane 的刻度 Map */
   private buildScaleTypesFromSetting(setting: ScaleType): Map<string, ScaleType> {
-    const current = this.kernel.pane.readonly.paneScaleTypes.peek()
+    const current = this.kernel.pane.getScalePreferences()
     const panes = this.paneRenderers.map((renderer) => renderer.getPane())
     const next = buildPaneScaleTypesFromSetting(panes, resolvePriceScaleTypeSetting(setting))
     for (const pane of panes) {
@@ -796,7 +806,7 @@ export class Chart {
       this.kernel.settings.readonly.settings.peek().mainRightAxisTypeSetting,
     )
     const seeded = this.buildScaleTypesFromSetting(setting)
-    const next = new Map(this.kernel.pane.readonly.paneScaleTypes.peek())
+    const next = new Map(this.kernel.pane.getScalePreferences())
     let changed = false
     for (const renderer of this.paneRenderers) {
       const pane = renderer.getPane()
@@ -856,7 +866,6 @@ export class Chart {
     }
     if (prev.rendererBackend !== next.rendererBackend) {
       void this.rendererHost.switchTo(next.rendererBackend as RendererBackend).then(() => {
-        this.syncGpuSceneCanvas()
         this.scheduleDraw(UpdateLevel.All)
       })
       return
@@ -1009,14 +1018,6 @@ export class Chart {
   scalePrice(paneId: string, deltaY: number, anchorY?: number): void {
     this.transformPrice(paneId, (yAxis, base) => yAxis.scaleRange(base, deltaY, anchorY))
   }
-  /**
-   * 更新数据并请求重绘
-   * @param data K 线数据数组
-   */
-  updateData(data: KLineData[]) {
-    this.dataManager.updateData(data)
-  }
-
   /** 获取当前数据源（供 renderers 和 interaction 使用） */
   getData(): KLineData[] {
     return this.dataManager.getData()
@@ -1025,6 +1026,16 @@ export class Chart {
   /** 返回图表与 Agent 共用的实例级行情缓存。 */
   getMarketDataCache(): MarketDataCache {
     return this.dataManager.marketDataCache
+  }
+
+  /** 对当前行情快照执行一次计算，不注册指标或创建 Pane。 */
+  withIndicatorData<T>(
+    compute: (bars: readonly Bar[], market: IndicatorMarketContext) => Promise<T>,
+  ): Promise<T> {
+    const bars = this.data.peek()
+    return this.dataManager.withIndicatorMarketContext(bars, (market) =>
+      compute(bars.map(toPlotBar), market),
+    )
   }
 
   /** 捕获当前 K 线视图的视口锚点，供布局文档持久化。 */
@@ -1037,19 +1048,9 @@ export class Chart {
     this.dataManager.ensureDataRange(startTs)
   }
 
-  /** 获取渲染数据源（分时图下为 TimeShareData，K线图为 KLineData） */
-  getRenderData(): ReadonlyArray<KLineData | TimeShareData> {
-    return this.dataManager.getRenderData()
-  }
-
   /** K线原始数据（分时模式下为空） */
   getInternalData(): KLineData[] {
     return this.dataManager.getInternalData()
-  }
-
-  /** 获取预警控制器 */
-  getAlertController(): AlertController {
-    return this.alertController
   }
 
   /** 数据就绪时触发预警评估 */
@@ -1111,14 +1112,9 @@ export class Chart {
       bar,
       indicators,
       rollingVolume,
-      volumeProfile: undefined,
       orderBook: undefined,
       footprint: undefined,
     }
-  }
-
-  getLogicalSlotCount(): number {
-    return this.dataManager.getLogicalSlotCount()
   }
 
   getTimestampAtLogicalIndex(index: number): number | null {
@@ -1157,51 +1153,75 @@ export class Chart {
   }
 
   /**
-   * 由可视区价格 high/low 变更驱动右轴宽度。
+   * 按 K 线根数水平平移视口；正数向右（更新），负数向左（更早）。
    *
-   * 帧准备阶段仅在可视区极值跨数量级时调用本方法, 避免 measureText 高成本
-   * 该函数不得进入高频路径
+   * @param bars - 平移根数，非有限值或 0 时忽略
    */
-  private commitRightAxisWidthMeasurement(extrema: { min: number; max: number }): void {
-    const options = this.kernel.options.readonly.options.peek()
-    const minimumWidth =
-      options.rightAxisWidth + (options.priceLabelWidth ?? DEFAULT_PRICE_LABEL_WIDTH)
-    const yAxisCtx = this.paneRenderers[0]?.getContexts().yAxisCtx ?? null
-    if (!yAxisCtx) return
-    yAxisCtx.save()
-    yAxisCtx.font = RIGHT_AXIS_FONT
-    const widestLabel = Math.max(
-      yAxisCtx.measureText(extrema.min.toFixed(2)).width,
-      yAxisCtx.measureText(extrema.max.toFixed(2)).width,
-    )
-    yAxisCtx.restore()
-
-    const nextWidth = Math.max(minimumWidth, Math.ceil(widestLabel + RIGHT_AXIS_TEXT_PADDING))
-    if (this._effectiveRightAxisWidth.peek() === nextWidth) return
-    this._effectiveRightAxisWidth.set(nextWidth)
-    const rightAxisLayer = this.dom.rightAxisLayer
-    if (rightAxisLayer && rightAxisLayer.style.width !== `${nextWidth}px`) {
-      rightAxisLayer.style.width = `${nextWidth}px`
-    }
-
-    // 本帧后续右轴绘制即可使用新 canvas 宽度；不触发容器 resize，也不会重走滚动链路。
-    const viewport = this.getViewport()
-    if (!viewport) return
-    for (const renderer of this.paneRenderers) {
-      renderer.resize(viewport.plotWidth, renderer.getPane().height, viewport.dpr)
+  scrollByBars(bars: number): void {
+    if (!Number.isFinite(bars) || bars === 0) return
+    const view = this.kernel.viewport.readonly.viewSnapshot.peek()
+    if (!view.capabilities.allowPan) return
+    const { min, max } = view.scrollBounds
+    const target = Math.max(min, Math.min(view.scroll + bars * view.grid.step, max))
+    if (this.kernel.viewport.actions.scrollToLogical(target)) {
+      this.interaction.stopInertia()
+      this.scheduleDraw()
+      this.checkVisibleRangeGapWhenIdle()
     }
   }
 
-  /** 容器尺寸变化时调用 */
+  /** 重置图表视图：恢复初始缩放级别，再清除主图价格轴的手动缩放与偏移。 */
+  resetChart(): void {
+    this.zoom.toLevel(this.initialZoomLevel)
+    this.resetPriceTransform(MAIN_PANE_ID)
+  }
+
+  /** 统一提交左右纵轴宽度；交互期间只扩宽，结束后按所有 Pane 的实际标签需求收缩。 */
+  private commitAxisWidths(widths: import('../../axisWidth/types.js').AxisWidths): boolean {
+    const options = this.kernel.options.readonly.options.peek()
+    const interacting = this.interaction.isPointerDown()
+    const right = Math.max(
+      options.rightAxisWidth + (options.priceLabelWidth ?? DEFAULT_PRICE_LABEL_WIDTH),
+      widths.right,
+      interacting ? this._effectiveRightAxisWidth.peek() : 0,
+    )
+    const left = Math.max(
+      options.leftAxisWidth,
+      widths.left,
+      interacting ? this._effectiveLeftAxisWidth.peek() : 0,
+    )
+    const changed =
+      this._effectiveRightAxisWidth.peek() !== right || this._effectiveLeftAxisWidth.peek() !== left
+    if (!changed) return false
+    batch(() => {
+      this._effectiveRightAxisWidth.set(right)
+      this._effectiveLeftAxisWidth.set(left)
+    })
+    if (this.dom.rightAxisLayer) this.dom.rightAxisLayer.style.width = `${right}px`
+    if (this.dom.leftAxisLayer) this.dom.leftAxisLayer.style.width = `${left}px`
+    return true
+  }
+
+  /** 容器尺寸变化时记录重排意图，保留当前像素直到下一帧能够立即重画。 */
   resize() {
     const vp = this.getViewport()
     const timeShare = this.activeMode === this._timeShareMode
     if (!vp || (timeShare ? vp.plotWidth <= 0 : vp.viewWidth < 10 || vp.viewHeight < 10)) return
+    this.viewportResizePending = true
     this.renderer.clearCachedFrame()
-    this.layoutManager.layoutPanes()
+    this.renderer.invalidateFrame()
     this.interaction.invalidateHover()
     this.scheduleDraw()
     if (!timeShare) this.checkVisibleRangeGapWhenIdle()
+  }
+
+  /** 在绘制帧内提交容器尺寸变化，统一重算 pane 内容区。 */
+  private commitPendingLayout(): void {
+    if (!this.viewportResizePending) return
+    const vp = this.getViewport()
+    if (!vp) return
+    this.viewportResizePending = false
+    this.layoutManager.layoutPanes()
   }
 
   /**
@@ -1260,38 +1280,6 @@ export class Chart {
     })
   }
 
-  /**
-   * 将 GPU canvas 挂到 plot 区（main 与 overlay 之间），Canvas2D 后端时移除。
-   * 多 pane 共用一张 canvas，region.y + scissor 区分。
-   */
-  private syncGpuSceneCanvas(): void {
-    const layer = this.dom.canvasLayer
-    if (!layer) return
-    const effective = this.rendererHost.runtime.effective
-    const existing = layer.querySelector('canvas.gpu-scene-canvas') as HTMLCanvasElement | null
-
-    if (effective === 'canvas') {
-      existing?.remove()
-      return
-    }
-
-    const canvas = getVisibleCanvas(this.rendererHost.renderer.surface)
-    if (!canvas) return
-
-    canvas.classList.add('gpu-scene-canvas')
-    canvas.style.position = 'absolute'
-    canvas.style.left = '0'
-    canvas.style.top = '0'
-    canvas.style.pointerEvents = 'none'
-    canvas.style.zIndex = '1'
-    canvas.style.backgroundColor = 'transparent'
-
-    if (existing !== canvas) {
-      existing?.remove()
-      if (!canvas.isConnected) layer.appendChild(canvas)
-    }
-  }
-
   /** 销毁图表实例 */
   destroy(): Promise<void> {
     if (!this.destruction) this.destruction = this.destroyChart()
@@ -1311,6 +1299,9 @@ export class Chart {
     this.disposeLeftAxisProjection = null
     this.disposeTradeDemand?.()
     this.disposeTradeDemand = null
+    this.disposeFootprintDraw?.()
+    this.disposeFootprintDraw = null
+    this.footprintRuntime.dispose()
     this.disposeSettingsProjection?.()
     this.disposeSettingsProjection = null
     this.indicatorManager.destroy()
@@ -1321,7 +1312,6 @@ export class Chart {
     this.dataManager.destroy()
     this.viewportManager.destroy()
     this.layoutManager.destroy()
-    this.dom.canvasLayer?.querySelector('canvas.gpu-scene-canvas')?.remove()
     this.rendererHost.dispose()
     this.drawingCommands.dispose()
     this.kernel.dispose()
@@ -1333,6 +1323,11 @@ export class Chart {
   /** 右轴当前有效 CSS 宽度；外部宿主应使用它而非覆盖内联宽度。 */
   get rightAxisEffectiveWidth(): ReadonlySignal<number> {
     return this._effectiveRightAxisWidth
+  }
+
+  /** 左轴所需逻辑像素宽度，供宿主布局消费。 */
+  get leftAxisEffectiveWidth(): ReadonlySignal<number> {
+    return this._effectiveLeftAxisWidth
   }
 
   /** 视口状态信号 */
@@ -1394,7 +1389,7 @@ export class Chart {
   }
 
   /**
-   * 按指针位置重算绘图悬停目标（none / 锚点 / 平移手柄 / 线身），宿主据此切换光标。
+   * 按指针位置重算绘图悬停命中（目标语义 + 光标），宿主据此切换光标。
    * 由 InteractionController 在 hover flush 中调用，与本帧几何同代。
    */
   updateDrawingHover(clientX: number, clientY: number): void {
@@ -1402,27 +1397,28 @@ export class Chart {
       this.clearDrawingHover()
       return
     }
-    this.kernel.interaction.actions.setDrawingTargetHover(
-      this.drawingSession.getHoveredTarget({ clientX, clientY }, this.dom.container),
+    const hit = this.drawingSession.getHoveredHit({ clientX, clientY }, this.dom.container)
+    this.kernel.interaction.actions.setDrawingHover(
+      hit === null ? null : { target: hit.target.type, cursor: hit.cursor },
     )
   }
 
-  /** 冻结绘图悬停目标：图元拖拽开始时调用，拖拽期间不再被实时命中改写。 */
+  /** 冻结绘图悬停：图元拖拽开始时调用，拖拽期间不再被实时命中改写。 */
   freezeDrawingHover(): void {
     if (this.drawingSession === null) return
-    this.kernel.interaction.actions.setDrawingDragTarget(
-      this.kernel.interaction.readonly.hoveredDrawingTarget.peek(),
+    this.kernel.interaction.actions.setDrawingDragHover(
+      this.kernel.interaction.readonly.hoveredDrawing.peek(),
     )
   }
 
-  /** 解冻绘图悬停目标：图元拖拽结束后调用，恢复为实时命中。 */
+  /** 解冻绘图悬停：图元拖拽结束后调用，恢复为实时命中。 */
   unfreezeDrawingHover(): void {
-    this.kernel.interaction.actions.setDrawingDragTarget(null)
+    this.kernel.interaction.actions.setDrawingDragHover(null)
   }
 
-  /** 清除绘图悬停目标：指针离开画布、悬停被清空或切换绘图工具时调用。 */
+  /** 清除绘图悬停：指针离开画布、悬停被清空或切换绘图工具时调用。 */
   clearDrawingHover(): void {
-    this.kernel.interaction.actions.setDrawingTargetHover('none')
+    this.kernel.interaction.actions.setDrawingHover(null)
   }
 
   /** 面板比例信号 */
@@ -1475,23 +1471,6 @@ export class Chart {
   }
 
   // ---------- Data ----------
-
-  setData(data: KLineData[]): void {
-    this.dataManager.setData(data)
-  }
-
-  /** 实时帧写入活动 K 线序列：末尾窗口 replace-on-conflict（SSE forming/closed 链路）。 */
-  updateBars(bars: KLineData[]): void {
-    this.dataManager.updateBars(bars)
-  }
-
-  appendData(newData: KLineData[]): void {
-    this.dataManager.appendData(newData)
-  }
-
-  get dataBuffer(): DataBuffer {
-    return this.dataManager.dataBuffer as DataBuffer
-  }
 
   checkVisibleRangeGap(): void {
     this.dataManager.checkVisibleRangeGap()
@@ -1578,15 +1557,6 @@ export class Chart {
     this.scheduleDraw()
   }
 
-  setComparisonData(symbol: string, data: KLineData[]): void {
-    this.dataManager.setComparisonData(symbol, data)
-    this.applyPriceScaleSettingToKernel(
-      resolvePriceScaleTypeSetting(
-        this.kernel.settings.readonly.settings.peek().mainRightAxisTypeSetting,
-      ),
-    )
-  }
-
   setCurrentSymbol(symbol: string): void {
     this.dataManager.setCurrentSymbol(symbol)
   }
@@ -1603,31 +1573,6 @@ export class Chart {
   switchToTimeShareForDate(dateYYYYMMDD: number): void {
     this.dataManager.setTimeShareQueryDate(dateYYYYMMDD)
     this.setCurrentPeriod(TIME_SHARE_PERIOD)
-  }
-
-  /** 校验并原子替换自定义 K 线数据及对比集合，再按最终快照选择视图。 */
-  applyCustomData(source: CustomDataSource): void {
-    // 在任何数据写入前校验市场契约，失败时不留下半写入的品种状态。
-    if (isTimeSharePeriod(source.period)) {
-      resolveSymbolMarketSession(
-        {
-          symbol: source.symbol ?? '',
-          market: source.market,
-        },
-        this.marketSessions,
-      )
-    }
-    // 自定义数据会替换对比集合；用最终快照裁决，避免旧集合决定新视图。
-    batch(() => {
-      this.dataManager.applyCustomData(source)
-      this.transitionView()
-    })
-  }
-
-  /** 在恢复 Provider 数据入口前配置目标品种的视图。 */
-  resetToFetcher(spec: SymbolSpec): void {
-    this.transitionView(spec)
-    this.dataManager.resetToFetcher(spec)
   }
 
   // ---------- Interaction (Zero-config unified entry) ----------

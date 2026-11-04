@@ -4,7 +4,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import type { KLineData } from '@/types/price'
-import { EMPTY_TRADE_SNAPSHOT, type TradeBatch } from '../../../data/trades/types'
 
 import {
   expandIndicatorCalculationOutputs,
@@ -17,7 +16,6 @@ import {
   findInstanceFirstReadyIndex,
 } from '../instances/execution/instanceCalculationRuntime'
 import {
-  diffTradeSnapshot,
   IndicatorInstanceExecutionRuntime,
 } from '../instances/execution/instanceExecutionRuntime'
 import {
@@ -26,108 +24,76 @@ import {
   FakeCalculationSource,
 } from './helpers/instanceTestKit'
 
-/** 构造仅用于引用前缀比较的成交批次。 */
-function createTradeBatch(tradeId: string): TradeBatch {
-  return {
-    items: [{ tradeId, timestamp: 0, price: '1', size: '1', side: 'buy' }],
-    range: { from: 0, to: 1 },
-    complete: true,
-  }
-}
-
-describe('成交输入依赖', () => {
-  // 只改变成交版本时，纯 K 线计算结果复用；成交依赖必须重新计算。
-  it('invalidates only calculators that declare trades', () => {
+describe('executeIndicatorCalculationPlan', () => {
+  it('定义更新清除旧 calculator 与结果缓存，保留其它定义缓存并拒绝新增冲突', async () => {
     const source = new FakeCalculationSource([
-      createTestInstance({ instanceId: 'bars', definitionId: 'bars' }),
-      createTestInstance({ instanceId: 'trades', definitionId: 'trades' }),
+      createTestInstance({ instanceId: 'edited', definitionId: 'edited' }),
+      createTestInstance({ instanceId: 'other', definitionId: 'other' }),
     ])
-    const bars = vi.fn(() => [1])
-    const trades = vi.fn(() => [2])
+    const other = vi.fn(() => [9])
     const runtime = new IndicatorInstanceExecutionRuntime([
-      { definitionId: 'bars', compute: bars },
-      { definitionId: 'trades', inputs: ['trades'], compute: trades },
+      { definitionId: 'edited', compute: () => [1], createCompute: () => () => [2] },
+      { definitionId: 'other', compute: other },
+    ])
+    runtime.setData(createTestData(1), 1)
+    const plan = source.calculationPlan()
+    expect((await runtime.execute(plan))[0]?.series).toEqual([2])
+    expect(() => runtime.addDefinition({ definitionId: 'edited', compute: () => [3] })).toThrow(
+      'Duplicate',
+    )
+    runtime.updateDefinition({
+      definitionId: 'edited',
+      compute: () => [3],
+      createCompute: () => () => [4],
+    })
+    expect((await runtime.execute(plan))[0]?.series).toEqual([4])
+    expect(other).toHaveBeenCalledTimes(1)
+    expect(() => runtime.updateDefinition({ definitionId: 'missing', compute: () => [] })).toThrow(
+      'Unknown',
+    )
+  })
+  it('单个实例计算失败仍提交其他实例，错误可序列化且重算成功后清除', async () => {
+    const source = new FakeCalculationSource([
+      createTestInstance({ instanceId: 'bad', definitionId: 'bad' }),
+      createTestInstance({ instanceId: 'good', definitionId: 'good' }),
+    ])
+    let fail = true
+    const runtime = new IndicatorInstanceExecutionRuntime([
+      {
+        definitionId: 'bad',
+        compute: () => {
+          if (fail)
+            throw Object.assign(new Error('invalid plot'), {
+              code: 'TEST_PLOT',
+              plotId: 'line',
+              barIndex: 1,
+            })
+          return [2, 3]
+        },
+      },
+      { definitionId: 'good', compute: () => [1, 2] },
     ])
     const data = createTestData(2)
-    runtime.setData(data, 1, {
-      mode: 'replace',
-      snapshot: { ...EMPTY_TRADE_SNAPSHOT, revision: 1 },
+    runtime.setData(data, 1)
+    const plan = source.calculationPlan()
+    const results = expandIndicatorCalculationOutputs(
+      plan,
+      structuredClone(await runtime.execute(plan)),
+      1,
+    )
+    expect(results.get('bad')).toMatchObject({
+      series: undefined,
+      firstReadyIndex: null,
+      error: { message: 'invalid plot', code: 'TEST_PLOT', plotId: 'line', barIndex: 1 },
     })
-    runtime.execute(source.calculationPlan())
-    runtime.setData(data, 1, {
-      mode: 'replace',
-      snapshot: { ...EMPTY_TRADE_SNAPSHOT, revision: 2 },
-    })
-    runtime.execute(source.calculationPlan())
-    expect(bars).toHaveBeenCalledTimes(1)
-    expect(trades).toHaveBeenCalledTimes(2)
-    runtime.setData(data, 2, {
-      mode: 'replace',
-      snapshot: { ...EMPTY_TRADE_SNAPSHOT, revision: 2 },
-    })
-    runtime.execute(source.calculationPlan())
-    expect(bars).toHaveBeenCalledTimes(2)
-    expect(trades).toHaveBeenCalledTimes(3)
+    expect(results.get('good')?.series).toEqual([1, 2])
+    fail = false
+    runtime.setData(data, 2)
+    const recovered = expandIndicatorCalculationOutputs(plan, await runtime.execute(plan), 2)
+    expect(recovered.get('bad')?.error).toBeUndefined()
+    expect(recovered.get('bad')?.series).toEqual([2, 3])
   })
-})
-
-describe('diffTradeSnapshot', () => {
-  // 引用前缀扩展时只返回新增批次，避免整段快照结构化克隆。
-  it('引用前缀扩展时返回仅含新增批次的 append 增量', () => {
-    const a = createTradeBatch('a')
-    const b = createTradeBatch('b')
-    const c = createTradeBatch('c')
-    const previous = { ...EMPTY_TRADE_SNAPSHOT, revision: 1, batches: [a, b] }
-    const next = { ...EMPTY_TRADE_SNAPSHOT, revision: 2, batches: [a, b, c] }
-
-    const diff = diffTradeSnapshot(previous, next)
-
-    expect(diff.mode).toBe('append')
-    expect(diff.snapshot.batches).toEqual([c])
-    expect(diff.snapshot.batches[0]).toBe(c)
-  })
-
-  // 长度不变（仅版本推进）时同样走 append，增量为空，避免重复克隆整段批次。
-  it('批次引用完全一致时返回空增量', () => {
-    const a = createTradeBatch('a')
-    const b = createTradeBatch('b')
-    const previous = { ...EMPTY_TRADE_SNAPSHOT, revision: 1, batches: [a, b] }
-
-    const diff = diffTradeSnapshot(previous, {
-      ...EMPTY_TRADE_SNAPSHOT,
-      revision: 2,
-      batches: [a, b],
-    })
-
-    expect(diff.mode).toBe('append')
-    expect(diff.snapshot.batches).toEqual([])
-    expect(diff.snapshot.revision).toBe(2)
-  })
-
-  // 前缀引用不同、长度缩短或没有上一份时，必须整段替换。
-  it('无法证明引用前缀时返回 replace', () => {
-    const a = createTradeBatch('a')
-    const b = createTradeBatch('b')
-    const previous = { ...EMPTY_TRADE_SNAPSHOT, revision: 1, batches: [a, b] }
-
-    expect(
-      diffTradeSnapshot(previous, {
-        ...EMPTY_TRADE_SNAPSHOT,
-        revision: 2,
-        batches: [a, createTradeBatch('b'), createTradeBatch('c')],
-      }).mode,
-    ).toBe('replace')
-    expect(
-      diffTradeSnapshot(previous, { ...EMPTY_TRADE_SNAPSHOT, revision: 2, batches: [a] }).mode,
-    ).toBe('replace')
-    expect(
-      diffTradeSnapshot(undefined, { ...EMPTY_TRADE_SNAPSHOT, revision: 1, batches: [a] }).mode,
-    ).toBe('replace')
-  })
-})
-
-describe('executeIndicatorCalculationPlan', () => {
-  it('相同计算参数的不同实例只执行一次并共享结果引用', () => {
+  it('相同计算参数的不同实例只执行一次并共享结果引用', async () => {
     const source = new FakeCalculationSource([
       createTestInstance({
         instanceId: 'macd-a',
@@ -149,8 +115,10 @@ describe('executeIndicatorCalculationPlan', () => {
     const compute = vi.fn<(data: KLineData[], params: IndicatorParameters) => unknown>(
       (data, _params) => data.map((_, index) => index),
     )
-    const outputs = executeIndicatorCalculationPlan(plan, createTestData(4), (definitionId) =>
-      definitionId === 'macd' ? { definitionId: 'macd', compute } : undefined,
+    const outputs = await executeIndicatorCalculationPlan(
+      plan,
+      createTestData(4),
+      (definitionId) => (definitionId === 'macd' ? { definitionId: 'macd', compute } : undefined),
     )
 
     expect(compute).toHaveBeenCalledTimes(1)
@@ -159,7 +127,7 @@ describe('executeIndicatorCalculationPlan', () => {
     expect(results.get('macd-a')!.series).toBe(results.get('macd-b')!.series)
   })
 
-  it('不同计算参数生成独立任务并各自执行', () => {
+  it('不同计算参数生成独立任务并各自执行', async () => {
     const source = new FakeCalculationSource([
       createTestInstance({
         instanceId: 'macd-a',
@@ -178,8 +146,10 @@ describe('executeIndicatorCalculationPlan', () => {
     const compute = vi.fn<(data: KLineData[], params: IndicatorParameters) => unknown>(
       (_data, params) => ({ fastPeriod: params.fastPeriod }),
     )
-    const outputs = executeIndicatorCalculationPlan(plan, createTestData(4), (definitionId) =>
-      definitionId === 'macd' ? { definitionId: 'macd', compute } : undefined,
+    const outputs = await executeIndicatorCalculationPlan(
+      plan,
+      createTestData(4),
+      (definitionId) => (definitionId === 'macd' ? { definitionId: 'macd', compute } : undefined),
     )
     const results = expandIndicatorCalculationOutputs(plan, outputs, 1)
 
@@ -216,8 +186,8 @@ describe('executeIndicatorCalculationTask', () => {
     instanceIds: ['bar-a'],
   }
 
-  it('按 K 线下标对齐的输出推导 warm-up 边界', () => {
-    const output = executeIndicatorCalculationTask(task, createTestData(4), () => ({
+  it('按 K 线下标对齐的输出推导 warm-up 边界', async () => {
+    const output = await executeIndicatorCalculationTask(task, createTestData(4), () => ({
       definitionId: 'bar',
       compute: (data) => data.map((_, index) => (index < 2 ? undefined : index)),
     }))
@@ -225,8 +195,8 @@ describe('executeIndicatorCalculationTask', () => {
     expect(output.firstReadyIndex).toBe(2)
   })
 
-  it('aggregate 输出不推导 warm-up 边界', () => {
-    const output = executeIndicatorCalculationTask(task, createTestData(4), () => ({
+  it('aggregate 输出不推导 warm-up 边界', async () => {
+    const output = await executeIndicatorCalculationTask(task, createTestData(4), () => ({
       definitionId: 'bar',
       outputAlignment: 'aggregate',
       compute: (data) => data.map((_, index) => ({ bin: index })),
@@ -237,6 +207,50 @@ describe('executeIndicatorCalculationTask', () => {
 })
 
 describe('IndicatorInstanceExecutionRuntime', () => {
+  it('等待异步计算并共享同版本的进行中请求，旧结果不覆盖新版本缓存', async () => {
+    const source = new FakeCalculationSource([
+      createTestInstance({ instanceId: 'async-a', definitionId: 'async' }),
+    ])
+    const completions: Array<(value: number[]) => void> = []
+    const compute = vi.fn(() => new Promise<number[]>((resolve) => completions.push(resolve)))
+    const runtime = new IndicatorInstanceExecutionRuntime([{ definitionId: 'async', compute }])
+    const data = createTestData(2)
+    runtime.setData(data, 1)
+    const first = runtime.execute(source.calculationPlan())
+    const shared = runtime.execute(source.calculationPlan())
+    expect(compute).toHaveBeenCalledTimes(1)
+    runtime.setData(data, 2)
+    const latest = runtime.execute(source.calculationPlan())
+    expect(compute).toHaveBeenCalledTimes(2)
+    completions[1]!([2, 3])
+    expect((await latest)[0]?.series).toEqual([2, 3])
+    completions[0]!([1, 2])
+    const [firstResult, sharedResult] = await Promise.all([first, shared])
+    expect(firstResult[0]).toBe(sharedResult[0])
+    expect((await runtime.execute(source.calculationPlan()))[0]?.series).toEqual([2, 3])
+    expect(compute).toHaveBeenCalledTimes(2)
+  })
+
+  it('异步拒绝转换为当前任务错误，不阻断其他任务', async () => {
+    const source = new FakeCalculationSource([
+      createTestInstance({ instanceId: 'bad', definitionId: 'bad' }),
+      createTestInstance({ instanceId: 'good', definitionId: 'good' }),
+    ])
+    const runtime = new IndicatorInstanceExecutionRuntime([
+      {
+        definitionId: 'bad',
+        compute: async () => {
+          throw new Error('Worker failed')
+        },
+      },
+      { definitionId: 'good', compute: () => [1, 2] },
+    ])
+    runtime.setData(createTestData(2), 1)
+    const outputs = await runtime.execute(source.calculationPlan())
+    expect(outputs[0]?.error?.message).toBe('Worker failed')
+    expect(outputs[1]?.series).toEqual([1, 2])
+  })
+
   it('拒绝重复注册同名计算定义', () => {
     const runtime = new IndicatorInstanceExecutionRuntime([
       { definitionId: 'ma', compute: () => [1] },
@@ -259,40 +273,7 @@ describe('IndicatorInstanceExecutionRuntime', () => {
     )
   })
 
-  // append 在已缓存批次后追加、replace 整段覆盖，二者共用同一合并路径。
-  it('按显式模式合并成交并驱动 trades 依赖重算', () => {
-    const source = new FakeCalculationSource([
-      createTestInstance({ instanceId: 'trades-a', definitionId: 'trades' }),
-    ])
-    const runtime = new IndicatorInstanceExecutionRuntime([
-      {
-        definitionId: 'trades',
-        inputs: ['trades'],
-        compute: (_data, _params, trades) => trades?.batches ?? [],
-      },
-    ])
-    const a = createTradeBatch('a')
-    const b = createTradeBatch('b')
-    const data = createTestData(1)
-
-    runtime.setData(data, 1, {
-      mode: 'replace',
-      snapshot: { ...EMPTY_TRADE_SNAPSHOT, revision: 1, batches: [a] },
-    })
-    runtime.setData(data, 1, {
-      mode: 'append',
-      snapshot: { ...EMPTY_TRADE_SNAPSHOT, revision: 2, batches: [b] },
-    })
-    expect(runtime.execute(source.calculationPlan())[0]!.series).toEqual([a, b])
-
-    runtime.setData(data, 1, {
-      mode: 'replace',
-      snapshot: { ...EMPTY_TRADE_SNAPSHOT, revision: 3, batches: [b] },
-    })
-    expect(runtime.execute(source.calculationPlan())[0]!.series).toEqual([b])
-  })
-
-  it('执行计划时解析已注册定义，未知定义直接抛错', () => {
+  it('执行计划时解析已注册定义，未知定义直接抛错', async () => {
     const source = new FakeCalculationSource([
       createTestInstance({ instanceId: 'ma-a', definitionId: 'ma', params: { period: 2 } }),
     ])
@@ -301,14 +282,14 @@ describe('IndicatorInstanceExecutionRuntime', () => {
     ])
     runtime.setData(createTestData(4), 1)
 
-    const outputs = runtime.execute(source.calculationPlan())
+    const outputs = await runtime.execute(source.calculationPlan())
     expect(outputs).toHaveLength(1)
     expect(outputs[0]!.series).toEqual([100, 101, 102, 103])
 
     const unknown = new FakeCalculationSource([
       createTestInstance({ instanceId: 'rsi-a', definitionId: 'rsi', params: {} }),
     ])
-    expect(() => runtime.execute(unknown.calculationPlan())).toThrow(
+    await expect(runtime.execute(unknown.calculationPlan())).rejects.toThrow(
       'Unknown indicator definition: rsi',
     )
   })

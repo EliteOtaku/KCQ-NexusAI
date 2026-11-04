@@ -1,0 +1,72 @@
+{
+  "name": "@363045841yyt/klinechart-script",
+  "private": true,
+  "version": "0.11.0-alpha.10",
+  "description": "Deterministic, data-source- and render-agnostic time-series script engine for KLineChartQuant. Scripts are written in plain TypeScript.",
+  "license": "AGPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/363045841/KLineChartQuant.git"
+  },
+  "bugs": "https://github.com/363045841/KLineChartQuant/issues",
+  "homepage": "https://363045841.github.io/KLineChartQuant/",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    "./worker": {
+      "types": "./dist/worker/index.d.ts",
+      "import": "./dist/worker/index.js"
+    },
+    "./language": {
+      "types": "./dist/language/index.d.ts",
+      "import": "./dist/language/index.js"
+    },
+    "./editor": {
+      "types": "./dist/editor/resources.d.ts",
+      "import": "./dist/editor/resources.js"
+    },
+    "./scripts/*": "./scripts/*",
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "scripts",
+    "LICENSE",
+    "THIRD-PARTY-NOTICES.md",
+    "README.md",
+    "README.zh-CN.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node scripts/generate-script-enums.mjs && tsc -p tsconfig.runtime.json && node scripts/generate-runtime-sources.mjs && node scripts/generate-editor-resources.mjs && tsc -p tsconfig.build.json && node scripts/build-worker.mjs",
+    "prepublishOnly": "pnpm build",
+    "test": "vitest run && node --test scripts/__tests__/generate-api-docs.test.mjs scripts/__tests__/generate-script-enums.test.mjs",
+    "test:watch": "vitest",
+    "test:worker": "pnpm build && node --test scripts/test-worker.mjs",
+    "coverage": "vitest run --coverage",
+    "lint:publish": "publint --strict .",
+    "test:docs": "node --test scripts/__tests__/generate-api-docs.test.mjs scripts/__tests__/generate-script-enums.test.mjs"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.5",
+    "@types/node": "^26.6.6",
+    "publint": "^0.3.21",
+    "vitest": "^5.0.0"
+  },
+  "dependencies": {
+    "@typescript/vfs": "^1.6.5",
+    "typescript": "~6.0.3",
+    "@363045841yyt/klinechart-plot-contracts": "workspace:*",
+    "quickjs-emscripten": "^0.32.0"
+  },
+  "engines": {
+    "node": ">=26.0.0"
+  }
+}

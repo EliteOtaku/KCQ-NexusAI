@@ -1,8 +1,8 @@
 <!-- 原生滚动区域与覆盖式滑块：隐藏原生滚动条，避免挤占内容宽度。 -->
 <template>
   <div class="overlay-scroll-area">
-    <div ref="viewport" class="overlay-scroll-area__viewport" @scroll.passive="onScroll">
-      <slot />
+    <div ref="viewport" class="overlay-scroll-area__viewport" @scroll.passive="onScroll(); emit('scroll', $event)">
+      <div ref="content" class="overlay-scroll-area__content"><slot /></div>
     </div>
     <div class="overlay-scroll-area__rail" aria-hidden="true">
       <div
@@ -20,12 +20,17 @@
 </template>
 
 <script setup lang="ts">
+  import { useOverlayScrollbar } from '@vue-src/composables/ui/useOverlayScrollbar.js'
   import { useTemplateRef } from 'vue'
-  import { useOverlayScrollbar } from '../../composables/useOverlayScrollbar.js'
 
   const viewport = useTemplateRef<HTMLElement>('viewport')
+  const content = useTemplateRef<HTMLElement>('content')
+  const props = withDefaults(defineProps<{ persistent?: boolean }>(), { persistent: false })
+  const emit = defineEmits<{ scroll: [event: Event] }>()
+  // 消费方可跟随输出滚动；滚动位置仍由内部原生 viewport 唯一持有。
+  defineExpose({ viewport })
   const { visible, thumbStyle, onScroll, onPointerDown, onPointerMove, onPointerEnd } =
-    useOverlayScrollbar(viewport)
+    useOverlayScrollbar(viewport, content, () => props.persistent)
 </script>
 
 <style scoped>
@@ -46,6 +51,10 @@
   .overlay-scroll-area__viewport::-webkit-scrollbar {
     display: none;
     width: 0;
+  }
+
+  .overlay-scroll-area__content {
+    display: flow-root;
   }
 
   .overlay-scroll-area__rail {

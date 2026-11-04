@@ -10,15 +10,17 @@
 
 {{include:_features.md}}
 
+{{include:_performance.md}}
+
 {{include:_architecture.md}}
 
-{{include:_performance.md}}
+{{include:_script.md}}
 
 {{include:_data-sources.md}}
 
 ## 🚀 Quick Start
 
-{{include:_usage-vue.md}}
+{{include:_product-vue.md}}
 
 {{include:_agent-runtime.md}}
 
@@ -32,4 +34,4 @@
 
 {{include:_whatsnew.md}}
 
-{{include:_license.md}}
+{{include:_product-license.md}}

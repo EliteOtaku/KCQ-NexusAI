@@ -1,7 +1,8 @@
 /**
  * @363045841yyt/klinechart — public API surface.
  *
- * Vue 3 bindings for @363045841yyt/klinechart-core. Bridges core signals to Vue's
+ * 完整 Vue 工作台与组件的唯一产品入口，内部模块随构建产物交付。
+ * Bridges core signals to Vue's
  * reactivity via `shallowRef` subscriptions so each adapter owns its own
  * reactivity boundary — no proxy wrapping of immutable signal values.
  *
@@ -20,6 +21,7 @@ import type {
   KLineData,
 } from '@363045841yyt/klinechart-core'
 import { createIndicatorSelectorController } from '@363045841yyt/klinechart-core'
+import { KlineChart } from '@vue-src/components/index.js'
 import {
   type App,
   type ComputedRef,
@@ -29,8 +31,7 @@ import {
   shallowRef,
   watch,
 } from 'vue'
-
-import { KlineChart } from './components/index.js'
+import KlineWorkbench from './workbench/KlineWorkbench.vue'
 import './styles/fonts.css'
 import './styles/scrollbar.css'
 
@@ -38,7 +39,6 @@ export type {
   ChartController,
   ChartMountOptions,
   ChartViewport,
-  CustomDataSource,
   KLineData,
 } from '@363045841yyt/klinechart-core'
 
@@ -54,14 +54,31 @@ export type {
   LegendTemplateContext,
   LegendTimeshareRow,
 } from '@363045841yyt/klinechart-core/controllers'
-export { default as ColorPicker } from './components/ColorPicker.vue'
-export type { ColorPickerProps } from './components/color-picker/types.js'
-
+export type {
+  BarsObserver,
+  BarsRequest,
+  ConnectionStatus,
+  DataSourceInstrument,
+  HistoryPage,
+  HistoryRequest,
+  InstrumentDescriptor,
+  MarketDataSource,
+  SourceCapabilities,
+} from '@363045841yyt/klinechart-core/market-data'
+export {
+  createMarketDataHost,
+  defaultMarketDataContext,
+  InstrumentType,
+  KLineAdjustment,
+  KLinePeriod,
+  MarketDataContext,
+} from '@363045841yyt/klinechart-core/market-data'
+export { default as ColorPicker } from '@vue-src/components/color/impl/ColorPicker.vue'
+export type { ColorPickerProps } from '@vue-src/components/color/types.js'
 export type {
   KlineTooltipSlotProps,
   LegendSlotProps,
-  MarkerTooltipSlotProps,
-} from './components/index.js'
+} from '@vue-src/components/index.js'
 export {
   DrawingStyleToolbar,
   IndicatorParams,
@@ -69,24 +86,35 @@ export {
   KLineTooltip,
   KlineChart,
   LeftToolbar,
-  MarkerTooltip,
-} from './components/index.js'
+} from '@vue-src/components/index.js'
+export {
+  SCRIPT_SOURCE_STORE_KEY,
+  type ScriptSourceStore,
+} from '@vue-src/composables/chart/scriptEditor/types.js'
+export {
+  MARKET_DATA_CONTEXT_KEY,
+  provideMarketDataContext,
+  useMarketDataContext,
+} from '@vue-src/composables/market/useMarketDataContext.js'
 
 // ---------------------------------------------------------------------------
 // Interaction primitives (overlay, toast + undo, textarea)
 // ---------------------------------------------------------------------------
 
-export { default as BaseModal } from './components/BaseModal.vue'
-export { default as BasePopover } from './components/common/BasePopover.vue'
-export { default as BaseTextarea } from './components/common/BaseTextarea.vue'
-export { default as BaseTooltip } from './components/common/BaseTooltip.vue'
-export { default as ToastViewport } from './components/common/ToastViewport.vue'
+export { default as BaseModal } from '@vue-src/components/common/BaseModal.vue'
+export { default as BasePopover } from '@vue-src/components/common/BasePopover.vue'
+export { default as BaseTextarea } from '@vue-src/components/common/BaseTextarea.vue'
+export { default as BaseTooltip } from '@vue-src/components/common/BaseTooltip.vue'
+export { default as ToastViewport } from '@vue-src/components/common/ToastViewport.vue'
 export {
   type AnchoredPlacement,
   type UseAnchoredPopoverOptions,
   useAnchoredPopover,
-} from './composables/overlay/useAnchoredPopover.js'
-export { type UseRovingFocusOptions, useRovingFocus } from './composables/overlay/useRovingFocus.js'
+} from '@vue-src/composables/overlay/useAnchoredPopover.js'
+export {
+  type UseRovingFocusOptions,
+  useRovingFocus,
+} from '@vue-src/composables/overlay/useRovingFocus.js'
 export {
   type CreateToastStoreOptions,
   createToastStore,
@@ -102,28 +130,23 @@ export {
   type ToastTone,
   type UndoToastOptions,
   useToast,
-} from './composables/toast/useToast.js'
+} from '@vue-src/composables/toast/useToast.js'
 
 // ---------------------------------------------------------------------------
 // Shared Agent workbench (browser and Electron Renderer)
 // ---------------------------------------------------------------------------
 
-export { default as AgentWorkbenchShell } from './features/agent/AgentWorkbenchShell.vue'
-export * from './features/agent/agent-contracts.js'
-export { BrowserAgentBridge } from './features/agent/browser-agent/bridge/impl/browser-agent-bridge.js'
-export type { BrowserAgentBridgeOptions } from './features/agent/browser-agent/bridge/types.js'
-export { default as AgentWorkspace } from './features/agent/components/AgentWorkspace.vue'
-export { createAgentPanelWidthStorage } from './features/agent/workspace/impl/agent-panel-width-storage.js'
-export { useAgentWorkspace } from './features/agent/workspace/impl/use-agent-workspace.js'
+export { formatTimeInTimeZone } from '@363045841yyt/klinechart-core'
+export type { ChartSettings } from '@363045841yyt/klinechart-core/config'
+export type { MarketDataConfiguration } from '@363045841yyt/klinechart-core/market-data'
 export {
-  createWorkspaceState,
-  displayConversation,
-} from './features/agent/workspace/impl/workspace-state.js'
-export type {
-  AgentPanelWidthStorage,
-  AgentWorkspaceAvailability,
-  AgentWorkspaceState,
-} from './features/agent/workspace/types.js'
+  createBuiltinMarketDataContext,
+  createMockDataSource,
+} from '@363045841yyt/klinechart-core/market-data/sources'
+export { createPersistedMarketDataHost } from '@vue-src/features/market/impl/persisted-market-data-host.js'
+export type { PersistedMarketDataHost } from '@vue-src/features/market/types.js'
+export type { KlineWorkbenchHandle, KlineWorkbenchProps } from './workbench/types.js'
+export { KlineWorkbench }
 
 // ---------------------------------------------------------------------------
 // Controller factory injection
@@ -168,7 +191,7 @@ export function createChart(opts: ChartMountOptions): ChartController | Promise<
   return controllerFactory(opts)
 }
 
-import { coreSignalToVueRef } from './utils/signalBridge.js'
+import { coreSignalToVueRef } from '@vue-src/utils/signalBridge.js'
 
 export { coreSignalToVueRef }
 
@@ -327,7 +350,7 @@ export function useIndicatorSelector(controller: ChartController): {
     const def = controller.catalog.find((d) => d.id === definitionId)
     if (def === undefined) return null
     await controller.loadIndicators([definitionId])
-    return controller.addIndicator(definitionId, def.role)
+    return controller.addIndicator(definitionId)
   }
 
   function remove(instanceId: string): boolean {
@@ -365,6 +388,7 @@ export function useIndicatorSelector(controller: ChartController): {
 export const KMapPlugin = {
   install(app: App): void {
     app.component('KLineChart', KlineChart)
+    app.component('KlineWorkbench', KlineWorkbench)
   },
 }
 
@@ -383,4 +407,4 @@ import { createChartController } from '@363045841yyt/klinechart-core'
 
 __setControllerFactory(createChartController)
 
-export { CORE_VERSION, VERSION } from './version.js'
+export { CORE_VERSION, VERSION } from '@vue-src/version.js'

@@ -1,0 +1,175 @@
+/** 脚本虚拟程序专用声明资源，不参与宿主 TypeScript 程序。 */
+/// <reference path="../quickjs/runtime/plotKind.ts" />
+import type { HLineOptions, HLineRef, InputDef, InputOptions } from '@363045841yyt/klinechart-plot-contracts'
+import type { LibraryModules } from '../contracts/library.js'
+import type { TechnicalAnalysisLibrary } from '../Library/types.js'
+import { Position as PositionEnum } from '../quickjs/types.js'
+import type { ScriptParamValue } from '../quickjs/types.js'
+import type { Series as ScriptSeries } from '../series/types.js'
+import type { ScriptIndicatorDeclaration, ScriptFillOptions, ScriptInput, ScriptPlot, PlotRef } from './types.js'
+import type { ScriptRequest } from '../request/types.js'
+import type { DrawingLineApi, DrawingBoxApi, DrawingLabelApi, ChartPoint, LineRef as ScriptLineRef, BoxRef as ScriptBoxRef, LabelRef as ScriptLabelRef, Color } from '@363045841yyt/klinechart-plot-contracts'
+
+declare global {
+  /** 输出到编辑器底部的“输出”面板；支持多个参数和对象。 */
+  var console: {
+    log(...values: unknown[]): void
+    info(...values: unknown[]): void
+    warn(...values: unknown[]): void
+    error(...values: unknown[]): void
+    debug(...values: unknown[]): void
+  }
+
+  /** 行情与金融计算共用的只读序列契约。 */
+  type Series = ScriptSeries
+
+  /** line.new 返回的线段引用；只在本次运行内有效，用于为接收引用的函数标注参数。 */
+  type LineRef = ScriptLineRef
+  /** 矩形与标签的运行内引用。 */
+  type BoxRef = ScriptBoxRef
+  type LabelRef = ScriptLabelRef
+  /** 创建、修改、读取和删除矩形；位置参数顺序与 Pine box.new 一致。 */
+  const box: DrawingBoxApi
+  /** 在历史 bar 的价格位置创建纯文字标签，支持 label.style_none。 */
+  const label: DrawingLabelApi
+  /** 当前执行 bar 是否是本次数据的最后一根。 */
+  const barstate: { readonly islast: boolean }
+
+  /** 编辑器从当前 inputs 推导并合并具体参数。 */
+  interface ScriptParameters {}
+
+  // 行情序列由 VM 注入为 globalThis 属性，声明成 var 才能让 globalThis.close 与 close 解析出同一类型。
+  var open: Series
+  var high: Series
+  var low: Series
+  var close: Series
+  var volume: Series
+  var time: Series
+  /** 当前 K 线索引，从 0 开始。 */
+  const bar_index: number
+  /**
+   * 创建、修改、读取和删除线段，跨 bar 保留。
+   *
+   * 只能在 onBar 内新建与修改；引用只在本次运行内有效，重算后旧引用失效。
+   *
+   * ```ts
+   * const id = line.new(bar_index, low[0], bar_index + 5, high[0])
+   * line.set_color(id, Color.Red)
+   * ```
+   */
+  const line: DrawingLineApi
+  /** chart.point 坐标工厂；line.new 会复制坐标，不保留 point 对象引用。 */
+  const chart: { readonly point: {
+    /** 用时间戳、bar 索引和价格构造 point；xloc 决定 line.new 读取哪个字段。 */
+    "new"(time: number, index: number, price: number): ChartPoint
+    /** 当前 K 线的 point，索引取 bar_index。 */
+    now(price: number): ChartPoint
+    /** 只带 bar 索引的 point，用于 xloc.bar_index。 */
+    from_index(index: number, price: number): ChartPoint
+    /** 只带毫秒时间戳的 point，用于 xloc.bar_time。 */
+    from_time(time: number, price: number): ChartPoint
+    /** 复制 point，得到独立值对象。 */
+    copy(point: ChartPoint): ChartPoint
+  } }
+  /**
+   * 内建技术分析库
+   * 序列结果用 [0] 取当前值、[1] 取上一根值，例如 ta.sma(close, 20)[0]。
+   */
+  const ta: TechnicalAnalysisLibrary
+
+  /**
+   * @summary 渲染位置
+   *
+   * 指标渲染位置，由宿主注入 VM。
+   *
+   * | 取值 | 含义 |
+   * | --- | --- |
+   * | `Position.Main` | 叠加到主图，与 K 线共用主图价格轴 |
+   * | `Position.Sub` | 独立副图 |
+   */
+  const Position: typeof PositionEnum
+
+
+  /** 输入参数：int / float 支持范围和步长，bool 显示开关，string 支持下拉选项。 */
+  const input: ScriptInput
+  /**
+   * 定义一个指标。
+   * 顶层代码只执行一次，顶层变量跨 bar 保留（等价 Pine 的 var）；逐根计算写在 onBar 内。
+   */
+  function defineIndicator(definition: ScriptIndicatorDeclaration): void
+  /**
+   * 惰性派生序列；读取时按绝对 bar 缓存，不主动填充历史。
+   * key 必须稳定且区分输入与参数；同 key 复用首次注册的回调。
+   * 回调用 offset 读取输入历史，用 self[offset + 1] 读取自身上一根；历史越界返回 NaN。
+   * 不要捕获当前 bar 的数值快照，应捕获 Series 并按 offset 取值。
+   */
+  function derive(key: string, compute: (self: Series, offset: number) => number): Series
+  /**
+   * 当前 K 线的绘图方法；仅在 onBar 中调用，name 必填，null 主动留空。
+   *
+   * | 方法 | 图形 | value 含义 |
+   * | --- | --- | --- |
+   * | `plot.Line` | 普通折线 | 跨空值连接前后有效点 |
+   * | `plot.LineBR` | 断线折线 | 空值处断开 |
+   * | `plot.StepLine` | 阶梯线 | 在相邻有效点的水平中点跳变，跨空值连接 |
+   * | `plot.StepLineBR` | 断线阶梯线 | 空值处断开 |
+   * | `plot.Histogram` | 柱状图 | 柱状图数值 |
+   * | `plot.Point` | 散点 | 散点数值 |
+   * | `plot.Shape` | 形状标记 | 数值或布尔条件；false 留空，absolute 定位时数值为价格 |
+   * | `plot.Char` | 字符标记 | 数值或布尔条件；false 留空，absolute 定位时数值为价格 |
+   * | `plot.Arrow` | 箭头 | 正负决定方向，绝对值决定长度 |
+   */
+  const plot: ScriptPlot
+  /**
+   * 声明两个 Plot 之间的填充区域；两个句柄由 plot.* 返回，仅在 onBar 中调用。
+   * 每根 bar 保存调用处求出的颜色；null 表示该 bar 不填充。
+   *
+   * | 参数 | 含义 |
+   * | --- | --- |
+   * | `from` / `to` | 填充的两个边界 Plot |
+   * | `color` | 当前 bar 的颜色，支持 CSS 颜色值，常用色可用 `Color` 枚举，透明度由颜色携带 |
+   * | `title` | 填充标识；不填则按 from/to 生成 |
+   */
+  function fill(
+    from: PlotRef,
+    to: PlotRef,
+    color: Color | (string & {}) | null,
+    title?: string,
+    options?: ScriptFillOptions,
+  ): void
+  /**
+   * 声明两条水平参考线之间的填充区域；整幅宽度、单色，不随 bar 变化。
+   * 只能在文件顶层调用，两个句柄都必须来自 hline。
+   */
+  function fill(
+    from: HLineRef,
+    to: HLineRef,
+    color: Color | (string & {}) | null,
+    title?: string,
+    options?: ScriptFillOptions,
+  ): void
+  /**
+   * 图表级水平参考线：固定价格、贯穿整幅宽度，不占用逐 bar 数据列。
+   *
+   * 只能在文件顶层声明；颜色、线型与线宽在整轮运行内固定，不随 bar 变化。
+   *
+   * ```ts
+   * hline(70, { color: Color.Gray, linestyle: HLineStyle.style_dashed })
+   * ```
+   *
+   * @param price 水平线价格
+   * @param options 标题、颜色、线型与线宽
+   * @returns 句柄；可交给 fill 与另一条水平线围出带状区域
+   */
+  function hline(price: number, options?: HLineOptions): HLineRef
+  /** 注册一个库，其成员同时绑定到同名全局对象。 */
+  function defineLibrary<T extends object>(name: string, members: T): Readonly<T>
+  /** 读取已注册的库，内置名称由统一库类型目录提供。 */
+  function importLibrary<K extends keyof LibraryModules>(name: K): LibraryModules[K]
+
+  // 参数契约与示例只在 ../request/types.ts 的 ScriptRequest.security 维护，这里不复制第二份。
+  /** 获取指定品种周期的数据；`syminfo.tickerid` 是当前图表品种。 */
+  const request: ScriptRequest
+  /** 当前图表品种信息；`tickerid` 可直接传给 `request.security`。 */
+  const syminfo: { readonly tickerid: string }
+}

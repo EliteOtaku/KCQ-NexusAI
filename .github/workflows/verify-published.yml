@@ -1,0 +1,134 @@
+# 发布后回读验收：从 npm registry 安装已发布版本，在独立项目里挂载 KlineWorkbench。
+#
+# 触发方式：
+#   - workflow_dispatch：手动指定版本，用于任意一次抽查或复现
+#   - workflow_run：release.yml 结束后自动跟随（tag 名去掉 v 即版本号）
+#
+# 检出的代码必须与被验收版本同源：手动触发检出 v<version> tag，自动触发检出触发的 head_sha。
+# 消费者示例会跟随主分支演进，若检出默认分支，后续的破坏性改动会让历史版本回读假红。
+#
+# 这个 workflow 只能报警，不能阻断发布：包已经上传，失败说明 registry 上的内容不可用。
+name: verify-published
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 已发布版本号（不带 v）
+        required: true
+        default: 0.11.0
+  workflow_run:
+    workflows: [release.yml]
+    types: [completed]
+
+permissions:
+  contents: read
+
+env:
+  TZ: Asia/Shanghai
+  PRODUCT_NAME: '@363045841yyt/klinechart'
+
+jobs:
+  verify:
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion != 'cancelled')
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: e2e/product-consumer
+    steps:
+      # 版本与检出点必须在 checkout 之前确定，checkout 才能落在被验收的那个版本上。
+      - name: Resolve version
+        id: version
+        shell: bash
+        working-directory: .
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            version="${{ inputs.version }}"
+            version="${version#v}"
+            ref="v${version}"
+          else
+            tag="$(jq -r '.workflow_run.head_branch' "$GITHUB_EVENT_PATH")"
+            version="${tag#v}"
+            ref="$(jq -r '.workflow_run.head_sha' "$GITHUB_EVENT_PATH")"
+          fi
+          if [ -z "$version" ]; then
+            echo '::error::Cannot resolve the published version'
+            exit 1
+          fi
+          if [ -z "$ref" ] || [ "$ref" = "null" ]; then
+            echo '::error::Cannot resolve the published ref'
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "Verifying $PRODUCT_NAME@$version from $ref"
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.version.outputs.ref }}
+
+      # 检出点没有对应到目标版本时立即失败，避免又变回“在主分支上验收旧版本”。
+      - name: Confirm the checkout matches the version
+        shell: bash
+        working-directory: .
+        run: |
+          set -euo pipefail
+          expected="${{ steps.version.outputs.version }}"
+          actual="$(jq -r '.version' packages/vue/package.json)"
+          if [ "$actual" != "$expected" ]; then
+            echo "::error::Checked out $actual, expected $expected"
+            exit 1
+          fi
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 12
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26.13.0
+          cache: pnpm
+          cache-dependency-path: e2e/product-consumer/pnpm-lock.yaml
+
+      - name: Install the published package
+        run: pnpm add --save-exact "$PRODUCT_NAME@${{ steps.version.outputs.version }}"
+
+      - name: Confirm the registry serves this version
+        run: |
+          set -euo pipefail
+          version="${{ steps.version.outputs.version }}"
+          published="$(npm view "$PRODUCT_NAME@$version" version)"
+          test "$published" = "$version"
+          npm view "$PRODUCT_NAME@$version" dist.integrity dist.tarball
+
+      - name: Type-check the public API
+        run: pnpm exec tsc --noEmit -p tsconfig.json
+
+      - name: Build the consumer page
+        run: pnpm exec vite build
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Mount the workbench in Chromium
+        run: pnpm exec playwright test
+
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: verify-published-${{ steps.version.outputs.version }}
+          path: e2e/product-consumer/test-results
+
+      - name: Record result
+        if: always()
+        shell: bash
+        working-directory: .
+        run: |
+          {
+            echo "### verify-published ${{ steps.version.outputs.version }}"
+            echo ""
+            echo "- result: \`${{ job.status }}\`"
+            echo "- package: \`$PRODUCT_NAME@${{ steps.version.outputs.version }}\`"
+            echo "- 失败时先看 artifact 里的截图与 Playwright 报告。"
+          } >> "$GITHUB_STEP_SUMMARY"

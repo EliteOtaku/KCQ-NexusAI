@@ -7,25 +7,72 @@ import {
 } from '@/engine/__tests__/helpers/renderTestKit'
 
 import type { DrawingPrimitive } from '@/foundation/plugin/index'
+import { createCanvas2DRenderer } from '@/rendering/render/backend/createCanvas2DRenderer'
 import { LINE_LABEL_NORMAL_OFFSET } from '../../geometry/impl/labelLayout'
 import { createDrawingLayer, createDrawingSessionLayer } from '../impl/plugin'
 import { createDefaultPrimitiveRendererSet } from '../impl/primitiveRendererSet'
 
 describe('createDrawingLayer', () => {
+  /** 默认适配器整层提交原语，GPU 目标不能误用行情画布。 */
+  it.each(['committed', 'session'] as const)(
+    'submits the default %s renderer through the backend',
+    (scope) => {
+      const drawingCtx = createMockCanvasContext()
+      const overlayCtx = createMockCanvasContext()
+      const paint = vi.fn(() => true)
+      const projection = {
+        primitives: [
+          {
+            kind: 'point',
+            point: { x: 10, y: 20 },
+            style: { stroke: '#f00' },
+          } satisfies DrawingPrimitive,
+        ],
+        yAxisRanges: [],
+        xAxisRanges: [],
+        snapLines: [],
+      }
+      const context = createMockRenderContext({
+        ctx: scope === 'committed' ? drawingCtx : overlayCtx,
+        drawingCtx,
+        overlayCtx,
+        drawingProjection: projection,
+        sessionDrawingProjection: projection,
+        sceneRenderer: { ...createCanvas2DRenderer(), primitives: { paint, dispose() {} } },
+      })
+      const layer = (scope === 'committed' ? createDrawingLayer : createDrawingSessionLayer)()
+      layer.paint({ ...context, paneId: 'main', clear: false })
+      expect(paint).toHaveBeenCalledExactlyOnceWith(
+        scope === 'committed' ? drawingCtx : overlayCtx,
+        [expect.objectContaining({ kind: 'circle', strokeWidth: 1 })],
+        1,
+        undefined,
+      )
+      expect(drawingCtx.fill).not.toHaveBeenCalled()
+      expect(overlayCtx.fill).not.toHaveBeenCalled()
+    },
+  )
+
   /** 正式图元与会话图元分别写入独立表面，避免被动态清屏和 GPU 覆盖。 */
   it.each(['committed', 'session'] as const)('renders %s primitives on its own canvas', (scope) => {
-    const mainCtx = createMockCanvasContext()
     const drawingCtx = createMockCanvasContext()
     const overlayCtx = createMockCanvasContext()
     const point = vi.fn()
     const context = createMockRenderContext({
-      ctx: mainCtx,
+      ctx: scope === 'committed' ? drawingCtx : overlayCtx,
       drawingCtx,
       overlayCtx,
       drawingProjection: {
-        primitives: [{ kind: 'point', point: { x: 10, y: 20 } } satisfies DrawingPrimitive],
+        primitives: [
+          {
+            kind: 'point',
+            point: { x: 10, y: 20 },
+            style: { stroke: '#f00' },
+          } satisfies DrawingPrimitive,
+        ],
         yAxisRanges: [],
         xAxisRanges: [],
+        snapLines: [],
       },
       viewport: { scrollLeft: 0, plotWidth: 800, plotHeight: 400 },
       pane: { height: 400 },
@@ -46,13 +93,27 @@ describe('createDrawingLayer', () => {
 
     expect(point).toHaveBeenCalledWith(
       scope === 'committed' ? drawingCtx : overlayCtx,
-      { kind: 'point', point: { x: 10, y: 20 } },
+      { kind: 'point', point: { x: 10, y: 20 }, style: { stroke: '#f00' } },
       1,
     )
   })
 })
 
 describe('createDefaultPrimitiveRendererSet', () => {
+  /** 注入的手柄填充色，与被测主题无关。 */
+  const HANDLE_FILL = '#101010'
+
+  /** 手柄填充取注入的背景色，不写死白色，明暗主题才都不会错。 */
+  it('fills handles with the injected background color', () => {
+    const ctx = createMockCanvasContext()
+    createDefaultPrimitiveRendererSet({ handleFill: HANDLE_FILL }).point(
+      ctx,
+      { kind: 'point', point: { x: 10, y: 20 }, style: { stroke: '#f00' } },
+      1,
+    )
+    expect(ctx.fillStyle).toBe(HANDLE_FILL)
+  })
+
   /** 端点标签按线段语义位置锚定，并在端点外侧排版。 */
   it.each([
     ['start', 10, 'left'],
@@ -62,7 +123,7 @@ describe('createDefaultPrimitiveRendererSet', () => {
     'renders a %s line label at its semantic anchor',
     (position, expectedX, expectedAlign) => {
       const ctx = createMockCanvasContext()
-      const renderers = createDefaultPrimitiveRendererSet()
+      const renderers = createDefaultPrimitiveRendererSet({ handleFill: HANDLE_FILL })
 
       renderers.line(
         ctx,
@@ -71,6 +132,7 @@ describe('createDefaultPrimitiveRendererSet', () => {
           a: { x: 10, y: 20 },
           b: { x: 90, y: 20 },
           showEndpoints: false,
+          style: { stroke: '#f00' },
           text: { text: '标签', position },
         },
         { left: 0, top: 0, right: 100, bottom: 100 },
@@ -85,11 +147,17 @@ describe('createDefaultPrimitiveRendererSet', () => {
   /** 字面量换行控制码必须被拆为多行，不按图元宽度自动折行。 */
   it('renders literal newline text without automatic wrapping', () => {
     const ctx = createMockCanvasContext()
-    const renderers = createDefaultPrimitiveRendererSet()
+    const renderers = createDefaultPrimitiveRendererSet({ handleFill: HANDLE_FILL })
 
     renderers.text(
       ctx,
-      { kind: 'text', point: { x: 10, y: 20 }, text: '第一行\\n第二行文字', baseline: 'top' },
+      {
+        kind: 'text',
+        point: { x: 10, y: 20 },
+        text: '第一行\\n第二行文字',
+        baseline: 'top',
+        style: { stroke: '#f00' },
+      },
       1,
     )
 
@@ -100,7 +168,7 @@ describe('createDefaultPrimitiveRendererSet', () => {
   /** 线段标签在旋转的局部坐标系中也必须逐行绘制。 */
   it('renders literal newline line labels in the rotated local coordinate system', () => {
     const ctx = createMockCanvasContext()
-    const renderers = createDefaultPrimitiveRendererSet()
+    const renderers = createDefaultPrimitiveRendererSet({ handleFill: HANDLE_FILL })
 
     renderers.line(
       ctx,
@@ -109,6 +177,7 @@ describe('createDefaultPrimitiveRendererSet', () => {
         a: { x: 10, y: 20 },
         b: { x: 90, y: 20 },
         showEndpoints: false,
+        style: { stroke: '#f00' },
         text: { text: '第一行\\n第二行', position: 'center' },
       },
       { left: 0, top: 0, right: 100, bottom: 100 },
@@ -122,7 +191,7 @@ describe('createDefaultPrimitiveRendererSet', () => {
   /** 线身虚线不得传染到锚点环：虚线只作用于线本身。 */
   it('keeps anchor rings solid on a dashed line', () => {
     const ctx = createMockCanvasContext()
-    const renderers = createDefaultPrimitiveRendererSet()
+    const renderers = createDefaultPrimitiveRendererSet({ handleFill: HANDLE_FILL })
 
     renderers.line(
       ctx,

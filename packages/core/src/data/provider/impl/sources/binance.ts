@@ -1,23 +1,9 @@
-/** Binance 源只负责标准 Provider 装配，不创建专用图表或指标生命周期。 */
-import { BarsLiveSource } from '../../../live/impl/barsLive.js'
-import { createTradeDataSource } from '../../../trades/impl/tradeSource.js'
-import { createHttpMarketDataTransport, createMarketDataProvider } from '../../protocol/index.js'
-import { marketDataProviderRegistry } from '../registry.js'
+/** Binance Provider 的实例装配，K 线与成交共享连接配置；实时连接由订阅池统一建立。 */
+import type { MarketDataProviderRegistry } from '../registry.js'
 import { dataSourceRegistry } from '../sourceRegistry.js'
+import { createHttpSource } from './createHttpSource.js'
 
-const source = dataSourceRegistry.binance
-const baseUrl = () =>
-  marketDataProviderRegistry.getConfig(source.id).baseUrl ?? source.defaultBaseUrl
-const transport = createHttpMarketDataTransport({ baseUrl, sourceLabel: source.id })
-export const binanceMarketDataProvider = createMarketDataProvider({
-  source,
-  transport,
-  trades: createTradeDataSource(source.id, transport, baseUrl),
-  liveBars: {
-    createStream({ symbol, period, barAggregation }) {
-      return new BarsLiveSource(source.id, symbol, period, barAggregation, baseUrl())
-    },
-  },
-})
-if (!marketDataProviderRegistry.get(source.id))
-  marketDataProviderRegistry.register(binanceMarketDataProvider)
+/** 通过同一实例装配 HTTP 与成交流；实时 K 线走共享订阅池。 */
+export function createBinanceMarketDataProvider(registry: MarketDataProviderRegistry) {
+  return createHttpSource(dataSourceRegistry.binance, registry, { trades: true })
+}

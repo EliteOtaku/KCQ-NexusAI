@@ -16,13 +16,12 @@
 
 import type { Signal } from '../../foundation/reactivity/signal.js'
 import type { Renderer } from '../render/Renderer.js'
-import type { SurfaceRegion } from '../render/SurfaceBackend.js'
 
 /**
  * 绘制角色。Scene 按角色分组/过滤（例如 overlay 帧只画 overlay），
  * 也供其它子系统按语义定位 Layer（如命中测试忽略 background）。
  *
- * 顺序是语义性的，不是绘制顺序；z 才是权威叠放顺序。
+ * 角色映射到 main / drawing / overlay 合成目标；同一目标内由 z 决定顺序。
  */
 export type LayerRole =
   | 'background' // grid, axes
@@ -45,6 +44,20 @@ export type LayerPane = string
 /** Layer 声明绘制到所有 pane 时使用的 pane 身份。 */
 export const LAYER_PANE_GLOBAL: LayerPane = 'global'
 
+/** 合成目标是固定的三个层带；z 只在目标内比较，避免 DOM 层序与 Scene 层序冲突。 */
+export type ScenePaintTarget = 'main' | 'drawing' | 'overlay'
+export const SCENE_TARGET_Z: Readonly<Record<ScenePaintTarget, number>> = {
+  main: 0,
+  drawing: 1,
+  overlay: 2,
+}
+export const SCENE_PAINT_TARGETS: readonly ScenePaintTarget[] = ['main', 'drawing', 'overlay']
+
+/** 角色到合成目标的唯一映射，Scene 与 DOM 使用相同层带语义。 */
+export function scenePaintTarget(role: LayerRole): ScenePaintTarget {
+  return role === 'drawing' ? 'drawing' : role === 'overlay' ? 'overlay' : 'main'
+}
+
 /**
  * 单个 pane 在一帧内的绘制输入：Scene 透传给每个命中该 pane 的 Layer。
  */
@@ -52,9 +65,21 @@ export interface FramePaint {
   /** 本帧构建的业务帧上下文（含 ctx/几何/主题），由 ChartRenderer 提供。 */
   context: unknown
   /** 本帧渲染后端；Layer 用它提交 GPU 画笔。 */
-  renderer: Pick<Renderer, 'beginFrame'>
-  /** 本 pane 的绘制区域，由 Scene 在分发图层前绑定。 */
-  region: SurfaceRegion
+  renderer: Renderer
+  /** 原始像素目标由 Pane 持有；未分配的 drawing 目标为 null。 */
+  targets: Readonly<Record<ScenePaintTarget, CanvasRenderingContext2D | null>>
+  /**
+   * 该 pane 主图带的可见 GPU 表面。存在时纯增量图层直接写入它，不再做整张拷贝；
+   * 缺省（Canvas 后端或直出不可用）时仍合成到 `targets.main`。
+   */
+  gpuSurface?: import('../primitives/types.js').PrimitiveSurface
+  /** 本帧 DPR；直出表面按它投影，缺省为 1。 */
+  dpr?: number
+  /**
+   * Pane 的完整尺寸（逻辑像素），Scene 据此生成从 (0, 0) 开始的绘制边界。
+   * 不接收价格坐标留白或图例高度，避免把映射范围误用为裁剪范围。
+   */
+  bounds: Readonly<{ width: number; height: number }>
   /** 帧计数器，用于动画与跳帧检测。 */
   frameNumber: number
   /** 距离上一次绘制的时间（ms），首帧可能为 0。 */
@@ -80,12 +105,60 @@ export interface SceneFrame {
  * Layer 从 `context` 读取所需能力（数据/几何/主题）。
  */
 export type LayerPaint<TFrame> = TFrame & {
+  /** Scene 已根据图层角色选择目标，业务层不得另行选择输出画布。 */
+  ctx: CanvasRenderingContext2D
   /** 当前 pane id；由 Scene 注入。 */
   paneId?: string
   /** 本帧是否清除该 pane 的 canvas；由 Scene 注入。 */
   clear?: boolean
   /** 本帧渲染后端；由 Scene 注入，直接绘制（测试）时可缺省。 */
-  sceneRenderer?: unknown
+  sceneRenderer?: Renderer
+  /** 本帧已绑定输出目标的原语提交器；Scene 注入，图层不得另行选择画布。 */
+  primitives?: import('../primitives/types.js').PrimitivePaint
+}
+
+/**
+ * 纯增量图层的绘制上下文：**没有 ctx**，只能提交原语。
+ *
+ * 类型上因此写不出 clip / clear / 读回 / 改坐标系，合批边界由构造保证，
+ * 不再依赖"图层承诺不碰状态"的口头约定。
+ */
+export type PrimitiveDrawContext<TFrame> = Omit<TFrame, 'ctx'> & {
+  /** 目标已绑定的原语提交入口；Scene 必注入，直接绘制的测试上下文可缺省。 */
+  primitives?: import('../primitives/types.js').PrimitivePaint
+  /** 仅用于文字度量；禁止用于绘制。 */
+  measureContext?: CanvasRenderingContext2D
+  /** 当前 pane id；由 Scene 注入。 */
+  paneId?: string
+  /** 本帧是否清除该 pane 的 canvas；由 Scene 注入。 */
+  clear?: boolean
+  /** 本帧渲染后端；由 Scene 注入。 */
+  sceneRenderer?: Renderer
+}
+
+/** 所有 Layer 的公共身份与生命周期。 */
+interface LayerBase<TFrame> {
+  readonly id: string
+  readonly role: LayerRole
+  /** 绘制目标 pane：具体 paneId 或 LAYER_PANE_GLOBAL。 */
+  readonly pane: LayerPane
+  /** 同一合成目标内 z 小者先画；相同 z 按注册顺序。 */
+  readonly z: number
+  /** 运行时开关，不改变图层成员关系。 */
+  visible: boolean
+  dispose(): void
+}
+
+/** 只输出纯增量原语：拿不到 ctx，可与相邻同类图层合并成一次合成。 */
+export interface DrawListLayer<TFrame = unknown> extends LayerBase<TFrame> {
+  readonly kind: 'draw-list'
+  paint(context: PrimitiveDrawContext<TFrame>): void
+}
+
+/** 允许自行改状态或直接写 canvas：Scene 在其前后立即合成。 */
+export interface ContextLayer<TFrame = unknown> extends LayerBase<TFrame> {
+  readonly kind?: 'context'
+  paint(context: LayerPaint<TFrame>): void
 }
 
 /**
@@ -99,22 +172,11 @@ export type LayerPaint<TFrame> = TFrame & {
  * - `visible` 是运行时开关；不可见的 Layer 被 Scene 跳过（不调用 paint）。
  * - `pane` 声明绘制目标，`LAYER_PANE_GLOBAL` 表示所有 pane。
  *
- * 泛型参数 `TFrame` 由使用方实例化为具体帧上下文类型（图表侧为 `RenderContext`）；
- * Scene 只透传，不感知其结构。
+ * 判别联合决定合成边界：`draw-list` 拿不到 ctx，只能增量提交；`context` 保留完整
+ * ctx，Scene 在其前后各自合成。泛型 `TFrame` 由使用方实例化为具体帧上下文
+ * （图表侧为 `RenderContext`），Scene 只透传，不感知其结构。
  */
-export interface Layer<TFrame = unknown> {
-  readonly id: string
-  readonly role: LayerRole
-  /** 绘制目标 pane：具体 paneId 或 LAYER_PANE_GLOBAL。 */
-  readonly pane: LayerPane
-  /** z 小者先画；相同 z 按注册顺序。 */
-  readonly z: number
-  /** 运行时开关，不改变图层成员关系。 */
-  visible: boolean
-
-  paint(ctx: LayerPaint<TFrame>): void
-  dispose(): void
-}
+export type Layer<TFrame = unknown> = DrawListLayer<TFrame> | ContextLayer<TFrame>
 
 /**
  * Scene 组合 Layer，并通过 Signal 暴露给订阅方。

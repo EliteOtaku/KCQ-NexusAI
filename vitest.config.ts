@@ -21,6 +21,8 @@ export default mergeConfig(
         // aliases. Running them under the root config would fail to resolve
         // the workspace package. Use `pnpm -r test` to fan out across packages.
         'packages/**',
+        // 嵌套 git worktree 是另一份完整检出，收集它们会跑重复用例且依赖不完整。
+        '.worktrees/**',
       ],
       root: fileURLToPath(new URL('./', import.meta.url)),
       env: {

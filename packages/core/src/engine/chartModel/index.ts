@@ -2,24 +2,14 @@
 
 export * from './impl/comparison/index.js'
 export * from './impl/modes/index.js'
-export {
-  type ChartModeId,
-  type ChartModelModule,
-  createChartModel,
-} from './impl/view/chartModelState.js'
+export { type ChartModelModule, createChartModel } from './impl/view/chartModelState.js'
 export {
   CHART_VIEW_DEFINITIONS,
   type ChartDataView,
   ChartDataViewId,
-  type ChartViewDefinition,
-  ChartWorkspaceId,
-  DEFAULT_PRIMARY_RENDERERS,
   isTimeShareDataView,
-  type MainInstanceDefinition,
-  type PrimaryRendererByView,
   type PrimaryRendererType,
   resolveChartDataView,
-  resolveChartDataViewForSpec,
   resolveChartWorkspaceId,
   type ViewCapabilities,
 } from './impl/view/chartViews.js'

@@ -4,7 +4,7 @@
  */
 
 import { execFile, spawn } from 'node:child_process'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -13,20 +13,126 @@ import { promisify } from 'node:util'
 const execFileAsync = promisify(execFile)
 const benchDir = dirname(fileURLToPath(import.meta.url))
 const repoDir = resolve(benchDir, '..')
+
+/** 多轮样本合并后统一汇总：百分位基于全部帧，单轮整段抖动不会决定结果。 */
+function poolRounds(rounds, refreshIntervalMs) {
+  const first = rounds[0]
+  const utilization = rounds
+    .map((round) => round.resource.mainThreadUtilization)
+    .filter((value) => Number.isFinite(value))
+  return summarize(
+    {
+      ...first.result,
+      cpuFramePreparationMs: rounds.flatMap((round) => round.result.cpuFramePreparationMs),
+      cpuFrameMs: rounds.flatMap((round) => round.result.cpuFrameMs),
+      frameIntervalsMs: rounds.flatMap((round) => round.result.frameIntervalsMs),
+      gpuFrameMs: rounds.flatMap((round) => round.result.gpuFrameMs),
+    },
+    {
+      gpuSamples: rounds.flatMap((round) => round.resource.gpuSamples),
+      mainThreadUtilization: utilization.length
+        ? utilization.reduce((sum, value) => sum + value, 0) / utilization.length
+        : null,
+    },
+    refreshIntervalMs,
+  )
+}
+
+/** 读取 --name=value 形式的命令行参数；用于单点重跑，不必一次跑完全部组合。 */
+function argument(name) {
+  const prefix = `--${name}=`
+  const match = process.argv.find((value) => value.startsWith(prefix))
+  return match ? match.slice(prefix.length) : undefined
+}
+
+const csv = (value) =>
+  value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+
+/**
+ * 分辨率预设：名称即结果里的 resolution 标签，尺寸为 CSS 像素，物理像素 = 尺寸 × dpr。
+ * default 保持历史基线；1080p / 2k 对应全屏图表在 1920×1080 与 2560×1440 下的滚动成本。
+ * 各档位在 DPR 2 下的画布像素都不超过应用的 MAX_CANVAS_PIXELS（16M），不会被 DPR 钳制降级。
+ */
+const RESOLUTIONS = {
+  default: { width: 1180, height: 640 },
+  '720p': { width: 1280, height: 720 },
+  '1080p': { width: 1920, height: 1080 },
+  '2k': { width: 2560, height: 1440 },
+}
+
+/**
+ * 解析逗号分隔的分辨率预设名。
+ * @param raw `1080p,2k` 形式的字符串
+ * @returns 预设名称与 CSS 像素尺寸
+ */
+function parseResolutions(raw) {
+  const names = csv(raw)
+  if (names.length === 0) throw new Error('resolution list is empty')
+  return names.map((name) => {
+    const preset = RESOLUTIONS[name]
+    if (!preset) {
+      throw new Error(
+        `unknown resolution "${name}"; available: ${Object.keys(RESOLUTIONS).join(', ')}`,
+      )
+    }
+    return { name, width: preset.width, height: preset.height }
+  })
+}
+
+/**
+ * 解析 DPR 参数；非有限值或小于 1 直接失败，不把错误配置静默降级成默认值。
+ * @param raw 命令行或环境变量给出的 DPR
+ * @returns 有效的设备像素比
+ */
+function parseDpr(raw) {
+  const value = Number(raw)
+  if (!Number.isFinite(value) || value < 1) throw new Error(`invalid DPR "${raw}"`)
+  return value
+}
+
+/**
+ * 结果行所属的分辨率标签；旧结果没有该字段时按画布尺寸归入预设，供增量合并复用。
+ * @param row 结果行（含 width/height，可能含 resolution）
+ * @returns 分辨率标签
+ */
+function resolutionOf(row) {
+  if (row.resolution) return row.resolution
+  const match = Object.entries(RESOLUTIONS).find(
+    ([, preset]) => preset.width === row.width && preset.height === row.height,
+  )
+  return match ? match[0] : `${row.width}x${row.height}`
+}
+
 const chromePath =
   process.env.KLINE_BENCH_CHROME ?? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
 const vitePath = resolve(repoDir, 'node_modules', 'vite', 'bin', 'vite.js')
 const port = Number(process.env.KLINE_BENCH_PORT ?? 4173)
 const remoteDebugPort = Number(process.env.KLINE_BENCH_DEBUG_PORT ?? 9223)
-const visiblePointSets = (process.env.KLINE_BENCH_POINTS ?? '1000,5000,10000')
-  .split(',')
+const visibleBarSets = csv(
+  argument('bars') ?? process.env.KLINE_BENCH_BARS ?? '300,600,1200,2000,3000,5000,7000,10000',
+)
   .map(Number)
   .filter((value) => Number.isFinite(value) && value > 0)
-const warmupFrames = Number(process.env.KLINE_BENCH_WARMUP ?? 120)
-const sampleFrames = Number(process.env.KLINE_BENCH_FRAMES ?? 600)
-const width = Number(process.env.KLINE_BENCH_WIDTH ?? 1180)
-const height = Number(process.env.KLINE_BENCH_HEIGHT ?? 640)
-const dpr = Number(process.env.KLINE_BENCH_DPR ?? 2)
+const backendSets = csv(
+  argument('backends') ?? process.env.KLINE_BENCH_BACKENDS ?? 'canvas2d,webgl2,webgpu',
+)
+const profileSets = csv(
+  argument('profiles') ?? process.env.KLINE_BENCH_PROFILES ?? 'lines3,lines12,ichimoku',
+)
+const warmupFrames = Number(process.env.KLINE_BENCH_WARMUP ?? 60)
+const sampleFrames = Number(process.env.KLINE_BENCH_FRAMES ?? 300)
+// 同一场景重复测量并取中位数；系统占用会让某一轮整体偏慢，单轮容易画出假拐点。
+const rounds = Math.max(
+  1,
+  Math.round(Number(argument('rounds') ?? process.env.KLINE_BENCH_ROUNDS ?? 1)) || 1,
+)
+const resolutions = parseResolutions(
+  argument('resolutions') ?? process.env.KLINE_BENCH_RESOLUTIONS ?? 'default',
+)
+const dpr = parseDpr(argument('dpr') ?? process.env.KLINE_BENCH_DPR ?? 2)
 const droppedFrameMultiplier = 1.5
 const severeJankMultiplier = 2
 
@@ -110,6 +216,31 @@ async function evaluate(page, expression, awaitPromise = true) {
 async function performanceMetrics(page) {
   const response = await page.send('Performance.getMetrics')
   return Object.fromEntries(response.metrics.map((metric) => [metric.name, metric.value]))
+}
+
+/**
+ * 把页面 layout viewport 与 DPR 固定到指定分辨率。
+ *
+ * 画布尺寸由场景参数决定，但 layout viewport 与 devicePixelRatio 来自浏览器；
+ * 不覆盖的话 1080p/2K 只是把大画布塞进默认窗口，反映不了全屏图表的真实成本。
+ *
+ * @param page       页面级 CDP 客户端
+ * @param resolution 预设名称与 CSS 像素尺寸
+ * @param dpr        设备像素比
+ */
+async function applyResolution(page, resolution, dpr) {
+  await page.send('Emulation.setDeviceMetricsOverride', {
+    width: resolution.width,
+    height: resolution.height,
+    deviceScaleFactor: dpr,
+    mobile: false,
+  })
+  const actual = await evaluate(page, 'window.devicePixelRatio')
+  if (Math.abs(actual - dpr) > 1e-6) {
+    throw new Error(
+      `DPR override failed for ${resolution.name}: page reports ${actual}, expected ${dpr}`,
+    )
+  }
 }
 
 /** 读取可选的 NVIDIA 设备清单；非 NVIDIA 环境不应因此中止基准。 */
@@ -273,9 +404,14 @@ function summarize(result, resource, refreshIntervalMs) {
 /** 将关键汇总指标同步输出为便于论文使用的 CSV。 */
 function toCsv(results) {
   const columns = [
+    'resolution',
     'backend',
-    'indicatorProfile',
-    'visiblePoints',
+    'effectiveBackend',
+    'lineProfile',
+    'visibleBars',
+    'width',
+    'height',
+    'dpr',
     'cpuFramePreparationP50Ms',
     'cpuFramePreparationP95Ms',
     'initializationMs',
@@ -300,6 +436,8 @@ function toCsv(results) {
     'gpuMemoryMaxMiB',
     'drawCallsPerFrame',
     'queueSubmitsPerFrame',
+    'uploadsPerFrame',
+    'uploadedBytesPerFrame',
   ]
   const rows = results.map((result) =>
     columns
@@ -313,8 +451,30 @@ function toCsv(results) {
 }
 
 /** 运行完整矩阵并保证所有临时进程与目录被清理。 */
+/** 输出阶段日志；长等待期间用户必须知道当前卡在哪一步。 */
+function logPhase(message) {
+  process.stderr.write(`[bench] ${message}\n`)
+}
+
+/** 等待期间每秒打一个点，避免单场景跑十几秒时界面完全静默。 */
+function heartbeat() {
+  const timer = setInterval(() => process.stderr.write('.'), 1000)
+  return () => clearInterval(timer)
+}
+
+/** 在页面里跑一个场景；执行期间持续打点，长场景也不会看起来卡死。 */
+async function runPageScenario(page, options) {
+  const stopHeartbeat = heartbeat()
+  try {
+    return await evaluate(page, `window.renderBench.runScenario(${JSON.stringify(options)})`)
+  } finally {
+    stopHeartbeat()
+  }
+}
+
 async function main() {
   const profileDir = await mkdtemp(resolve(tmpdir(), 'kline-render-bench-'))
+  logPhase('starting Vite dev server…')
   const vite = spawn(
     process.execPath,
     [vitePath, '--config', resolve(benchDir, 'vite.config.ts')],
@@ -338,6 +498,7 @@ async function main() {
       20_000,
       'Vite server',
     )
+    logPhase('launching headless Chrome…')
 
     const chromeArgs = [
       '--headless=new',
@@ -352,7 +513,7 @@ async function main() {
       '--enable-precise-memory-info',
       `--remote-debugging-port=${remoteDebugPort}`,
       `--user-data-dir=${profileDir}`,
-      `--window-size=${width},${height}`,
+      `--window-size=${resolutions[0].width},${resolutions[0].height}`,
       `--force-device-scale-factor=${dpr}`,
       '--no-first-run',
       '--no-default-browser-check',
@@ -387,6 +548,7 @@ async function main() {
       20_000,
       'benchmark page',
     )
+    logPhase('checking GPU identity…')
 
     const systemInfo = await browser.send('SystemInfo.getInfo')
     const browserVersion = await browser.send('Browser.getVersion')
@@ -399,91 +561,162 @@ async function main() {
       throw new Error('Hardware WebGL/WebGPU unavailable in headless Chrome')
     }
 
-    const submissionRaw = await evaluate(
-      page,
-      'window.renderBench.runSubmissionBenchmark(7, 50, 400)',
-    )
-    const submissionBatching = {
-      commandBuffersPerFrame: submissionRaw.commandBuffersPerFrame,
-      repetitionsPerSample: submissionRaw.repetitionsPerSample,
-      warmupFrames: submissionRaw.warmupFrames,
-      sampleFrames: submissionRaw.sampleFrames,
-      batchedSubmitP50Ms: percentile(submissionRaw.batchedSubmitMs, 0.5),
-      batchedSubmitP95Ms: percentile(submissionRaw.batchedSubmitMs, 0.95),
-      splitSubmitP50Ms: percentile(submissionRaw.splitSubmitMs, 0.5),
-      splitSubmitP95Ms: percentile(submissionRaw.splitSubmitMs, 0.95),
-      p50Speedup:
-        percentile(submissionRaw.batchedSubmitMs, 0.5) > 0
-          ? percentile(submissionRaw.splitSubmitMs, 0.5) /
-            percentile(submissionRaw.batchedSubmitMs, 0.5)
-          : null,
-      raw: submissionRaw,
-    }
-    process.stdout.write(
-      `WebGPU submit A/B: one=${submissionBatching.batchedSubmitP50Ms.toFixed(3)}ms, ` +
-        `seven=${submissionBatching.splitSubmitP50Ms.toFixed(3)}ms, ` +
-        `speedup=${submissionBatching.p50Speedup?.toFixed(2) ?? 'N/A'}x\n`,
-    )
-
     const processInfo = await browser.send('SystemInfo.getProcessInfo')
     const chromeProcessIds = processInfo.processInfo.map((process) => Number(process.id))
     gpuSampler = beginGpuSampling(chromeProcessIds)
+    logPhase('calibrating refresh interval…')
     const refreshIntervals = await evaluate(page, 'window.renderBench.measureRefreshIntervals(180)')
     const refreshIntervalMs = percentile(refreshIntervals, 0.5)
     if (!refreshIntervalMs || refreshIntervalMs <= 0) {
       throw new Error('Unable to calibrate requestAnimationFrame refresh interval')
     }
     const scenarios = []
-    for (const indicatorProfile of ['ma', 'ichimoku']) {
-      for (const visiblePoints of visiblePointSets) {
-        for (const backend of ['canvas2d', 'webgl2', 'webgpu']) {
-          const options = {
-            backend,
-            indicatorProfile,
-            visiblePoints,
-            width,
-            height,
-            dpr,
-            warmupFrames,
-            sampleFrames,
+    const optionsByKey = new Map()
+    const backends = backendSets
+    const profiles = profileSets
+    const totalScenarios =
+      resolutions.length * backends.length * visibleBarSets.length * profiles.length
+    const resolutionPlan = resolutions
+      .map((resolution) => `${resolution.name} ${resolution.width}×${resolution.height}`)
+      .join(' / ')
+    process.stderr.write(
+      `Plan: ${totalScenarios} scenarios (${resolutionPlan} @ ${dpr}x × ${backends.join('/')} × ` +
+        `${visibleBarSets.join('/')} bars × ${profiles.join('/')}), ` +
+        `refresh ${(1000 / refreshIntervalMs).toFixed(0)} Hz` +
+        `${rounds > 1 ? `, ${rounds} rounds (pooled)` : ''}\n`,
+    )
+    let scenarioIndex = 0
+    for (const resolution of resolutions) {
+      logPhase(`viewport ${resolution.name} ${resolution.width}×${resolution.height} @ ${dpr}x`)
+      await applyResolution(page, resolution, dpr)
+      for (const backend of backends) {
+        for (const visibleBars of visibleBarSets) {
+          for (const lineProfile of profiles) {
+            scenarioIndex += 1
+            const sampleBudget = visibleBars >= 2000 ? Math.min(sampleFrames, 120) : sampleFrames
+            const options = {
+              resolution: resolution.name,
+              backend,
+              lineProfile,
+              visibleBars,
+              width: resolution.width,
+              height: resolution.height,
+              dpr,
+              warmupFrames,
+              sampleFrames: sampleBudget,
+            }
+            optionsByKey.set(`${resolution.name}|${backend}|${lineProfile}|${visibleBars}`, options)
+            const measured = []
+            for (let round = 1; round <= rounds; round += 1) {
+              process.stderr.write(
+                `[${scenarioIndex}/${totalScenarios}]` +
+                  (rounds > 1 ? ` r${round}/${rounds}` : '') +
+                  ` ${resolution.name} ${lineProfile} ${backend} ${visibleBars}b … `,
+              )
+              const before = await performanceMetrics(page)
+              const resourceStartedAt = Date.now()
+              const startedAt = performance.now()
+              const result = await runPageScenario(page, options)
+              const resourceEndedAt = Date.now()
+              const gpuSamples = gpuSampler.between(resourceStartedAt, resourceEndedAt)
+              const elapsedSeconds = (performance.now() - startedAt) / 1000
+              const after = await performanceMetrics(page)
+              const taskDuration = Math.max(
+                0,
+                (after.TaskDuration ?? 0) - (before.TaskDuration ?? 0),
+              )
+              const mainThreadUtilization =
+                elapsedSeconds > 0 ? (taskDuration / elapsedSeconds) * 100 : null
+              const row = summarize(
+                result,
+                { gpuSamples, mainThreadUtilization },
+                refreshIntervalMs,
+              )
+              measured.push({ result, resource: { gpuSamples, mainThreadUtilization } })
+              const summary = row.summary
+              const severeJankRate =
+                summary.severeJankRate === null
+                  ? 'N/A'
+                  : `${(summary.severeJankRate * 100).toFixed(2)}%`
+              process.stderr.write(
+                `done in ${elapsedSeconds.toFixed(1)}s | ` +
+                  `prepare ${summary.cpuFramePreparationP50Ms?.toFixed(3)}ms, ` +
+                  `paint ${summary.cpuFrameP50Ms?.toFixed(3)}ms, ` +
+                  `FPS ${summary.observedFps?.toFixed(1)}, ` +
+                  `1% low ${summary.onePercentLowFps?.toFixed(1)}, ` +
+                  `P99 ${summary.frameIntervalP99Ms?.toFixed(2)}ms, jank ${severeJankRate}\n`,
+              )
+            }
+            scenarios.push(poolRounds(measured, refreshIntervalMs))
           }
+        }
+      }
+    }
+
+    // 单轮中明显高于两侧 bar 的点通常来自整机占用，不是几何成本；补测后取中位数。
+    // 多轮已经摊平抖动，只有单轮时才需要补测异常点。
+    const retries = rounds === 1 ? Math.max(0, Number(process.env.KLINE_BENCH_RETRIES ?? 2)) : 0
+    const groups = new Map()
+    for (const scenario of scenarios) {
+      const key = `${scenario.resolution}|${scenario.backend}|${scenario.lineProfile}`
+      const series = groups.get(key) ?? []
+      series.push(scenario)
+      groups.set(key, series)
+    }
+    for (const series of groups.values()) {
+      series.sort((a, b) => a.visibleBars - b.visibleBars)
+      for (let index = 1; index < series.length - 1; index += 1) {
+        const current = series[index]
+        const p50 = current.summary.cpuFrameP50Ms
+        const left = series[index - 1].summary.cpuFrameP50Ms
+        const right = series[index + 1].summary.cpuFrameP50Ms
+        if (p50 == null || left == null || right == null) continue
+        const neighbor = Math.max(left, right)
+        if (p50 <= neighbor * 1.35 || p50 - neighbor < 0.4) continue
+        const options = optionsByKey.get(
+          `${current.resolution}|${current.backend}|${current.lineProfile}|${current.visibleBars}`,
+        )
+        if (!options || retries === 0) continue
+        const measured = [current]
+        for (let attempt = 1; attempt <= retries; attempt += 1) {
+          process.stderr.write(
+            `[stabilize] ${current.resolution} ${current.lineProfile} ${current.backend} ` +
+              `${current.visibleBars}b r${attempt}/${retries} … `,
+          )
           const before = await performanceMetrics(page)
           const resourceStartedAt = Date.now()
           const startedAt = performance.now()
-          const result = await evaluate(
-            page,
-            `window.renderBench.runScenario(${JSON.stringify(options)})`,
-          )
-          const resourceEndedAt = Date.now()
-          const gpuSamples = gpuSampler.between(resourceStartedAt, resourceEndedAt)
+          const result = await runPageScenario(page, options)
+          const gpuSamples = gpuSampler.between(resourceStartedAt, Date.now())
           const elapsedSeconds = (performance.now() - startedAt) / 1000
           const after = await performanceMetrics(page)
           const taskDuration = Math.max(0, (after.TaskDuration ?? 0) - (before.TaskDuration ?? 0))
-          const mainThreadUtilization =
-            elapsedSeconds > 0 ? (taskDuration / elapsedSeconds) * 100 : null
-          scenarios.push(
-            summarize(result, { gpuSamples, mainThreadUtilization }, refreshIntervalMs),
+          measured.push(
+            summarize(
+              result,
+              {
+                gpuSamples,
+                mainThreadUtilization:
+                  elapsedSeconds > 0 ? (taskDuration / elapsedSeconds) * 100 : null,
+              },
+              refreshIntervalMs,
+            ),
           )
-          const summary = scenarios.at(-1).summary
-          const severeJankRate =
-            summary.severeJankRate === null
-              ? 'N/A'
-              : `${(summary.severeJankRate * 100).toFixed(2)}%`
-          process.stdout.write(
-            `${indicatorProfile} ${backend} ${visiblePoints}: prepare P50=${summary.cpuFramePreparationP50Ms?.toFixed(3)}ms, ` +
-              `CPU submit P50=${summary.cpuFrameP50Ms?.toFixed(3)}ms, ` +
-              `GPU P50=${summary.gpuFrameP50Ms?.toFixed(3) ?? 'N/A'}ms, ` +
-              `FPS=${summary.observedFps?.toFixed(1)}, ` +
-              `1% low=${summary.onePercentLowFps?.toFixed(1)}, ` +
-              `frame P99=${summary.frameIntervalP99Ms?.toFixed(2)}ms, jank=${severeJankRate}\n`,
+          process.stderr.write(
+            `done in ${elapsedSeconds.toFixed(1)}s | paint ` +
+              `${measured.at(-1).summary.cpuFrameP50Ms?.toFixed(3)}ms\n`,
           )
         }
+        const sorted = [...measured].sort(
+          (a, b) => (a.summary.cpuFrameP50Ms ?? Infinity) - (b.summary.cpuFrameP50Ms ?? Infinity),
+        )
+        Object.assign(current, sorted[Math.floor(sorted.length / 2)])
       }
     }
 
     const nvidiaInventory = await readNvidiaInventory()
     const report = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       generatedAt: new Date().toISOString(),
       git: {
         branch: (
@@ -502,33 +735,67 @@ async function main() {
         chromeArgs,
       },
       configuration: {
-        visiblePointSets,
+        resolutions: resolutions.map((resolution) => ({
+          name: resolution.name,
+          width: resolution.width,
+          height: resolution.height,
+        })),
+        visibleBars: visibleBarSets,
         warmupFrames,
         sampleFrames,
-        width,
-        height,
+        rounds,
+        outlierRetries: retries,
         dpr,
         refreshIntervalMs,
         nominalRefreshRateHz: 1000 / refreshIntervalMs,
-        indicatorProfiles: {
-          ma: ['MA5', 'MA20', 'MA60'],
-          ichimoku: ['Tenkan9', 'Kijun26', 'SpanA', 'SpanB52', 'Chikou26', 'Cloud26'],
-        },
+        lineProfiles: { lines3: 3, lines12: 12, ichimoku: 5 },
         panes: 1,
-        webgpuMsaa: 4,
+        webgpuMsaa: 1,
       },
-      submissionBatching,
       scenarios,
     }
-
+    // 单点重跑时与已有结果合并：按 resolution/backend/profile/bars 覆盖本次测过的行，其余保留。
     const resultsDir = resolve(benchDir, 'results')
-    await mkdir(resultsDir, { recursive: true })
-    await writeFile(
-      resolve(resultsDir, 'render-bench-local.json'),
-      `${JSON.stringify(report, null, 2)}\n`,
+    const jsonPath = resolve(resultsDir, 'render-bench-local.json')
+    let previous = null
+    try {
+      previous = JSON.parse(await readFile(jsonPath, 'utf8'))
+    } catch {
+      previous = null
+    }
+    const keyOf = (row) =>
+      `${resolutionOf(row)}|${row.backend}|${row.lineProfile}|${row.visibleBars}`
+    const merged = new Map()
+    for (const row of previous?.scenarios ?? []) {
+      merged.set(keyOf(row), { ...row, resolution: resolutionOf(row) })
+    }
+    const reused = merged.size
+    for (const row of scenarios) merged.set(keyOf(row), row)
+    const resolutionOrder = new Map(
+      resolutions.map((resolution, index) => [resolution.name, index]),
     )
-    await writeFile(resolve(resultsDir, 'render-bench-local.csv'), toCsv(scenarios))
-    process.stdout.write(`Results: ${resolve(resultsDir, 'render-bench-local.json')}\n`)
+    const rank = (row) => {
+      const index = resolutionOrder.get(row.resolution)
+      return index === undefined ? resolutions.length : index
+    }
+    const mergedScenarios = [...merged.values()].sort(
+      (a, b) =>
+        rank(a) - rank(b) ||
+        a.resolution.localeCompare(b.resolution) ||
+        a.visibleBars - b.visibleBars ||
+        a.lineProfile.localeCompare(b.lineProfile) ||
+        a.backend.localeCompare(b.backend),
+    )
+    report.scenarios = mergedScenarios
+    report.configuration.mergedFromPrevious = reused
+    process.stderr.write(
+      `Merged ${scenarios.length} measured scenarios with ${reused} existing rows (${mergedScenarios.length} total)\n`,
+    )
+
+    await mkdir(resultsDir, { recursive: true })
+    await writeFile(jsonPath, `${JSON.stringify(report, null, 2)}\n`)
+    await writeFile(resolve(resultsDir, 'render-bench-local.csv'), toCsv(mergedScenarios))
+    process.stdout.write(`Results: ${jsonPath}\n`)
   } finally {
     await gpuSampler?.stop()
     page?.close()

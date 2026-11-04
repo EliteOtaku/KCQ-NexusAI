@@ -13,12 +13,11 @@ import type { PriceAxisRangeMode } from '../../foundation/config/priceAxisRangeM
 import type { ChartWorkspaceId } from '../../foundation/types/chartView.js'
 import type { ScaleType } from '../../foundation/types/scaleType.js'
 import type { DrawingObject } from '../drawing/index.js'
-import type { PaneSpec } from '../pane/types.js'
 import type { PriceRange } from '../scale/index.js'
-import type { IndicatorInstanceInput } from '../state/indicatorState.js'
+import type { IndicatorInstanceConfig } from '../state/indicatorState.js'
 
-/** 布局文档版本号；恢复时据此迁移旧文档。 */
-export const LAYOUT_DOCUMENT_VERSION = 1
+/** Alpha 布局只接受当前版本，不迁移旧文档。 */
+export const LAYOUT_DOCUMENT_VERSION = 3
 
 /** 单个数据视图可恢复的横向位置：锚点时间 + 相对偏移 + 缩放等级。 */
 export interface LayoutViewportSnapshot {
@@ -28,10 +27,17 @@ export interface LayoutViewportSnapshot {
 }
 
 /** 单个视图工作区中需要跨会话恢复的用户配置。 */
+export interface LayoutPaneConfig {
+  readonly id: string
+  readonly ratio: number
+  readonly visible?: boolean
+  readonly minHeightPx?: number
+}
+
 export interface LayoutWorkspace {
-  readonly instances: ReadonlyArray<IndicatorInstanceInput>
-  readonly paneRatios: Readonly<Record<string, number>>
-  readonly paneSpecs: ReadonlyArray<PaneSpec>
+  readonly instances: ReadonlyArray<IndicatorInstanceConfig>
+  /** 顺序、可见性和高度权重的唯一来源，与指标实现是否就绪无关。 */
+  readonly paneSpecs: ReadonlyArray<LayoutPaneConfig>
   readonly paneScaleTypes: Readonly<Record<string, ScaleType>>
 }
 
@@ -103,7 +109,7 @@ export interface LayoutApi {
   >
   createLayout(input: { name: string }): Promise<string>
   setLayoutAutoSave(input: { enabled: boolean }): Promise<void>
-  /** 先加载文档引用的指标实现，再原子恢复；返回时状态已写入。 */
+  /** 立即原子恢复配置，再加载指标内容；内容加载不改变 pane 布局。 */
   applyLayout(document: LayoutDocument): Promise<void>
   listLayouts(): Promise<ReadonlyArray<LayoutSummary>>
   saveLayout(input: { name: string; id?: string }): Promise<string>

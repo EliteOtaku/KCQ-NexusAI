@@ -2,6 +2,9 @@
 
 面向浏览器的框架无关 K 线图表运行时，以自研 Signal 响应式状态内核为中心，提供多后端渲染能力。
 
+> **内部模块。** 本包不对外发布，随产品包 [`@363045841yyt/klinechart`](../vue/README.md) 交付；
+> 只需安装该包。下文导入路径在 monorepo 内通过 workspace 解析。
+
 ## 概述
 
 `@363045841yyt/klinechart-core` 是 KLineChartQuant 各框架绑定的运行时基础。它负责图表业务状态、视口与面板计算、输入处理、数据协调和渲染；它会创建及管理图表 DOM 与 Canvas，但应用层 UI 由 Vue、React、Angular 或自定义适配器负责。
@@ -12,16 +15,6 @@
 - 通过 Controller 方法修改图表状态。
 - 自定义宿主需要时转发浏览器输入事件。
 - 宿主卸载时销毁 Controller。
-
-## 安装
-
-```bash
-npm install @363045841yyt/klinechart-core
-# 或
-pnpm add @363045841yyt/klinechart-core
-# 或
-yarn add @363045841yyt/klinechart-core
-```
 
 ## 快速开始
 
@@ -59,7 +52,7 @@ const unsubscribe = chart.viewport.subscribe(() => {
 
 // 指标实现按需加载；目录可同步读取。
 await chart.loadIndicators(['MA'])
-chart.addIndicator('MA', 'main')
+chart.addIndicator('MA')
 chart.zoomIn()
 
 // 宿主移除时调用两者。
@@ -135,9 +128,9 @@ import {
 
 ### 挂载选项
 
-`ChartMountOptions` 接收宿主 `container`，以及可选的初始数据或 symbols。它还支持初始缩放、light 或 dark 主题偏好、图表 settings、市场交易时段、布局尺寸和框架宿主预先创建的 DOM layer。
+`ChartMountOptions` 接收宿主 `container`、行情上下文及初始 symbols，也支持初始缩放、主题、settings、市场交易时段、布局尺寸和框架宿主的 DOM layer。
 
-数据已就绪时使用 `data`。通过已注册行情 Provider 拉取数据时使用 `symbols`。数据完全由应用持有时，使用 `applyCustomData()` 原子写入完整数据包并绕过拉取链路。
+通过 `symbols` 选择已注册 Provider 的品种，行情数据归 Provider 运行时管理。
 
 ### 只读状态
 
@@ -158,7 +151,7 @@ import {
 `chart.legend` 统一管理指标、比较品种与自定义图例。创建返回稳定图例 ID，后续查询和修改使用同一 ID。
 
 ```typescript
-const id = chart.legend.create({ kind: 'indicator', definitionId: 'MA', role: 'main' })
+const id = chart.legend.create({ kind: 'indicator', definitionId: 'MA' })
 if (id) {
   chart.legend.update(id, { hidden: true })
   chart.legend.get(id)
@@ -174,10 +167,6 @@ chart.legend.rows.peek() // 所有 Pane 的展示行，包含按钮能力 action
 ### 数据与模式
 
 ```typescript
-chart.setData(nextBars)
-chart.appendData(laterBars)
-chart.updateData(revisedBars)
-
 chart.setSymbols([
   { symbol: '000001', market: 'CN', period: 'daily', source: 'baostock' },
 ])
@@ -187,7 +176,7 @@ chart.removeComparisonSymbol('000002')
 chart.switchToTimeShareForDate(20240102)
 ```
 
-拉取型数据请通过 market-data API 注册 Provider 和品种。`setCurrentSymbol()` 与 `setCurrentPeriod()` 只更新当前选择，不触发拉取；`resetToFetcher()` 可将 custom data 图表切回 Provider 拉取链路。
+通过 market-data API 注册 Provider，选择品种后沿统一行情链路取数。公开控制器提供品种选择和只读数据，不提供数组注入方法。
 
 ### 视口、主题与输入
 
@@ -211,7 +200,7 @@ Core 创建默认 DOM scaffold 时会在挂载期间安装交互绑定。由框�
 
 ```typescript
 await chart.loadIndicators(['MACD', 'RSI'])
-const id = chart.addIndicator('MACD', 'sub', { fast: 12, slow: 26, signal: 9 })
+const id = chart.addIndicator('MACD', { fast: 12, slow: 26, signal: 9 })
 if (id) chart.updateIndicatorParams(id, { fast: 10, slow: 20, signal: 7 })
 
 chart.createSubPane('rsi-pane', 'RSI', { period1: 6, period2: 12, period3: 24 })
@@ -269,11 +258,5 @@ Canvas preference: Canvas2D
 ```
 
 默认同步 Host 尝试 WebGL，失败时使用 Canvas2D。WebGPU 通过 renderer settings 选择，并可在 device lost 后运行时降级。
-
-## 相关包
-
-- `@363045841yyt/klinechart` - Vue 3 bindings
-- `@363045841yyt/klinechart-react` - React bindings
-- `@363045841yyt/klinechart-angular` - Angular bindings
 
 {{include:_license.md}}

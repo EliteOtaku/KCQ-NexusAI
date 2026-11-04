@@ -6,6 +6,7 @@
  * 由 loadIndicatorDefinitions 按需填充。
  */
 import { GENERIC_ERROR_CODES, KLineChartError } from '../../errors.js'
+import { batch, createSignal } from '../../foundation/reactivity/signal.js'
 import type { ChartDataView } from '../chartModel/index.js'
 import { BUILTIN_INDICATOR_MANIFEST } from './generated/builtinIndicators.js'
 import type { IndicatorName } from './indicatorContracts.js'
@@ -17,9 +18,9 @@ import {
 } from './indicatorLayerNaming.js'
 import type {
   IndicatorCategory,
+  IndicatorInputDef,
   IndicatorKind,
   IndicatorMetadata,
-  IndicatorType,
 } from './indicatorMetadata.js'
 
 /** 装饰器与定义配置由叶子模块提供，此处转出以维持公开出口。 */
@@ -32,18 +33,23 @@ export { resolveIndicatorLayerId } from './indicatorLayerNaming.js'
  * 内置定义由生成器在编译期从 @Indicator 声明提取。
  */
 export interface IndicatorDescriptor {
+  readonly source?: IndicatorMetadata['source']
   readonly name: IndicatorName
   readonly kind: IndicatorKind
   readonly aliases?: readonly string[]
   readonly displayName: string
+  /** 指标选择器/图例显示的长名称；缺省用 displayName。 */
+  readonly title?: string
+  /** 指标选择器里的说明文本；缺省不展示说明。 */
+  readonly info?: string
   readonly category: IndicatorCategory
-  readonly indicatorType: IndicatorType
-  readonly indicatorTypeLabel?: string
   readonly defaultPaneId: string
   readonly dataViews?: readonly ChartDataView[]
   readonly allowMainPane?: boolean
   /** runtime.defaultParams 的静态值。 */
   readonly defaultParams?: Readonly<Record<string, unknown>>
+  /** runtime.inputDefs 的静态值；只含展示声明，默认值仍在 defaultParams。 */
+  readonly inputDefs?: Readonly<Record<string, IndicatorInputDef>>
   /** presentation.defaultOptions 的静态值。 */
   readonly defaultOptions?: Readonly<Record<string, unknown>>
 }
@@ -58,7 +64,14 @@ const indicatorDescriptors = new Map<
 >()
 const indicatorDefinitionAliases = new Map<string, string>()
 const pendingDefinitionLoads = new Map<string, Promise<void>>()
-const registrationListeners = new Set<(definition: IndicatorMetadata) => void>()
+/** 定义变更意图，执行器据此区分新增与替换。 */
+export interface IndicatorDefinitionChange {
+  readonly type: 'create' | 'update' | 'remove'
+  readonly definition: IndicatorMetadata
+}
+
+const definitionListeners = new Set<(change: IndicatorDefinitionChange) => void>()
+const catalogRevision = createSignal(0)
 let builtinCatalogRegistered = false
 
 /** 将已校验的非空别名写入目录索引。 */
@@ -117,6 +130,7 @@ export function registerIndicatorDescriptor(
   const aliases = identityAliases(descriptor)
   assertAliasesAvailable(aliases, normalizedName)
   indicatorDescriptors.set(normalizedName, { descriptor, load })
+  catalogRevision.set(catalogRevision.peek() + 1)
   for (const alias of aliases) indexAlias(alias, normalizedName)
 }
 
@@ -125,12 +139,13 @@ function descriptorFromMetadata(definition: IndicatorMetadata): IndicatorDescrip
   const defaultParams = definition.runtime?.defaultParams
   return {
     name: definition.name,
+    source: definition.source,
     kind: definition.kind,
     aliases: definition.aliases,
     displayName: definition.displayName,
+    title: definition.title,
+    info: definition.info,
     category: definition.category,
-    indicatorType: definition.indicatorType,
-    indicatorTypeLabel: definition.indicatorTypeLabel,
     defaultPaneId: definition.defaultPaneId,
     dataViews: definition.dataViews,
     allowMainPane: definition.allowMainPane,
@@ -139,6 +154,7 @@ function descriptorFromMetadata(definition: IndicatorMetadata): IndicatorDescrip
         ? (defaultParams as () => Record<string, unknown>)()
         : (defaultParams as Readonly<Record<string, unknown>> | undefined),
     defaultOptions: definition.presentation?.defaultOptions,
+    inputDefs: definition.runtime?.inputDefs,
   }
 }
 
@@ -161,24 +177,102 @@ export function registerIndicatorDefinition(definitionClass: IndicatorDefinition
       `[Indicator] definition name is empty or already registered: '${definition.name}'`,
     )
   }
-  // 先校验全部别名，避免失败后目录留下部分写入。
+  publishDefinition(definition, false)
+}
+
+/** 显式替换已有脚本实现；脚本内部名与别名固定，仅展示名可编辑。 */
+export function updateIndicatorDefinition(definitionClass: IndicatorDefinitionClass): void {
+  const definition = definitionClass[definitionMetadata]?.()
+  const existing = definition && getRegisteredIndicatorDefinition(definition.name)
+  if (
+    !definition ||
+    !existing ||
+    definition.source !== 'script' ||
+    existing.source !== 'script' ||
+    existing.document?.identity === 'builtin' ||
+    definition.name !== existing.name ||
+    JSON.stringify(definition.aliases ?? []) !== JSON.stringify(existing.aliases ?? [])
+  ) {
+    throw new KLineChartError(
+      GENERIC_ERROR_CODES.INVALID_PARAM,
+      '[Indicator] only existing script definitions with unchanged name and aliases can be updated',
+    )
+  }
+  publishDefinition(definition, true, existing)
+}
+
+/** 校验后统一发布完整定义快照，静态目录与执行器订阅者同时接收新元数据。 */
+function publishDefinition(
+  definition: IndicatorMetadata,
+  replaceDescriptor: boolean,
+  previous?: IndicatorMetadata,
+): void {
+  const normalizedName = normalizeIndicatorId(definition.name)
   const aliases = identityAliases(definition)
   assertAliasesAvailable(aliases, normalizedName)
+  // 脚本展示名可编辑：删除不再归属本定义的旧身份键，避免旧展示名残留成幽灵别名。
+  if (previous) {
+    const nextKeys = new Set(aliases.map(normalizeIndicatorId))
+    for (const stale of identityAliases(previous)) {
+      const key = normalizeIndicatorId(stale)
+      if (key && !nextKeys.has(key)) indicatorDefinitionAliases.delete(key)
+    }
+  }
   indicatorDefinitions.set(normalizedName, definition)
-  if (!indicatorDescriptors.has(normalizedName)) {
+  if (replaceDescriptor || !indicatorDescriptors.has(normalizedName)) {
     indicatorDescriptors.set(normalizedName, { descriptor: descriptorFromMetadata(definition) })
   }
   for (const alias of aliases) indexAlias(alias, normalizedName)
   registerIndicatorLayerNaming(aliases, definition.getRendererName, definition.getScaleRendererName)
-  for (const listener of [...registrationListeners]) listener(definition)
+  // 执行器接收定义之后才刷新响应式投影，避免内容已就绪但计算入口尚未安装。
+  batch(() => {
+    catalogRevision.set(catalogRevision.peek() + 1)
+    notifyDefinition({ type: replaceDescriptor ? 'update' : 'create', definition })
+  })
 }
 
-/** 订阅实现装配事件；返回取消订阅函数。 */
-export function onIndicatorDefinitionRegistered(
-  listener: (definition: IndicatorMetadata) => void,
+/** 删除脚本文档及目录身份，通知所有图表移除对应实例。 */
+export function removeScriptIndicatorDefinition(id: string): void {
+  const definition = getRegisteredIndicatorDefinition(id)
+  if (
+    !definition?.document ||
+    definition.source !== 'script' ||
+    definition.document.identity === 'builtin'
+  ) {
+    throw new KLineChartError(
+      GENERIC_ERROR_CODES.INVALID_PARAM,
+      '[Indicator] script document not found',
+    )
+  }
+  const key = normalizeIndicatorId(definition.name)
+  indicatorDefinitions.delete(key)
+  indicatorDescriptors.delete(key)
+  for (const alias of identityAliases(definition))
+    indicatorDefinitionAliases.delete(normalizeIndicatorId(alias))
+  batch(() => {
+    catalogRevision.set(catalogRevision.peek() + 1)
+    notifyDefinition({ type: 'remove', definition })
+  })
+}
+
+/** 已提交快照的通知独立于写入，单个消费者失败不能阻断其它消费者。 */
+function notifyDefinition(change: IndicatorDefinitionChange): void {
+  for (const listener of [...definitionListeners]) {
+    // 已提交定义不因某个消费者失败而回滚；其它图表仍须收到同一快照。
+    try {
+      listener(change)
+    } catch (error) {
+      console.error('[Indicator] definition consumer failed', error)
+    }
+  }
+}
+
+/** 订阅定义新增与更新事件；返回取消订阅函数。 */
+export function onIndicatorDefinitionChanged(
+  listener: (change: IndicatorDefinitionChange) => void,
 ): () => void {
-  registrationListeners.add(listener)
-  return () => registrationListeners.delete(listener)
+  definitionListeners.add(listener)
+  return () => definitionListeners.delete(listener)
 }
 
 /** 将名称、展示名或别名解析为目录统一键；未知身份返回 undefined。 */
@@ -192,11 +286,14 @@ function resolveCatalogKey(nameOrAlias: string): string | undefined {
 /** 返回全部静态目录项（内置 + 已注册的第三方定义），不加载实现。 */
 export function getIndicatorDescriptors(): readonly IndicatorDescriptor[] {
   ensureBuiltinCatalog()
+  // 读取修订号建立响应式依赖：定义增删改时，依赖本目录的派生视图会自动重建。
+  catalogRevision()
   return [...indicatorDescriptors.values()].map((entry) => entry.descriptor)
 }
 
 /** 按名称、展示名或别名查询静态目录项，不加载实现。 */
 export function getIndicatorDescriptor(nameOrAlias: string): IndicatorDescriptor | undefined {
+  catalogRevision()
   const key = resolveCatalogKey(nameOrAlias)
   return key === undefined ? undefined : indicatorDescriptors.get(key)?.descriptor
 }
@@ -248,18 +345,30 @@ export function getRegisteredIndicatorDefinitions(): readonly IndicatorMetadata[
 
 /** 按名称、展示名或别名查询已装配定义；未加载实现时返回 undefined。 */
 export function getRegisteredIndicatorDefinition(name: string): IndicatorMetadata | undefined {
+  catalogRevision()
   const key = resolveCatalogKey(name)
   return key === undefined ? undefined : indicatorDefinitions.get(key)
 }
 
 /**
- * 将指标的 name / displayName / 别名解析为对外规范 ID（即 displayName）。
+ * 目录项的对外规范 ID：脚本定义以稳定内部 name（宿主分配的 script_<uuid>）为身份，
+ * 展示名可编辑；原生与内置定义沿用 displayName，保持既有对外契约。
+ */
+export function resolveCanonicalIndicatorId(
+  descriptor: Pick<IndicatorDescriptor, 'name' | 'displayName' | 'source'>,
+): string {
+  return descriptor.source === 'script' ? descriptor.name : descriptor.displayName
+}
+
+/**
+ * 将指标的 name / displayName / 别名解析为对外规范 ID。
  *
- * 规范 ID 是 Core、UI、Agent 共用的唯一指标身份；内部 name 仅用于 renderer 命名与
- * 计算定义解析，不再作为对外标识。未注册时返回 undefined。
+ * 规范 ID 是 Core、UI、Agent 共用的唯一指标身份；脚本取稳定内部 name，原生取 displayName。
+ * 内部 name 仅用于 renderer 命名与计算定义解析。未注册时返回 undefined。
  */
 export function resolveIndicatorDefinitionId(nameOrAlias: string): string | undefined {
-  return getIndicatorDescriptor(nameOrAlias)?.displayName
+  const descriptor = getIndicatorDescriptor(nameOrAlias)
+  return descriptor === undefined ? undefined : resolveCanonicalIndicatorId(descriptor)
 }
 
 /** 清空测试目录；类上的声明仍可重新装配，内置静态目录在下次读取时重新登记。 */
@@ -270,4 +379,6 @@ export function clearRegisteredIndicatorDefinitionsForTest(): void {
   pendingDefinitionLoads.clear()
   clearIndicatorLayerNamingForTest()
   builtinCatalogRegistered = false
+  // 清空本身也是一次目录变更，推进修订号让派生视图失效。
+  catalogRevision.set(catalogRevision.peek() + 1)
 }

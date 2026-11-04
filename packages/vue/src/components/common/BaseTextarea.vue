@@ -18,9 +18,8 @@
 </template>
 
 <script setup lang="ts">
+  import { supportsFieldSizing } from '@vue-src/composables/overlay/platform.js'
   import { computed, nextTick, onMounted, useTemplateRef, watch } from 'vue'
-
-  import { supportsFieldSizing } from '../../composables/overlay/platform.js'
 
   const props = withDefaults(
     defineProps<{
@@ -66,6 +65,7 @@
 </script>
 
 <style scoped>
+  /* 默认外观保持无层：宿主 reset 必须是零特异性 :where()，组件类才能压过它；不要改回 @layer。 */
   .base-textarea {
     --base-textarea-padding-block: var(--klc-space-8, 8px);
     --base-textarea-border: 1px;
@@ -92,9 +92,8 @@
     font: inherit;
     font-size: var(--klc-text-copy-13-font-size, 13px);
     line-height: var(--klc-text-copy-13-line-height, 18px);
-    transition:
-      border-color var(--klc-motion-dur-fast, 160ms) var(--klc-motion-ease-out, ease-out),
-      box-shadow var(--klc-motion-dur-fast, 160ms) var(--klc-motion-ease-out, ease-out);
+    /* 聚焦不画边框或焦点环，光标即提示。 */
+    outline: none;
   }
 
   .base-textarea--sm {
@@ -109,20 +108,8 @@
     color: var(--klc-color-ui-muted);
   }
 
-  .base-textarea:focus-visible {
-    border-color: var(--klc-color-ui-accent);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--klc-color-ui-accent) 24%, transparent);
-    outline: 0;
-  }
-
   .base-textarea:disabled {
     opacity: 0.6;
     cursor: not-allowed;
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .base-textarea {
-      transition: none;
-    }
   }
 </style>
