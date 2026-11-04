@@ -10,15 +10,17 @@
 
 {{include:_performance.zh-CN.md}}
 
+{{include:_script.zh-CN.md}}
+
 {{include:_data-sources.zh-CN.md}}
 
 ## 🚀 快速开始
 
-{{include:_usage-vue.zh-CN.md}}
+{{include:_product-vue.zh-CN.md}}
 
 ## 🎨 自定义 Tooltip
 
-`KlineChart` 提供 `#kline-tooltip` 和 `#marker-tooltip` 插槽用于自定义 tooltip。当提供插槽时，默认 tooltip 内容完全被替换，你可以完全控制显示内容和样式。
+`KlineChart` 提供 `#kline-tooltip` 插槽用于自定义 tooltip。当提供插槽时，默认 tooltip 内容完全被替换，你可以完全控制显示内容和样式。
 
 定位与拖拽仍由组件接管：`tooltipPosition === 'adaptive'` 时，自定义 `#kline-tooltip` 同样可拖拽；双击复位。`tooltipPosition === 'none'`（默认）时数据悬浮框整体隐藏。
 
@@ -37,7 +39,7 @@
     <div class="custom-tooltip">
       <div class="custom-tooltip__title">
         <span>{{ hoverData.stockCode }}</span>
-        <span>{{ formatTimestamp(hoverData.timestamp, { timeZone: 'Asia/Shanghai' }) }}</span>
+        <span>{{ formatTimeInTimeZone(hoverData.timestamp, { timeZone: 'Asia/Shanghai' }) }}</span>
       </div>
       <div class="custom-tooltip__price"
            :style="{ color: hoverData.close >= hoverData.open ? upColor : downColor }">
@@ -52,7 +54,7 @@
 </KlineChart>
 
 <script setup lang="ts">
-  import { formatTimestamp } from '@363045841yyt/klinechart-core'
+  import { formatTimeInTimeZone } from '@363045841yyt/klinechart'
 </script>
 
 <style scoped>
@@ -77,12 +79,6 @@
 </style>
 ```
 
-### `#marker-tooltip`
-
-| 插槽属性              | 类型                                                            | 说明                     |
-| ---------------------- | --------------------------------------------------------------- | ------------------------------- |
-| `marker`               | `MarkerEntity \| CustomMarkerEntity \| null`                    | 悬停的标记数据             |
-
 {{include:_docs.zh-CN.md}}
 
 {{include:_props.zh-CN.md}}
@@ -91,4 +87,4 @@
 
 {{include:_whatsnew.zh-CN.md}}
 
-{{include:_license.zh-CN.md}}
+{{include:_product-license.zh-CN.md}}

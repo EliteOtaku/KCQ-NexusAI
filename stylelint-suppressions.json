@@ -31,7 +31,7 @@
   },
   "packages/vue/src/components/CompareSymbolSelector.vue": {
     "klc/no-raw-length": {
-      "count": 18
+      "count": 17
     }
   },
   "packages/vue/src/components/DrawingSettingsDialog.vue": {
@@ -49,17 +49,19 @@
       "count": 5
     }
   },
-  "packages/vue/src/components/IndicatorParams.vue": {
+  "packages/vue/src/components/indicator-params/impl/IndicatorParamItem.vue": {
     "klc/no-raw-length": {
-      "count": 19
-    },
-    "declaration-property-value-disallowed-list": {
-      "count": 1
+      "count": 12
+    }
+  },
+  "packages/vue/src/components/indicator-params/impl/IndicatorParams.vue": {
+    "klc/no-raw-length": {
+      "count": 6
     }
   },
   "packages/vue/src/components/IndicatorSelector.vue": {
     "klc/no-raw-length": {
-      "count": 11
+      "count": 10
     }
   },
   "packages/vue/src/components/KLineChart.vue": {
@@ -166,11 +168,6 @@
       "count": 1
     }
   },
-  "packages/vue/src/components/common/CollapsibleSection.vue": {
-    "klc/no-raw-length": {
-      "count": 5
-    }
-  },
   "packages/vue/src/components/common/SearchField.vue": {
     "klc/no-raw-length": {
       "count": 5
@@ -226,7 +223,7 @@
   },
   "packages/vue/src/features/agent/components/AgentHeader.vue": {
     "klc/no-raw-length": {
-      "count": 2
+      "count": 1
     }
   },
   "packages/vue/src/features/agent/components/AgentMessageItem.vue": {
@@ -306,6 +303,11 @@
   "packages/vue/src/features/agent/components/AgentUnavailableNotice.vue": {
     "klc/no-raw-length": {
       "count": 9
+    }
+  },
+  "packages/vue/src/components/MarketDataManagementDialog.vue": {
+    "klc/no-raw-length": {
+      "count": 23
     }
   },
   "packages/vue/src/components/ShortcutSettings.vue": {

@@ -13,9 +13,14 @@
  */
 
 import { describe, expect, it, vi } from 'vitest'
+import { createMockCanvasContext } from '@/engine/__tests__/helpers/renderTestKit'
+import type { PrimitiveSurface } from '@/rendering/primitives/types'
+import { createMockRenderer } from '@/rendering/render/__tests__/helpers/rendererTestKit'
 
 import { createScene } from '../createScene'
 import {
+  type ContextLayer,
+  type DrawListLayer,
   LAYER_PANE_GLOBAL,
   type Layer,
   type LayerPaint,
@@ -40,7 +45,7 @@ interface MockLayerOpts {
   onDispose?: () => void
 }
 
-interface MockLayer extends Layer<FrameStub> {
+interface MockLayer extends ContextLayer<FrameStub> {
   paintCalls: Array<LayerPaint<FrameStub>>
   disposeCalls: number
 }
@@ -54,6 +59,7 @@ function makeMockLayer(opts: MockLayerOpts): MockLayer {
     pane: opts.pane,
     z: opts.z,
     visible: opts.visible ?? true,
+    kind: 'context',
     paint: (ctx) => {
       paintCalls.push(ctx)
       opts.onPaint?.()
@@ -78,9 +84,14 @@ function frame(paneId: string, clear = false, roles?: ReadonlyArray<LayerRole>):
     panes: [
       {
         paneId,
+        bounds: { width: 300, height: 260 },
         context: { tag: paneId },
-        renderer: { beginFrame: vi.fn() },
-        region: { x: 0, y: 0, width: 600, height: 300, dpr: 1 },
+        renderer: createMockRenderer(),
+        targets: {
+          main: createMockCanvasContext(),
+          drawing: createMockCanvasContext(),
+          overlay: createMockCanvasContext(),
+        },
         frameNumber: 0,
         deltaMs: 0,
         roles,
@@ -95,50 +106,159 @@ function frame(paneId: string, clear = false, roles?: ReadonlyArray<LayerRole>):
 // ---------------------------------------------------------------------------
 
 describe('createScene', () => {
-  it('binds each pane region before painting its layers and preserves overlay content', () => {
+  it('selects each pane target before painting and keeps drawing separate from the main target', () => {
     const scene = createScene<FrameStub>()
-    const mainRegion = { x: 0, y: 0, width: 600, height: 300, dpr: 2 }
-    const subRegion = { ...mainRegion, y: 310, height: 150 }
-    let boundRegion = subRegion
-    const beginFrame = vi.fn((region: typeof mainRegion) => {
-      boundRegion = region
-    })
-    const renderer = { beginFrame }
-    const painted: Array<{ paneId: string; region: typeof mainRegion }> = []
-    for (const paneId of [LAYER_PANE_GLOBAL, 'main', 'sub']) {
+    const input = frame('main')
+    const targets = input.panes[0]!.targets
+    const painted: CanvasRenderingContext2D[] = []
+    for (const [id, role] of [
+      ['main', 'primary'],
+      ['drawing', 'drawing'],
+      ['overlay', 'overlay'],
+    ] as const) {
       scene.addLayer({
-        id: paneId,
-        pane: paneId,
-        role: 'primary',
+        id,
+        pane: 'main',
+        role,
         z: 0,
         visible: true,
         paint(context) {
-          painted.push({ paneId: context.tag, region: boundRegion })
+          painted.push(context.ctx)
         },
         dispose() {},
       })
     }
-    const passes = [
-      { paneId: 'main', region: mainRegion, clear: true },
-      { paneId: 'main', region: mainRegion, clear: false },
-      { paneId: 'sub', region: subRegion, clear: true },
-    ]
-    scene.paint({
-      panes: passes.map((pass) => ({
-        ...pass,
-        context: { tag: pass.paneId },
-        renderer,
-        frameNumber: 0,
-        deltaMs: 0,
-      })),
+    scene.paint(input)
+    expect(painted).toEqual([targets.main, targets.drawing, targets.overlay])
+    for (const [name, target] of Object.entries(targets)) {
+      const saves = name === 'overlay' ? 1 : 2
+      expect(target?.save).toHaveBeenCalledTimes(saves)
+      expect(target?.restore).toHaveBeenCalledTimes(saves)
+      expect(target?.clearRect).not.toHaveBeenCalled()
+    }
+  })
+
+  it.each(['primary', 'indicator', 'component', 'drawing'] as const)(
+    '%s 使用完整 Pane 边界，不把价格留白裁成上下空带',
+    (dataRole) => {
+      const scene = createScene<FrameStub>()
+      const input = frame('main')
+      input.panes[0]!.context = { tag: 'main', priceMapping: { top: 60, bottom: 220 } }
+      const target = input.panes[0]!.targets[dataRole === 'drawing' ? 'drawing' : 'main']!
+      for (const [id, role, z] of [
+        ['grid', 'background', 0],
+        ['data', dataRole, 1],
+      ] as const) {
+        scene.addLayer({
+          id,
+          pane: 'main',
+          role,
+          z,
+          visible: true,
+          paint() {},
+          dispose() {},
+        })
+      }
+
+      scene.paint(input)
+
+      // 背景层不裁；数据层从顶部 0 画到 Pane 底部 260。
+      expect(target.rect).toHaveBeenCalledTimes(1)
+      expect(target.rect).toHaveBeenCalledWith(0, 0, 300, 260)
+      expect(target.clip).toHaveBeenCalledTimes(1)
+      scene.dispose()
+    },
+  )
+
+  it.each([true, false])('GPU 直出结果为 %s 时，直出与回退共享完整 Pane 边界', (success) => {
+    const scene = createScene<FrameStub>()
+    const input = frame('main')
+    const pane = input.panes[0]!
+    const target = pane.targets.main!
+    const paint = vi.fn<PrimitiveSurface['paint']>().mockReturnValue(success)
+    pane.gpuSurface = { canvas: target.canvas, paint, dispose() {} }
+    scene.addLayer({
+      id: 'data',
+      role: 'primary',
+      pane: 'main',
+      z: 0,
+      visible: true,
+      kind: 'draw-list',
+      paint(context) {
+        context.primitives!(
+          [
+            { kind: 'circle', x: 10, y: 2, radius: 4, color: '#ffffff' },
+            { kind: 'circle', x: 10, y: 258, radius: 4, color: '#ffffff' },
+          ],
+          2,
+        )
+      },
+      dispose() {},
     })
-    expect(painted).toEqual(
-      passes.flatMap(({ paneId, region }) => [
-        { paneId, region },
-        { paneId, region },
-      ]),
-    )
-    expect(beginFrame.mock.calls).toEqual(passes.map(({ region, clear }) => [region, { clear }]))
+    scene.paint(input)
+    expect(paint).toHaveBeenCalledOnce()
+    expect(paint.mock.calls[0]?.[4]).toEqual({ x: 0, y: 0, width: 300, height: 260 })
+    // 失败回退时在同一完整边界内重新合成，不能丢失或恢复旧裁剪。
+    expect(target.rect).toHaveBeenCalledTimes(success ? 1 : 2)
+    for (const args of vi.mocked(target.rect).mock.calls) expect(args).toEqual([0, 0, 300, 260])
+    scene.dispose()
+  })
+
+  it('injects the same target-bound primitives submitter into ctx and draw-list layers', () => {
+    const scene = createScene<FrameStub>()
+    const renderer = createMockRenderer()
+    const main = createMockCanvasContext()
+    const input: SceneFrame = {
+      panes: [
+        {
+          paneId: 'main',
+          bounds: { width: 300, height: 260 },
+          context: { tag: 'main' },
+          renderer,
+          targets: { main, drawing: null, overlay: null },
+          frameNumber: 0,
+          deltaMs: 0,
+          clear: false,
+        },
+      ],
+    }
+    const circle = (x: number) =>
+      ({ kind: 'circle', x, y: 0, radius: 1, color: '#ffffff' }) as const
+    const contextLayer: ContextLayer<FrameStub> = {
+      id: 'context',
+      role: 'primary',
+      pane: 'main',
+      z: 0,
+      visible: true,
+      paint(context) {
+        context.primitives!([circle(1)], 1)
+      },
+      dispose() {},
+    }
+    const drawListLayer: DrawListLayer<FrameStub> = {
+      id: 'draw-list',
+      role: 'primary',
+      pane: 'main',
+      z: 1,
+      visible: true,
+      kind: 'draw-list',
+      paint(context) {
+        context.primitives!([circle(2)], 1)
+      },
+      dispose() {},
+    }
+    scene.addLayer(contextLayer)
+    scene.addLayer(drawListLayer)
+    scene.paint(input)
+
+    // 两种图层都必须以 (primitives, dpr) 调用，目标由 Scene 绑定；传错形状会抛 not iterable。
+    expect(renderer.primitives.paint).toHaveBeenCalledTimes(2)
+    const [firstTarget, firstBatch] = renderer.primitives.paint.mock.calls[0]!
+    expect(firstTarget).toBe(main)
+    expect(firstBatch).toEqual([circle(1)])
+    const [secondTarget, secondBatch] = renderer.primitives.paint.mock.calls[1]!
+    expect(secondTarget).toBe(main)
+    expect(secondBatch).toEqual([circle(2)])
   })
 
   it('addLayer then getLayer round-trips by id', () => {
@@ -266,8 +386,8 @@ describe('createScene', () => {
       }),
     )
     scene.paint(frame('main'))
-    // z order: b (1) → c (3) → a (5)
-    expect(order).toEqual(['b', 'c', 'a'])
+    // main 目标内按 z 排序，overlay 层带始终与实际 DOM 一样位于其上。
+    expect(order).toEqual(['b', 'a', 'c'])
   })
 
   it('paint skips invisible layers', () => {

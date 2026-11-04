@@ -7,13 +7,12 @@
 
 import type { ChartController, ChartMountOptions } from '@363045841yyt/klinechart-core'
 import { mount } from '@vue/test-utils'
+import KLineTooltip from '@vue-src/components/chart/KLineTooltip.vue'
+import type { KlineTooltipSlotProps } from '@vue-src/index'
+import * as VueAdapter from '@vue-src/index'
+import { coreSignalToVueRef } from '@vue-src/index'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, h, nextTick, ref, shallowRef } from 'vue'
-
-import KLineTooltip from '../components/KLineTooltip.vue'
-import type { KlineTooltipSlotProps, MarkerTooltipSlotProps } from '../index'
-import * as VueAdapter from '../index'
-import { coreSignalToVueRef } from '../index'
 
 import { createMockApp, createMockChartController, createTestSignal } from './_mockController'
 
@@ -46,7 +45,7 @@ describe('@363045841yyt/klinechart —useChart lifecycle', () => {
   })
 
   it('mounts on first render via template ref', async () => {
-    const mockController = createMockChartController({ data: [] })
+    const mockController = createMockChartController()
     const factorySpy = vi.fn((opts: ChartMountOptions) => Promise.resolve(mockController))
     VueAdapter.__setControllerFactory(factorySpy)
 
@@ -54,7 +53,7 @@ describe('@363045841yyt/klinechart —useChart lifecycle', () => {
       name: 'Host',
       setup() {
         const containerRef = ref<HTMLElement | null>(null)
-        const { chart } = VueAdapter.useChart(containerRef, { data: [] })
+        const { chart } = VueAdapter.useChart(containerRef, {})
         return { containerRef, chart }
       },
       render() {
@@ -74,14 +73,14 @@ describe('@363045841yyt/klinechart —useChart lifecycle', () => {
   })
 
   it('disposes on unmount', async () => {
-    const mockController = createMockChartController({ data: [] })
+    const mockController = createMockChartController()
     VueAdapter.__setControllerFactory(() => Promise.resolve(mockController))
 
     const HostComponent = defineComponent({
       name: 'Host',
       setup() {
         const containerRef = ref<HTMLElement | null>(null)
-        const { chart } = VueAdapter.useChart(containerRef, { data: [] })
+        const { chart } = VueAdapter.useChart(containerRef, {})
         return { containerRef, chart }
       },
       render() {

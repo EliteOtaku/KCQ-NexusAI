@@ -1,13 +1,16 @@
 /** 按引擎 DPR 合成原始 Canvas 像素与 DOM 浮层，避免图表经过 SVG 重采样。 */
 import type { ChartFrameCaptureContext } from '@363045841yyt/klinechart-core/controllers'
+
 const CHART_BACKGROUND_HOSTS = '.chart-main, .chart-container, .left-axis-host, .right-axis-host'
 const SCREENSHOT_EXCLUDED_CONTROLS = '.price-axis-shortcuts, .axis-settings-menu'
 const CLIPPING_OVERFLOW = new Set(['hidden', 'clip', 'auto', 'scroll'])
 const SVG_MIME_TYPE = 'image/svg+xml'
+const SVG_DATA_URL_PREFIX = 'data:image/svg+xml;charset=utf-8,'
+const SVG_DATA_URL_ERROR = '截图 SVG 生成失败'
 const CANVAS_CONTEXT_ERROR = '截图画布初始化失败'
 
 type CanvasSnapshot = {
-  image: Promise<HTMLCanvasElement>
+  image: HTMLCanvasElement
   x: number
   y: number
   clip: { x: number; y: number; width: number; height: number }
@@ -31,7 +34,8 @@ function snapshotCanvases(element: HTMLElement, frame: ChartFrameCaptureContext)
   const snapshots: CanvasSnapshot[] = []
   for (const source of element.querySelectorAll('canvas')) {
     const bounds = source.getBoundingClientRect()
-    if (bounds.width <= 0 || bounds.height <= 0 || source.width === 0 || source.height === 0) continue
+    if (bounds.width <= 0 || bounds.height <= 0 || source.width === 0 || source.height === 0)
+      continue
     let left = rootBounds.left
     let top = rootBounds.top
     let right = rootBounds.right
@@ -40,7 +44,11 @@ function snapshotCanvases(element: HTMLElement, frame: ChartFrameCaptureContext)
     let visible = true
     for (let node: HTMLElement | null = source; node; node = node.parentElement) {
       const style = getComputedStyle(node)
-      if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) {
+      if (
+        style.display === 'none' ||
+        style.visibility === 'hidden' ||
+        Number(style.opacity) === 0
+      ) {
         visible = false
         break
       }
@@ -59,20 +67,13 @@ function snapshotCanvases(element: HTMLElement, frame: ChartFrameCaptureContext)
       if (node === element) break
     }
     if (!visible || right <= left || bottom <= top) continue
-    let image: Promise<HTMLCanvasElement>
-    if (frame.surface?.source === source) {
-      // GPU 由后端在同帧呈现前读取，不能把 WebGPU canvas 当作普通 Canvas2D 复制。
-      image = frame.surface.image
-    } else {
-      const copy = document.createElement('canvas')
-      copy.width = source.width
-      copy.height = source.height
-      const context = copy.getContext('2d')
-      if (!context) throw new Error(CANVAS_CONTEXT_ERROR)
-      // 不传目标宽高，原始 buffer 按一比一复制，不放大也不缩小。
-      context.drawImage(source, 0, 0)
-      image = Promise.resolve(copy)
-    }
+    const image = document.createElement('canvas')
+    image.width = source.width
+    image.height = source.height
+    const context = image.getContext('2d')
+    if (!context) throw new Error(CANVAS_CONTEXT_ERROR)
+    // 所有后端的像素已经按 Scene 顺序合成；原始 buffer 按一比一同步复制。
+    context.drawImage(source, 0, 0)
     snapshots.push({
       image,
       x: Math.round((bounds.left - rootBounds.left) * dpr),
@@ -80,13 +81,21 @@ function snapshotCanvases(element: HTMLElement, frame: ChartFrameCaptureContext)
       clip: {
         x: Math.round((left - rootBounds.left) * dpr),
         y: Math.round((top - rootBounds.top) * dpr),
-        width: Math.round((right - rootBounds.left) * dpr) - Math.round((left - rootBounds.left) * dpr),
-        height: Math.round((bottom - rootBounds.top) * dpr) - Math.round((top - rootBounds.top) * dpr),
+        width:
+          Math.round((right - rootBounds.left) * dpr) - Math.round((left - rootBounds.left) * dpr),
+        height:
+          Math.round((bottom - rootBounds.top) * dpr) - Math.round((top - rootBounds.top) * dpr),
       },
       stackingOrder,
     })
   }
   return snapshots.sort(compareStackingOrder)
+}
+
+/** html-to-image 的 toSvg 返回 percent-encoded 的内联 SVG data URL，本地解码即可；fetch(data:) 会被宿主 CSP 的 connect-src 拦截。 */
+function decodeSvgDataUrl(dataUrl: string): string {
+  if (!dataUrl.startsWith(SVG_DATA_URL_PREFIX)) throw new Error(SVG_DATA_URL_ERROR)
+  return decodeURIComponent(dataUrl.slice(SVG_DATA_URL_PREFIX.length))
 }
 
 /** 转换 DOM 浮层，排除坐标轴操作按钮并保留宿主边框。 */
@@ -104,10 +113,13 @@ async function captureDomOverlay(
       !(node instanceof HTMLCanvasElement) &&
       !(node instanceof Element && node.matches(SCREENSHOT_EXCLUDED_CONTROLS)),
   })
-  const svgText = await (await fetch(svgUrl)).text()
+  const svgText = decodeSvgDataUrl(svgUrl)
   const svg = new DOMParser().parseFromString(svgText, SVG_MIME_TYPE)
   for (const host of svg.querySelectorAll(CHART_BACKGROUND_HOSTS)) {
-    host.setAttribute('style', `${host.getAttribute('style') ?? ''};background:transparent !important;`)
+    host.setAttribute(
+      'style',
+      `${host.getAttribute('style') ?? ''};background:transparent !important;`,
+    )
   }
   // foreignObject 使用内嵌 data URL，保持最终 Canvas 可导出为 PNG。
   const image = new Image()
@@ -126,12 +138,7 @@ export async function captureChartImage(
   const bounds = element.getBoundingClientRect()
   // 在异步 DOM 转换前固定所有画布内容，避免不同图层来自不同帧。
   const snapshots = snapshotCanvases(element, frame)
-  const [imageCopies, overlay] = await Promise.all([
-    Promise.all(snapshots.map((snapshot) => snapshot.image)),
-    captureDomOverlay(element, bounds.width, bounds.height),
-    // 即使 GPU 表面暂时不可见，也消费其读回结果，避免设备丢失产生未处理拒绝。
-    frame.surface?.image,
-  ])
+  const overlay = await captureDomOverlay(element, bounds.width, bounds.height)
   const canvas = document.createElement('canvas')
   canvas.width = Math.round(bounds.width * dpr)
   canvas.height = Math.round(bounds.height * dpr)
@@ -140,12 +147,12 @@ export async function captureChartImage(
   context.fillStyle = backgroundColor
   context.fillRect(0, 0, canvas.width, canvas.height)
   context.imageSmoothingEnabled = false
-  for (const [index, snapshot] of snapshots.entries()) {
+  for (const snapshot of snapshots) {
     context.save()
     context.beginPath()
     context.rect(snapshot.clip.x, snapshot.clip.y, snapshot.clip.width, snapshot.clip.height)
     context.clip()
-    context.drawImage(imageCopies[index]!, snapshot.x, snapshot.y)
+    context.drawImage(snapshot.image, snapshot.x, snapshot.y)
     context.restore()
   }
   // DOM 文本保留浏览器抗锯齿，Canvas 图表不参与这次 SVG 栅格化。

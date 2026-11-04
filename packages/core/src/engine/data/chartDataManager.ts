@@ -1,6 +1,6 @@
 /** 行情协调器：管理 Repository、数据加载与各视图的数据投影。 */
+import type { IndicatorMarketContext } from '@363045841yyt/klinechart-plot-contracts'
 import {
-  type CustomDataSource,
   FIVE_DAY_TIME_SHARE_DAYS,
   FIVE_DAY_TIME_SHARE_PERIOD,
   isTimeSharePeriod,
@@ -33,12 +33,15 @@ import {
   type KLineBuffer,
   type TimeShareBuffer,
 } from '../../data/buffer/types.js'
-import { marketDataProviderRegistry } from '../../data/provider/impl/registry.js'
+import type { RealtimeSubscriptionPool } from '../../data/live/types.js'
+import {
+  type MarketDataProviderRegistry,
+  marketDataProviderRegistry,
+} from '../../data/provider/impl/registry.js'
 import type {
   BarAggregation,
   InstrumentDescriptor,
   KLineAdjustment,
-  KLinePeriod,
   SourceCapabilities,
   TradingDate,
 } from '../../data/provider/types.js'
@@ -46,6 +49,9 @@ import {
   AUTO_SOURCE_ID,
   DEFAULT_KLINE_ADJUSTMENT,
   DEFAULT_KLINE_PERIOD,
+  isKLineAdjustment,
+  isKLinePeriod,
+  KLinePeriod,
   OLDER_DATA_STATUS,
   ALIGNED_BAR_AGGREGATION,
   ORIGINAL_BAR_AGGREGATION,
@@ -78,6 +84,10 @@ import { ScrollCompensator } from './scrollCompensator.js'
 import { symbolSpecIdentityKey } from './symbolIdentity.js'
 
 export interface DataDependencies {
+  invalidateRequests?(): void
+  marketDataProviderRegistry?: MarketDataProviderRegistry
+  /** 实时订阅池；省略时使用注册表对应的共享池。 */
+  realtimeSubscriptionPool?: RealtimeSubscriptionPool
   updateTradeInput: (input: TradeSnapshot) => void
   needsTrades: () => boolean
   getOption: () => { kWidth: number; kGap: number }
@@ -105,29 +115,13 @@ export interface DataDependencies {
 }
 
 const PROVIDER_MARKET_SESSIONS = new MarketSessionRegistry()
-const CUSTOM_SOURCE_PREFIX = 'chart-custom:'
-
-const KLINE_PERIODS = new Set<KLinePeriod>([
-  '1min',
-  '5min',
-  '15min',
-  '30min',
-  '60min',
-  '4h',
-  'daily',
-  'weekly',
-  'monthly',
-  'quarterly',
-  'yearly',
-])
-
-const KLINE_ADJUSTMENTS = new Set<KLineAdjustment>(['qfq', 'hfq', 'splits', 'none'])
 
 export class ChartDataManager {
   private readonly marketRuntime: MarketRuntime
   private disposed = false
   private readonly loadRequests = new WeakMap<KLineBuffer | TimeShareBuffer, object>()
   private readonly readySessions = new WeakMap<KLineBuffer, ReadyMarketSession>()
+  private readonly barLoads = new Map<KLineBuffer, AbortController>()
 
   /** 成交需求与活动品种共同决定唯一 Buffer，不由 renderer 创建网络连接。 */
   reconcileTradeInput(): void {
@@ -148,8 +142,12 @@ export class ChartDataManager {
   /** 非对比视图的缺省聚合口径；宿主可按数据源声明（如 Exness 走 europe-traditional）。 */
   private _defaultBarAggregation: BarAggregation = ORIGINAL_BAR_AGGREGATION
   /** 图表与 Agent 共用的实例级行情缓存，负责分页、重试和 Provider 请求。 */
-  readonly marketDataCache = new MarketDataCache(marketDataProviderRegistry)
-  private readonly _repository = this.marketDataCache.repository
+  readonly marketDataCache: MarketDataCache
+  private readonly providerRegistry: MarketDataProviderRegistry
+  private readonly unsubscribeProviderRegistry: () => void
+  private get _repository() {
+    return this.marketDataCache.repository
+  }
   private get _activeSelection(): SeriesSelection | null {
     return this._dataState.readonly.activeSelection.peek()
   }
@@ -168,22 +166,79 @@ export class ChartDataManager {
   private _loadHint: IncrementalLoadHint
   private _pendingIncrementalLoadFlushTimer = 0
 
+  /** 跨周期行情复用市场运行模块。 */
+  get indicatorMarketData(): import('../indicators/instances/execution/marketDataTypes.js').IndicatorMarketData {
+    return this.marketRuntime
+  }
+
+  /** 临时计算的行情使用权也由唯一市场运行模块管理。 */
+  withIndicatorMarketContext<T>(
+    bars: readonly KLineData[],
+    compute: (market: IndicatorMarketContext) => Promise<T>,
+  ): Promise<T> {
+    return this.marketRuntime.withContext(bars, compute)
+  }
+
   private deps: DataDependencies
 
   constructor(deps: DataDependencies, dataState: DataStateModule, dmState: DataManagerStateModule) {
+    this.providerRegistry = deps.marketDataProviderRegistry ?? marketDataProviderRegistry
+    this.marketDataCache = new MarketDataCache(this.providerRegistry)
     this.deps = deps
     this._dataState = dataState
     this._dmState = dmState
     this.marketRuntime = new MarketRuntime({
+      registry: this.providerRegistry,
+      realtime: deps.realtimeSubscriptionPool,
       cache: this.marketDataCache,
       session: dataState.readonly.readyMarket,
       visibleRange: deps.viewport.readonly.visibleRange,
       data: dataState.readonly.data,
       needsTrades: () => deps.needsTrades(),
-      publishTrades: (snapshot) => deps.updateTradeInput(snapshot),
-      writeBars: (session, bars) => {
-        this._repository.getBars(session.selection)?.applyRealtimeBars(bars)
+      invalidateRequests: () => deps.invalidateRequests?.(),
+      resolveBarsSelection: (instrument, period, adjustment, barAggregation) => {
+        const specs = [...this.symbols.peek(), ...this.deps.comparison.readonly.specs.peek()]
+        const matching = specs.find(
+          (spec) =>
+            sourceIdFromSpec(spec) === instrument.sourceId &&
+            (spec.instrument === undefined
+              ? spec.symbol === instrument.symbol &&
+                (spec.exchange === undefined || spec.exchange === instrument.exchange)
+              : spec.instrument.id === instrument.id),
+        )
+        const spec: SymbolSpec =
+          matching === undefined
+            ? {
+                market: instrument.exchange,
+                symbol: instrument.symbol,
+                instrument,
+                source: instrument.sourceId,
+                period,
+                adjust: adjustment,
+              }
+            : { ...matching, period, adjust: adjustment }
+        return { ...this.barsSelectionForSpec(spec), barAggregation }
       },
+      publishTrades: (snapshot) => deps.updateTradeInput(snapshot),
+      reloadBars: (session, buffer, signal) =>
+        this.loadBars(
+          session.selection,
+          buffer,
+          {
+            instrument: session.instrument,
+            symbol: session.instrument.symbol,
+            market: session.instrument.sessionId ?? session.instrument.exchange,
+            exchange: session.instrument.exchange,
+            source: session.instrument.sourceId,
+            period: session.selection.period,
+            adjust: session.selection.adjustment,
+          },
+          {
+            limit: Math.max(buffer.getRawData().length, DEFAULT_BAR_PAGE_LIMIT),
+            refresh: true,
+            signal,
+          },
+        ),
     })
     this._scrollCompensator = new ScrollCompensator(deps)
     this._loadHint = new IncrementalLoadHint(deps)
@@ -206,6 +261,18 @@ export class ChartDataManager {
       this.reconcileComparisonBuffers()
     })
     this.reconcileComparisonBuffers()
+    this.unsubscribeProviderRegistry = this.providerRegistry.state.subscribe(() => {
+      if (this.disposed) return
+      const active = this._activeSelection
+      // 缓存先释放旧连接的快照；图表再加载，避免新实时流混入旧历史数据。
+      if (active && !this._repository.get(active)) {
+        const specs = this.symbols.peek()
+        this.publishEmptySnapshot()
+        this.setSymbols(specs)
+      } else {
+        this.reconcileComparisonBuffers()
+      }
+    })
   }
 
   // ── Buffer helpers ──
@@ -218,18 +285,25 @@ export class ChartDataManager {
   private barsSelectionForSpec(spec: SymbolSpec): BarsSelection {
     const period = ChartDataManager.normalizePeriod(spec.period)
     const adjustment = spec.adjust ?? DEFAULT_KLINE_ADJUSTMENT
-    if (!KLINE_PERIODS.has(period as KLinePeriod)) {
+    if (!isKLinePeriod(period)) {
       throw new Error(`[ChartDataManager] invalid K-line period "${period}"`)
     }
-    if (!KLINE_ADJUSTMENTS.has(adjustment as KLineAdjustment)) {
+    if (!isKLineAdjustment(adjustment)) {
       throw new Error(`[ChartDataManager] invalid K-line adjustment "${adjustment}"`)
     }
+    const existing = this.marketRuntime.findBarsSelection(
+      spec,
+      period,
+      adjustment,
+      this.barAggregation(),
+    )
+    if (existing !== undefined) return existing
     return {
       kind: SERIES_SELECTION_KIND.bars,
       instrumentKey: instrumentKeyFromSpec(spec),
       sourceId: sourceIdFromSpec(spec),
-      period: period as KLinePeriod,
-      adjustment: adjustment as KLineAdjustment,
+      period,
+      adjustment,
       barAggregation: this.barAggregation(),
     }
   }
@@ -472,35 +546,54 @@ export class ChartDataManager {
     selection: BarsSelection,
     buffer: KLineBuffer,
     spec: SymbolSpec,
-    target: { limit: number; beforeTimestamp?: number },
+    target: { limit: number; beforeTimestamp?: number; refresh?: boolean; signal?: AbortSignal },
   ): Promise<void> {
     const request = {}
+    this.barLoads.get(buffer)?.abort()
+    const abort = new AbortController()
+    const signal = target.signal ? AbortSignal.any([abort.signal, target.signal]) : abort.signal
+    this.barLoads.set(buffer, abort)
     this.loadRequests.set(buffer, request)
     const period = spec.period ?? DEFAULT_KLINE_PERIOD
     const adjustment = spec.adjust ?? DEFAULT_KLINE_ADJUSTMENT
-    if (
-      !KLINE_PERIODS.has(period as KLinePeriod) ||
-      !KLINE_ADJUSTMENTS.has(adjustment as KLineAdjustment)
-    ) {
+    if (!isKLinePeriod(period) || !isKLineAdjustment(adjustment)) {
       throw new Error(`[MarketDataCache] invalid bars request for "${spec.symbol}"`)
     }
     buffer.setLoading(true)
+    // 数据源可能不及时结束 Promise；取消时立即释放本任务拥有的加载状态。
+    const releaseLoading = () => {
+      if (this.isCurrentLoad(buffer, request)) buffer.setLoading(false)
+    }
+    signal.addEventListener('abort', releaseLoading, { once: true })
+    if (signal.aborted) releaseLoading()
     try {
-      const result = await this.marketDataCache.queryBars({
+      const query = {
+        signal,
         sourceId: spec.source,
         instrument: spec.instrument,
         symbol: spec.symbol,
         exchange: spec.exchange,
-        assetClass: spec.instrument?.assetClass,
-        period: period as KLinePeriod,
-        adjustment: adjustment as KLineAdjustment,
+        instrumentType: spec.instrument?.instrumentType,
+        period,
+        adjustment,
         barAggregation: selection.barAggregation,
         limit: target.limit,
         ...(target.beforeTimestamp === undefined
           ? {}
           : { beforeTimestamp: target.beforeTimestamp }),
-      })
-      if (this.disposed || this.loadRequests.get(buffer) !== request) return
+      }
+      if (target.refresh && (!spec.source || !spec.instrument)) {
+        throw new Error('Refreshing bars requires a resolved source and instrument')
+      }
+      const result =
+        target.refresh && spec.source && spec.instrument
+          ? await this.marketDataCache.refreshBars({
+              ...query,
+              sourceId: spec.source,
+              instrument: spec.instrument,
+            })
+          : await this.marketDataCache.queryBars(query)
+      if (signal.aborted || !this.isCurrentLoad(buffer, request)) return
       if (!this.isActiveSelection(selection) && this._repository.getBars(selection) !== buffer)
         return
       // 来源必须先于任何 Kernel/Buffer 通知就绪；通知的订阅者会立即协调成交连接。
@@ -508,7 +601,7 @@ export class ChartDataManager {
         sourceId: result.sourceId,
         instrument: result.instrument,
         capabilities: structuredClone(
-          marketDataProviderRegistry.get(result.sourceId)?.source.capabilities,
+          this.providerRegistry.get(result.sourceId)?.source.capabilities,
         ),
       })
       if (selection.sourceId === AUTO_SOURCE_ID) {
@@ -516,16 +609,38 @@ export class ChartDataManager {
           return
       }
       const previousEarliest = buffer.loadedTimeRange?.earliestTs
-      buffer.mergeData(result.series.data, result.series.olderData, result.series.timezone)
+      if (target.refresh) {
+        this.calendarRequests.delete(buffer)
+        buffer.replaceData(result.series.data, result.series.olderData, result.series.timezone)
+      } else buffer.mergeData(result.series.data, result.series.olderData, result.series.timezone)
+      const resolvedSelection = { ...selection, sourceId: result.sourceId }
+      if (
+        this.deps.comparison.readonly.specs
+          .peek()
+          .some(
+            (comparison) =>
+              seriesSelectionKey(
+                this.barsSelectionForSpec(this.comparisonSpecForPrimary(comparison)),
+              ) === seriesSelectionKey(resolvedSelection),
+          )
+      ) {
+        const session = this.readySession(resolvedSelection, buffer)
+        if (session !== null) this.marketRuntime.retainComparison(session, buffer)
+      }
       if (
         this.isActiveSelection(selection) &&
-        buffer.loadedTimeRange?.earliestTs !== previousEarliest
+        (target.refresh || buffer.loadedTimeRange?.earliestTs !== previousEarliest)
       ) {
         this.deps.onBarsReady()
       }
     } catch (error) {
-      if (!this.disposed && this.loadRequests.get(buffer) === request)
+      if (!signal.aborted && this.isCurrentLoad(buffer, request))
         buffer.setError(error instanceof Error ? error.message : String(error))
+      if (target.refresh) throw error
+    } finally {
+      signal.removeEventListener('abort', releaseLoading)
+      releaseLoading()
+      if (this.barLoads.get(buffer) === abort) this.barLoads.delete(buffer)
     }
   }
 
@@ -643,13 +758,16 @@ export class ChartDataManager {
   /** 分时单日与多日查询共用的来源描述字段。 */
   private timeShareQueryBase(
     spec: SymbolSpec,
-  ): Pick<TimeShareCacheQuery, 'sourceId' | 'instrument' | 'symbol' | 'exchange' | 'assetClass'> {
+  ): Pick<
+    TimeShareCacheQuery,
+    'sourceId' | 'instrument' | 'symbol' | 'exchange' | 'instrumentType'
+  > {
     return {
       sourceId: spec.source,
       instrument: spec.instrument,
       symbol: spec.symbol,
       exchange: spec.exchange,
-      assetClass: spec.instrument?.assetClass,
+      instrumentType: spec.instrument?.instrumentType,
     }
   }
 
@@ -675,6 +793,17 @@ export class ChartDataManager {
           : spec,
       )
     this.deps.setSymbols(symbols)
+    const comparisons = this.deps.comparison.readonly.specs.peek()
+    const resolvedComparisons = comparisons.map((spec) =>
+      sourceIdFromSpec(spec) === AUTO_SOURCE_ID &&
+      selection.kind === SERIES_SELECTION_KIND.bars &&
+      seriesSelectionKey(this.barsSelectionForSpec(this.comparisonSpecForPrimary(spec))) ===
+        seriesSelectionKey(selection)
+        ? { ...spec, source: sourceId, instrument }
+        : spec,
+    )
+    if (resolvedComparisons.some((spec, index) => spec !== comparisons[index]))
+      this.deps.comparison.actions.setSpecs(resolvedComparisons)
     const current = this._dmState.readonly.currentSpec.peek()
     if (
       current &&
@@ -814,8 +943,8 @@ export class ChartDataManager {
         instrument: spec.instrument,
         symbol: spec.symbol,
         exchange: spec.exchange,
-        assetClass: spec.instrument?.assetClass,
-        period: '1min',
+        instrumentType: spec.instrument?.instrumentType,
+        period: KLinePeriod.Min1,
         adjustment: (spec.adjust ?? DEFAULT_KLINE_ADJUSTMENT) as KLineAdjustment,
         barAggregation: ORIGINAL_BAR_AGGREGATION,
         limit: ChartDataManager.TIME_SHARE_INDICATOR_BAR_LIMIT,
@@ -950,22 +1079,8 @@ export class ChartDataManager {
 
   get dataBuffer(): KLineBuffer {
     const buf = this.getActiveDataBuffer()
-    if (buf) return buf
-    const spec: SymbolSpec = {
-      market: 'custom',
-      symbol: '',
-      period: DEFAULT_KLINE_PERIOD,
-      adjust: DEFAULT_KLINE_ADJUSTMENT,
-      source: 'custom',
-      incremental: false,
-    }
-    const selection = this.barsSelectionForSpec(spec)
-    const fallback = this._repository.getOrCreateBars(selection, () =>
-      this.createKLineBuffer(selection),
-    )
-    fallback.setCurrentSpec(spec)
-    this.activateBuffer(selection)
-    return fallback
+    if (!buf) throw new Error('No active K-line series')
+    return buf
   }
 
   getComparisonColors(): Map<string, string> {
@@ -975,49 +1090,6 @@ export class ChartDataManager {
   /** 返回比较折线隐藏状态供图例渲染。 */
   getComparisonHidden(): ReadonlyMap<string, boolean> {
     return this.deps.comparison.readonly.hidden.peek()
-  }
-
-  // ── Data updates (KLine) ──
-
-  /** 内联数据替换前撤销旧加载请求及正式来源，防止晚返回的 REST 覆盖调用方数据。 */
-  private setInlineBars(buffer: KLineBuffer, data: readonly KLineData[]): void {
-    this.loadRequests.delete(buffer)
-    this.resolvedBarSources.delete(buffer)
-    this.readySessions.delete(buffer)
-    buffer.setInlineData(data)
-  }
-
-  updateData(data: KLineData[]): void {
-    if (isTimeSharePeriod(this.currentPeriod)) return
-    const buf = this.getActiveDataBuffer()
-    if (buf) {
-      this.setInlineBars(buf, data)
-    }
-  }
-
-  setData(data: KLineData[]): void {
-    const buffer = this.dataBuffer
-    const currentSpec = buffer.currentSpec
-    if (currentSpec && currentSpec.incremental !== false) {
-      buffer.setCurrentSpec({ ...currentSpec, incremental: false })
-    }
-    this.setInlineBars(buffer, data)
-  }
-
-  /** 实时帧写入活动 K 线 Buffer（末尾窗口 replace-on-conflict）；分时视图或无活动序列时忽略。 */
-  updateBars(bars: KLineData[]): void {
-    if (isTimeSharePeriod(this.currentPeriod)) return
-    this.getActiveDataBuffer()?.applyRealtimeBars(bars)
-  }
-
-  appendData(newData: KLineData[]): void {
-    const buf = this.getActiveDataBuffer()
-    if (buf) {
-      const merged = [...buf.getRawData(), ...newData]
-      this.setInlineBars(buf, merged)
-    } else {
-      this.setInlineBars(this.dataBuffer, newData)
-    }
   }
 
   getData(): KLineData[] {
@@ -1087,6 +1159,7 @@ export class ChartDataManager {
 
   /** 删除不再被 comparison 或当前主品种引用的 Repository 叶子。 */
   private releaseComparisonSelection(selection: BarsSelection): void {
+    if (!this.marketRuntime.releaseComparison(selection)) return
     if (this.isActiveSelection(selection)) return
     const primary = this._dataState.readonly.symbols.peek()[0]
     if (
@@ -1098,18 +1171,6 @@ export class ChartDataManager {
       return
     }
     this._repository.delete(selection)
-  }
-
-  setComparisonData(symbol: string, data: KLineData[]): void {
-    const specs = this.deps.comparison.readonly.specs.peek()
-    if (!specs.some((spec) => spec.symbol === symbol)) {
-      // 未登记的对比品种按当前主品种 market 兜底，写回对比状态而非 kline symbols。
-      const market = this._dataState.readonly.symbols.peek()[0]?.market ?? ''
-      const next = [...specs, { symbol, market, period: DEFAULT_KLINE_PERIOD }]
-      this.deps.comparison.actions.setSpecs(next)
-      this.deps.comparison.actions.syncColors(next)
-    }
-    this._comparisonManager.setData(symbol, data)
   }
 
   // ── Symbol / Period ──
@@ -1208,65 +1269,6 @@ export class ChartDataManager {
     return new TimeShareBufferImpl()
   }
 
-  applyCustomData(source: CustomDataSource): void {
-    const sourceId = `${CUSTOM_SOURCE_PREFIX}${source.source?.trim() || 'default'}`
-    const spec: SymbolSpec = {
-      symbol: source.symbol ?? '',
-      market: source.market,
-      exchange: source.exchange,
-      period: ChartDataManager.normalizePeriod(source.period),
-      adjust: source.adjust ?? DEFAULT_KLINE_ADJUSTMENT,
-      incremental: false,
-      source: sourceId,
-    }
-    const comparisonSpecs = Object.keys(source.comparisons ?? {}).map<SymbolSpec>((symbol) => ({
-      symbol,
-      market: source.market,
-      exchange: source.exchange,
-      period: spec.period,
-      adjust: spec.adjust,
-      incremental: false,
-      source: sourceId,
-    }))
-
-    const mainBuffer = this._repository.getOrCreateBars(this.barsSelectionForSpec(spec), () =>
-      this.createKLineBuffer(this.barsSelectionForSpec(spec)),
-    )
-    mainBuffer.setCurrentSpec(spec)
-    mainBuffer.setInlineData(source.data.map((item) => ({ ...item })))
-
-    for (const comparisonSpec of comparisonSpecs) {
-      const buffer = this._repository.getOrCreateBars(
-        this.barsSelectionForSpec(comparisonSpec),
-        () => this.createKLineBuffer(this.barsSelectionForSpec(comparisonSpec)),
-      )
-      buffer.setCurrentSpec(comparisonSpec)
-      buffer.setInlineData(source.comparisons![comparisonSpec.symbol]!.map((item) => ({ ...item })))
-    }
-
-    this.setSymbols([spec])
-    this.deps.comparison.actions.setSpecs(comparisonSpecs)
-    this.deps.comparison.actions.syncColors(comparisonSpecs)
-
-    const symbolCode = spec.symbol
-    if (symbolCode) {
-      this.registerSymbols([
-        {
-          symbol: symbolCode,
-          market: source.market,
-          description: source.description ?? symbolCode,
-          exchange: source.exchange ?? '',
-          source: sourceId,
-        },
-      ])
-    }
-  }
-
-  resetToFetcher(spec: SymbolSpec): void {
-    this._dmState.actions.setRangeInitialized(false)
-    this.setSymbols([spec])
-  }
-
   // ── Main symbol switching ──
 
   setSymbols(specs: ReadonlyArray<SymbolSpec>): void {
@@ -1281,8 +1283,11 @@ export class ChartDataManager {
       symbolSpecIdentityKey(previous) !== symbolSpecIdentityKey(next) ||
       previous.period !== next.period ||
       previous.adjust !== next.adjust
-    )
+    ) {
+      const activeBuffer = this.getActiveDataBuffer()
+      if (activeBuffer) this.barLoads.get(activeBuffer)?.abort()
       this.publishEmptySnapshot()
+    }
     const selection = isTimeSharePeriod(specs[0]?.period) ? specs.slice(0, 1) : specs
     this.deps.setSymbols(selection)
 
@@ -1334,15 +1339,9 @@ export class ChartDataManager {
     const spec = specs[0]!
     const buf = this.getPrimaryDataBuffer(spec)
     this.activateBuffer(this.barsSelectionForSpec(spec))
-    // Buffer already has data (e.g. from a previous applyCustomData setInlineData call)
-    // → just update the spec metadata, skip fetch to avoid clearing inline data.
-    // Preserve the buffer's existing incremental flag so inline data sources
-    // (which use incremental:false) remain non-fetching even after a symbol switch.
+    // 已缓存的序列可以立即投影，后续更新仍由 Provider 运行时负责。
     if (buf.getRawData().length > 0) {
-      buf.setCurrentSpec({
-        ...spec,
-        incremental: spec.incremental ?? buf.currentSpec?.incremental ?? true,
-      })
+      buf.setCurrentSpec(spec)
       this.deps.resetInteraction()
       // 有快照时由 Chart 在模式切换后恢复；否则定位到最新数据。
       if (!this._dmState.actions.getViewportSnapshot(this.getViewportSnapshotKey(spec))) {
@@ -1354,7 +1353,7 @@ export class ChartDataManager {
     if (!spec.source) {
       throw new Error(
         `[ChartDataManager] source is required for symbol "${spec.symbol}". ` +
-          `Provide a source in SymbolSpec or use setData/applyCustomData for inline data.`,
+          `Provide a registered source in SymbolSpec.`,
       )
     }
 
@@ -1461,7 +1460,7 @@ export class ChartDataManager {
     const selection = this._activeSelection
     const source = this.resolvedBarSources.get(buffer)
     if (selection?.kind !== SERIES_SELECTION_KIND.bars || !source) return
-    const provider = marketDataProviderRegistry.get(source.sourceId)
+    const provider = this.providerRegistry.get(source.sourceId)
     if (
       !provider?.source.capabilities?.tradingCalendar ||
       !source.instrument.capabilities.tradingCalendar ||
@@ -1509,6 +1508,9 @@ export class ChartDataManager {
   }
 
   destroy(): void {
+    for (const abort of this.barLoads.values()) abort.abort()
+    this.barLoads.clear()
+    this.unsubscribeProviderRegistry()
     this.disposed = true
     this.marketRuntime.dispose()
     this._comparisonSpecsUnsub?.()

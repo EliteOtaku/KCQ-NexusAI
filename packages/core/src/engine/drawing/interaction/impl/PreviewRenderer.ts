@@ -1,10 +1,12 @@
-import { DEFAULT_DRAWING_STROKE } from '@/foundation/tokens/index.js'
+import type { DrawingStyle } from '@363045841yyt/klinechart-plot-contracts'
+import { DEFAULT_DRAWING_FILL_OPACITY } from '@/foundation/tokens/index.js'
 import type { InteractionDrawingAnchor } from '../../geometry/types.js'
 import { materializeDrawingAnchors } from '../../model/impl/materializeAnchors.js'
 import { PREVIEW_ID } from '../../session/impl/DrawingSessionOverlay.js'
 import type { DrawingObject, DrawingWorkspaceId } from '../../types.js'
 import type { DrawingToolId } from '../types.js'
 import { DrawingTool } from '../types.js'
+import { drawingToolStyle } from './drawingToolStyle.js'
 import {
   CHANNEL_KINDS,
   DOUBLE_ANCHOR_TOOLS,
@@ -12,6 +14,15 @@ import {
   SINGLE_ANCHOR_TOOLS,
   TRIPLE_ANCHOR_TOOLS,
 } from './toolConfig.js'
+
+/** 预览统一使用工具样式的虚线版本；通道类额外给出填充透明度。 */
+function previewStyle(withFill: boolean): DrawingStyle {
+  return {
+    ...drawingToolStyle(),
+    strokeStyle: 'dashed',
+    ...(withFill ? { fillOpacity: DEFAULT_DRAWING_FILL_OPACITY } : {}),
+  }
+}
 
 /**
  * Constructs preview DrawingObject instances for various tool types.
@@ -83,47 +94,44 @@ export class PreviewRenderer {
               },
       ],
       params: {},
-      style: {
-        stroke: DEFAULT_DRAWING_STROKE,
-        strokeWidth: 1,
-        strokeStyle: 'dashed',
-      },
+      style: previewStyle(false),
     }
   }
 
-  /** 双锚点工具预览：两个锚点之间的虚线，回归通道附带填充区域 */
+  /** 双锚点工具预览：两个锚点之间的虚线，回归通道附带填充区域；矩形等物化图元在此补齐全部锚点。 */
   private buildDoubleAnchorPreview(
     activeTool: DrawingToolId,
     first: InteractionDrawingAnchor,
     second: InteractionDrawingAnchor,
     paneId: string,
   ): DrawingObject {
+    const kind = getDrawingKind(activeTool)
+    let derivedId = 0
     return {
       id: PREVIEW_ID,
-      kind: getDrawingKind(activeTool),
+      kind,
       paneId,
       visible: true,
-      anchors: [
-        {
-          id: `${PREVIEW_ID}-a`,
-          time: first.time,
-          futureOffset: first.futureOffset,
-          price: first.price,
-        },
-        {
-          id: `${PREVIEW_ID}-b`,
-          time: second.time,
-          futureOffset: second.futureOffset,
-          price: second.price,
-        },
-      ],
+      anchors: materializeDrawingAnchors(
+        kind,
+        [
+          {
+            id: `${PREVIEW_ID}-a`,
+            time: first.time,
+            futureOffset: first.futureOffset,
+            price: first.price,
+          },
+          {
+            id: `${PREVIEW_ID}-b`,
+            time: second.time,
+            futureOffset: second.futureOffset,
+            price: second.price,
+          },
+        ],
+        () => `${PREVIEW_ID}-d${derivedId++}`,
+      ),
       params: activeTool === DrawingTool.RegressionChannel ? { sigma: 2 } : {},
-      style: {
-        stroke: DEFAULT_DRAWING_STROKE,
-        strokeWidth: 1,
-        strokeStyle: 'dashed',
-        ...(activeTool === DrawingTool.RegressionChannel ? { fillOpacity: 0.1 } : {}),
-      },
+      style: previewStyle(activeTool === DrawingTool.RegressionChannel),
     }
   }
 
@@ -164,11 +172,7 @@ export class PreviewRenderer {
           },
         ],
         params: {},
-        style: {
-          stroke: DEFAULT_DRAWING_STROKE,
-          strokeWidth: 1,
-          strokeStyle: 'dashed',
-        },
+        style: previewStyle(false),
       }
     }
 
@@ -208,12 +212,7 @@ export class PreviewRenderer {
       visible: true,
       anchors,
       params: {},
-      style: {
-        stroke: DEFAULT_DRAWING_STROKE,
-        strokeWidth: 1,
-        strokeStyle: 'dashed',
-        ...(isChannel ? { fillOpacity: 0.1 } : {}),
-      },
+      style: previewStyle(isChannel),
     }
   }
 }

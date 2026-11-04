@@ -94,6 +94,7 @@ export function createMockViewport(options: MockViewportOptions = {}): MockViewp
 
 /** DataDependencies 工厂入参。 */
 export interface MockDataDependenciesOptions {
+  marketDataProviderRegistry?: DataDependencies['marketDataProviderRegistry']
   /** 透传给 createMockViewport 的差异项。 */
   viewport?: MockViewportOptions
   /** 加载完成后的重绘回调。 */
@@ -118,6 +119,7 @@ function createMockDataDependencies(
     resetInteraction = () => {},
   } = options
   return {
+    marketDataProviderRegistry: options.marketDataProviderRegistry,
     getOption: () => ({ kWidth: 8, kGap: 2 }),
     getZoomLevel: () => 1,
     setZoomLevel: () => {},
@@ -269,7 +271,7 @@ export function instrumentFor(symbol: string) {
     sourceId: 'test',
     symbol,
     name: symbol,
-    assetClass: 'stock' as const,
+    instrumentType: 'stock' as const,
     exchange: 'SZ',
     sessionId: 'CN',
     capabilities: {
@@ -310,7 +312,7 @@ export function createTestProvider(options: {
       id: 'test',
       displayName: 'Test',
       capabilities: {
-        assetClasses: ['stock'],
+        instrumentTypes: ['stock'],
         bars: { periods: ['daily'], adjustments: ['none'] },
         ...(options.fetchTradingCalendar ? { tradingCalendar: true } : {}),
         timeShare: true,

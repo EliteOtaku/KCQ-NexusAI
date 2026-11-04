@@ -6,53 +6,78 @@
 import type { KLineData, TimeShareData } from '../../controllers/types.js'
 import type { MarketSessionConfig } from '../../foundation/utils/sessionTimeLabels.js'
 import type { DepthSource } from '../depth/types.js'
-import type { LiveBarsDataSource } from '../live/types.js'
+import type { RealtimeConnectionFactory } from '../live/types.js'
 import type { TradeDataSource } from '../trades/types.js'
 
-/** 前端可识别的品种类别；unknown 用于尚未完成语义归一化的数据源品种。 */
-const ASSET_CLASS_VALUES = [
-  'stock',
-  'index',
-  'fund',
-  'etf',
-  'future',
-  'option',
-  'forex',
-  'crypto',
-  'unknown',
-] as const
+/**
+ * 前端可识别的品种类别；unknown 用于尚未完成语义归一化的数据源品种。
+ * 运行时值与类型同名，宿主、脚本与 Agent 共用同一份枚举，不要再写裸字符串。
+ */
+export const InstrumentType = {
+  Stock: 'stock',
+  Index: 'index',
+  Fund: 'fund',
+  ETF: 'etf',
+  Future: 'future',
+  Option: 'option',
+  Forex: 'forex',
+  Crypto: 'crypto',
+  Unknown: 'unknown',
+} as const
 
-export type AssetClass = (typeof ASSET_CLASS_VALUES)[number]
+export type InstrumentType = (typeof InstrumentType)[keyof typeof InstrumentType]
+
+/** 完整枚举值，供输入校验；顺序与枚举声明一致。 */
+export const INSTRUMENT_TYPES: readonly InstrumentType[] = Object.values(InstrumentType)
 
 /** 已完成语义归一化的品种类别；排除 unknown，可作为筛选或歧义消解条件。 */
-export type KnownAssetClass = Exclude<AssetClass, 'unknown'>
+export type KnownInstrumentType = Exclude<InstrumentType, 'unknown'>
 
 /** unknown 只表示数据源尚未归一化，不允许作为筛选条件参与匹配。 */
-export const KNOWN_ASSET_CLASS_VALUES: readonly KnownAssetClass[] = ASSET_CLASS_VALUES.filter(
-  (value): value is KnownAssetClass => value !== 'unknown',
+export const KNOWN_INSTRUMENT_TYPES: readonly KnownInstrumentType[] = INSTRUMENT_TYPES.filter(
+  (value): value is KnownInstrumentType => value !== 'unknown',
 )
 
 /**
  * 判断资产类别是否可作为筛选条件参与匹配。
  * unknown 与缺省同义，仅表示数据源未完成归一化，返回 false 时调用方必须按“无条件”处理。
  */
-export function isFilterableAssetClass(value: AssetClass | undefined): value is KnownAssetClass {
+export function isFilterableInstrumentType(
+  value: InstrumentType | undefined,
+): value is KnownInstrumentType {
   return value !== undefined && value !== 'unknown'
 }
 
-/** 图表当前支持的标准 K 线周期。 */
-export type KLinePeriod =
-  | '1min'
-  | '5min'
-  | '15min'
-  | '30min'
-  | '60min'
-  | '4h'
-  | 'daily'
-  | 'weekly'
-  | 'monthly'
-  | 'quarterly'
-  | 'yearly'
+/**
+ * 图表支持的标准 K 线周期；运行时值与类型同名。
+ * 对象顺序即由小到大的比较顺序，`request.security` 判断目标周期是否低于主图时直接使用。
+ */
+export const KLinePeriod = {
+  Min1: '1min',
+  Min5: '5min',
+  Min15: '15min',
+  Min30: '30min',
+  Min60: '60min',
+  Hour4: '4h',
+  Daily: 'daily',
+  Weekly: 'weekly',
+  Monthly: 'monthly',
+  Quarterly: 'quarterly',
+  Yearly: 'yearly',
+} as const
+
+export type KLinePeriod = (typeof KLinePeriod)[keyof typeof KLinePeriod]
+
+/** 周期清单：类型、白名单、Agent 参数与比较顺序都从这里派生。 */
+export const KLINE_PERIODS: readonly KLinePeriod[] = Object.values(KLinePeriod)
+
+/** 周期校验集合；只在模块内建一次，避免调用方各自复制清单。 */
+const KLINE_PERIOD_SET: ReadonlySet<string> = new Set(KLINE_PERIODS)
+
+/** 判断任意字符串是否为受支持的标准 K 线周期。 */
+export function isKLinePeriod(value: string): value is KLinePeriod {
+  return KLINE_PERIOD_SET.has(value)
+}
 
 /** 保留上游原生周期边界的聚合方式。 */
 export const ORIGINAL_BAR_AGGREGATION = 'original'
@@ -75,14 +100,32 @@ export const BAR_AGGREGATIONS = [
 
 export type BarAggregation = (typeof BAR_AGGREGATIONS)[number]
 
-/** 图表当前支持的复权方式。 */
-export type KLineAdjustment = 'qfq' | 'hfq' | 'splits' | 'none'
+/** 图表支持的复权方式；运行时值与类型同名。 */
+export const KLineAdjustment = {
+  Qfq: 'qfq',
+  Hfq: 'hfq',
+  Splits: 'splits',
+  None: 'none',
+} as const
+
+export type KLineAdjustment = (typeof KLineAdjustment)[keyof typeof KLineAdjustment]
+
+/** 复权方式清单：类型、白名单、Agent 参数都从这里派生。 */
+export const KLINE_ADJUSTMENTS: readonly KLineAdjustment[] = Object.values(KLineAdjustment)
+
+/** 复权方式校验集合；只在模块内建一次。 */
+const KLINE_ADJUSTMENT_SET: ReadonlySet<string> = new Set(KLINE_ADJUSTMENTS)
+
+/** 判断任意字符串是否为受支持的复权方式。 */
+export function isKLineAdjustment(value: string): value is KLineAdjustment {
+  return KLINE_ADJUSTMENT_SET.has(value)
+}
 
 /** K 线请求未指定时使用的默认周期。 */
-export const DEFAULT_KLINE_PERIOD: KLinePeriod = 'daily'
+export const DEFAULT_KLINE_PERIOD: KLinePeriod = KLinePeriod.Daily
 
 /** K 线请求未指定时使用的默认复权方式。 */
-export const DEFAULT_KLINE_ADJUSTMENT: KLineAdjustment = 'none'
+export const DEFAULT_KLINE_ADJUSTMENT: KLineAdjustment = KLineAdjustment.None
 
 /** 当前游标之前的历史数据状态；unknown 表示数据源无法可靠判断。 */
 export const OLDER_DATA_STATUS = {
@@ -107,6 +150,8 @@ export type ProviderRef = Readonly<Record<string, string | number | boolean>>
 export interface BarCapability {
   periods: ReadonlyArray<KLinePeriod>
   adjustments: ReadonlyArray<KLineAdjustment>
+  /** Connector 单次请求的最大根数；批量历史目标由调用方沿游标补齐。 */
+  maxBarsPerRequest?: number
 }
 
 /** 多日分时接口可一次查询的交易日范围。 */
@@ -132,7 +177,7 @@ export interface InstrumentCapabilities {
 /** 数据源级能力声明，用于在请求前筛选流转候选源。 */
 export interface SourceCapabilities {
   trades?: { readonly raw: boolean; readonly live: boolean }
-  assetClasses: ReadonlyArray<AssetClass>
+  instrumentTypes: ReadonlyArray<InstrumentType>
   bars?: BarCapability
   tradingCalendar?: boolean
   /** 是否支持实时 K 线流。 */
@@ -155,7 +200,7 @@ export interface InstrumentDescriptor {
   sourceId: string
   symbol: string
   name: string
-  assetClass: AssetClass
+  instrumentType: InstrumentType
   exchange: string
   /** 对应 MarketSessionRegistry 的会话标识；纯深度品种可不提供。 */
   sessionId?: string
@@ -169,6 +214,8 @@ export interface InstrumentDescriptor {
 /** 数据源在聚合源管理和注册表中展示的元数据。 */
 export interface DataSourceDescriptor {
   id: string
+  /** 共用一个 Connector 的 Provider 使用同一个连接 ID；省略时以 source ID 为连接 ID。 */
+  connectionId?: string
   displayName: string
   description?: string
   /** 网络 Provider 的默认 Transport 地址。 */
@@ -198,7 +245,7 @@ export interface SourceProbeResult {
 export interface InstrumentSearchQuery {
   keyword: string
   limit: number
-  assetClasses?: ReadonlyArray<AssetClass>
+  instrumentTypes?: ReadonlyArray<InstrumentType>
   signal?: AbortSignal
 }
 
@@ -289,6 +336,8 @@ export interface TimeShareRangeQuery {
 
 /** 品种目录能力。 */
 export interface InstrumentCatalog {
+  /** 通过稳定 ID 恢复品种；数据源接入必须实现，内置目录可逐步提供。 */
+  resolve?(id: string, signal?: AbortSignal): Promise<InstrumentDescriptor>
   /** 按关键字和品种类别搜索当前 Provider 的品种目录。 */
   search(query: InstrumentSearchQuery): Promise<ReadonlyArray<InstrumentDescriptor>>
 }
@@ -326,11 +375,66 @@ export interface MarketDataProvider {
   readonly catalog?: InstrumentCatalog
   readonly bars?: BarDataSource
   readonly tradingCalendar?: TradingCalendarDataSource
-  /** 实时 K 线流；仅在 source.capabilities.liveBars 为 true 时提供。 */
-  readonly liveBars?: LiveBarsDataSource
+  /** 宿主自带的实时连接；HTTP Provider 不提供，由实时订阅池的 SSE 实现兜底。 */
+  readonly realtime?: RealtimeConnectionFactory
   readonly timeShare?: TimeShareDataSource
   readonly timeShareRange?: TimeShareRangeDataSource
   readonly depth?: DepthDataSource
+}
+
+/** 宿主数据源品种，身份与能力复用聚合协议；来源由注册宿主补齐。 */
+export interface DataSourceInstrument extends Omit<InstrumentDescriptor, 'sourceId'> {
+  timezone: string
+  volumeUnit?: VolumeUnit
+}
+
+/** 一条完整序列的身份；时间一律使用 UTC 毫秒。 */
+export interface BarsRequest {
+  instrument: DataSourceInstrument
+  period: KLinePeriod
+  adjustment: KLineAdjustment
+  barAggregation: BarAggregation
+  signal: AbortSignal
+}
+
+/** beforeTimestamp 是排他上界，缺省时请求最新一页。 */
+export interface HistoryRequest extends BarsRequest {
+  beforeTimestamp?: number
+  limit: number
+}
+
+export interface HistoryPage {
+  bars: ReadonlyArray<KLineData>
+  olderData: OlderDataStatus
+}
+
+/** 增量流只提交完整单根快照；历史修正必须显式声明。 */
+export interface BarsObserver {
+  update(bar: KLineData, options?: { historical: true }): void
+  invalidate(): void
+  status(status: ConnectionStatus): void
+  error(error: Error): void
+}
+
+export type ConnectionStatus = import('../live/types.js').RealtimeStatus
+
+/** 用户实现的公开数据源；注册后与内置 Provider 共用路由、缓存和运行时。 */
+export interface MarketDataSource
+  extends Pick<
+    MarketDataProvider,
+    'trades' | 'depth' | 'timeShare' | 'timeShareRange' | 'tradingCalendar'
+  > {
+  id: string
+  name: string
+  capabilities: SourceCapabilities
+  instruments: {
+    search(query: InstrumentSearchQuery): Promise<ReadonlyArray<DataSourceInstrument>>
+    resolve(id: string, signal: AbortSignal): Promise<DataSourceInstrument>
+  }
+  bars: {
+    fetch(request: HistoryRequest): Promise<HistoryPage>
+    subscribe?(request: BarsRequest, observer: BarsObserver): () => void
+  }
 }
 
 /** 前端可稳定处理的行情错误分类。 */
@@ -363,6 +467,8 @@ export const AUTO_SOURCE_ID = 'auto'
 /** 单个行情数据源的运行时配置。 */
 export interface MarketDataSourceConfig {
   enabled: boolean
+  /** 是否参与品种搜索；与自动行情路由的 enabled 独立。 */
+  searchEnabled?: boolean
   priority: number
   baseUrl?: string
 }
@@ -373,7 +479,7 @@ export type MarketDataSourceConfigPatch = Partial<MarketDataSourceConfig>
 /** 源级能力筛选条件。 */
 export interface SourceCapabilityQuery {
   capability: 'bars' | 'timeShare' | 'timeShareRange' | 'depth'
-  assetClass?: AssetClass
+  instrumentType?: InstrumentType
   period?: KLinePeriod
   adjustment?: KLineAdjustment
   days?: number
@@ -383,7 +489,7 @@ export interface SourceCapabilityQuery {
 export interface SourceRouterInstrumentIdentity {
   symbol: string
   exchange?: string
-  assetClass?: AssetClass
+  instrumentType?: InstrumentType
 }
 
 /** K 线流转请求。 */

@@ -2,19 +2,24 @@
 
 统一行情模型由前端定义。Provider 负责把数据源私有协议转换为标准品种、K 线和分时结果，图表与 UI 不解析 `providerRef`。
 
-图表运行时只通过 `MarketDataProvider` 与 `SourceRouter` 取数。自定义数据仍可用 `setData` / `applyCustomData` 注入。
+图表运行时只通过 `MarketDataProvider` 与 `SourceRouter` 取数，不提供绕过行情链路的数组注入入口。
 
 ## 定义品种
 
 ```ts
-import type { InstrumentDescriptor } from '@363045841yyt/klinechart-core/market-data'
+import {
+  InstrumentType,
+  KLineAdjustment,
+  KLinePeriod,
+  type InstrumentDescriptor,
+} from '@363045841yyt/klinechart-core/market-data'
 
 const instrument = {
   id: 'gotdx:stock:0:000001',
   sourceId: 'gotdx',
   symbol: '000001',
   name: '平安银行',
-  assetClass: 'stock',
+  instrumentType: InstrumentType.Stock,
   exchange: 'SZ',
   sessionId: 'CN',
   currency: 'CNY',
@@ -25,8 +30,8 @@ const instrument = {
   },
   capabilities: {
     bars: {
-      periods: ['1min', '5min', 'daily', 'weekly'],
-      adjustments: ['qfq', 'hfq', 'none'],
+      periods: [KLinePeriod.Min1, KLinePeriod.Min5, KLinePeriod.Daily, KLinePeriod.Weekly],
+      adjustments: [KLineAdjustment.Qfq, KLineAdjustment.Hfq, KLineAdjustment.None],
     },
     timeShare: true,
   },

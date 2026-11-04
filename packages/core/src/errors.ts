@@ -284,11 +284,6 @@ export const AVWAP_ERROR_CODES = {
   ANCHOR_OUT_OF_RANGE: 'AVWAP_ANCHOR_OUT_OF_RANGE',
 } as const satisfies Readonly<Record<string, KLineChartErrorCode>>
 
-// indicators（各指标共享的入参校验失败）；供 features/indicators 引用。
-export const INDICATOR_ERROR_CODES = {
-  INVALID_PARAM: 'INDICATOR_INVALID_PARAM',
-} as const satisfies Readonly<Record<string, KLineChartErrorCode>>
-
 // orderBookHeatmap（盘口热力图）；供 orderBookHeatmap 引用。
 export const HEATMAP_ERROR_CODES = {
   CONFIG_INVALID: 'HEATMAP_CONFIG_INVALID',
@@ -307,9 +302,4 @@ export const CHART_TYPE_ERROR_CODES = {
 // replay controller（回放）；供 features/replay 引用。
 export const REPLAY_ERROR_CODES = {
   CONFIG_INVALID: 'REPLAY_CONFIG_INVALID',
-} as const satisfies Readonly<Record<string, KLineChartErrorCode>>
-
-// depth/SSE source（深度源）；供 data/depth 引用。
-export const DEPTH_ERROR_CODES = {
-  SOURCE_ERROR: 'DEPTH_SOURCE_ERROR',
 } as const satisfies Readonly<Record<string, KLineChartErrorCode>>

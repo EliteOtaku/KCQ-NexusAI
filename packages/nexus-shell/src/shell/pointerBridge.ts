@@ -151,7 +151,7 @@ export class ChartPointerBridge {
       const container = this.container!
       const rect = container.getBoundingClientRect()
       const hit = this.dic.hitTestAt(event.clientX - rect.left, event.clientY - rect.top)
-      if (hit) this.dic.removeDrawing(hit.id)
+      if (hit) this.ctrl.removeDrawing(hit.id)
       return
     }
 

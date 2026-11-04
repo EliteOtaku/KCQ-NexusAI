@@ -85,6 +85,18 @@ function createDisjointChannelFixture() {
 }
 
 describe('HitTester', () => {
+  it('excludes indicator drawings from pointer and label interaction', () => {
+    const drawing = createFillFixture('parallel-channel', [
+      { time: 1000, price: 10 },
+      { time: 2000, price: 20 },
+      { time: 1000, price: 30 },
+      { time: 2000, price: 40 },
+    ])
+    drawing.ownerId = 'indicator'
+    const tester = new HitTester()
+    expect(tester.hitTest(20, 10, [drawing], createLineAdapter())).toBeNull()
+    expect(tester.findLabelTarget(120, 15, [drawing], createLineAdapter())).toBeNull()
+  })
   it('hits a vertical anchor along its full height', () => {
     const drawing: DrawingObject = {
       id: 'vertical',
@@ -93,12 +105,64 @@ describe('HitTester', () => {
       visible: true,
       anchors: [{ id: 'anchor', type: 'vertical', time: 1_000, price: 20 }],
       params: {},
-      style: {},
+      style: { stroke: '#2962ff' },
     }
 
     expect(new HitTester().hitTest(137, 120, [drawing], createAdapter())).toEqual({
       drawing,
       target: { type: 'all' },
+      cursor: 'move',
+    })
+  })
+
+  it('hits the edge handle of a selected horizontal line, and the body otherwise', () => {
+    const drawing: DrawingObject = {
+      id: 'horizontal',
+      kind: 'horizontal-line',
+      paneId: 'main',
+      visible: true,
+      anchors: [{ id: 'anchor', type: 'horizontal', price: 100 }],
+      params: {},
+      style: { stroke: '#2962ff' },
+    }
+    const tester = new HitTester()
+
+    // priceToY 为恒等映射、绘图区宽 300：手柄在右侧内边距 (260, 100)。
+    expect(tester.hitTest(260, 100, [drawing], createAdapter(), new Set(['horizontal']))).toEqual({
+      drawing,
+      target: { type: 'anchor', index: 0 },
+      cursor: 'ns-resize',
+    })
+    // 未选中不出手柄：同一位置按线身命中。
+    expect(tester.hitTest(260, 100, [drawing], createAdapter())).toEqual({
+      drawing,
+      target: { type: 'all' },
+      cursor: 'move',
+    })
+  })
+
+  it('hits the edge handle of a selected vertical line, and the body otherwise', () => {
+    const drawing: DrawingObject = {
+      id: 'vertical',
+      kind: 'vertical-line',
+      paneId: 'main',
+      visible: true,
+      anchors: [{ id: 'anchor', type: 'vertical', time: 1_000, price: 100 }],
+      params: {},
+      style: { stroke: '#2962ff' },
+    }
+    const tester = new HitTester()
+
+    // 锚点 X 恒为 137、Pane 高 240：手柄在下方内边距 (137, 200)。
+    expect(tester.hitTest(137, 200, [drawing], createAdapter(), new Set(['vertical']))).toEqual({
+      drawing,
+      target: { type: 'anchor', index: 0 },
+      cursor: 'ew-resize',
+    })
+    expect(tester.hitTest(137, 200, [drawing], createAdapter())).toEqual({
+      drawing,
+      target: { type: 'all' },
+      cursor: 'move',
     })
   })
 
@@ -114,7 +178,7 @@ describe('HitTester', () => {
       ],
       labels: { line: { 3: { text: '50% text', position: 'center' } }, area: {} },
       params: {},
-      style: {},
+      style: { stroke: '#2962ff' },
     }
 
     // 第 3 条线（50%）中点在 y=90，上侧法线偏移 6px 后为 y=84，再加 paneTop=30。
@@ -144,7 +208,7 @@ describe('HitTester', () => {
         { id: 'b', type: 'point', time: 2_000, price: 140 },
       ],
       params: {},
-      style: {},
+      style: { stroke: '#2962ff' },
     }
 
     // 指针落在原始两锚点中点：命中锚点应仍在原线段法线外侧，而非延长线上。
@@ -162,12 +226,14 @@ describe('HitTester', () => {
       paneId: 'main',
       visible: true,
       anchors: [
-        { id: 'a', type: 'point', time: 1_000, price: 40 },
-        { id: 'b', type: 'point', time: 2_000, price: 140 },
+        { id: 'tl', type: 'point', time: 1_000, price: 140 },
+        { id: 'tr', type: 'point', time: 2_000, price: 140 },
+        { id: 'br', type: 'point', time: 2_000, price: 40 },
+        { id: 'bl', type: 'point', time: 1_000, price: 40 },
       ],
       labels: { line: {}, area: { 0: { text: '区域文本', position: 'center' } } },
       params: {},
-      style: {},
+      style: { stroke: '#2962ff' },
     }
 
     expect(new HitTester().findLabelTarget(120, 90, [drawing], createLineAdapter())).toMatchObject({
@@ -195,7 +261,7 @@ describe('HitTester', () => {
       ],
       labels: { line: { 0: { text: 'Settings dialog label', position: 'start' } }, area: {} },
       params: {},
-      style: {},
+      style: { stroke: '#2962ff' },
     }
     const tester = new HitTester()
     // More than 18px from the start anchor, but inside the drawn text.
@@ -213,12 +279,14 @@ describe('HitTester', () => {
       paneId: 'main',
       visible: true,
       anchors: [
-        { id: 'a', type: 'point', time: 1_000, price: 40 },
-        { id: 'b', type: 'point', time: 2_000, price: 140 },
+        { id: 'tl', type: 'point', time: 1_000, price: 140 },
+        { id: 'tr', type: 'point', time: 2_000, price: 140 },
+        { id: 'br', type: 'point', time: 2_000, price: 40 },
+        { id: 'bl', type: 'point', time: 1_000, price: 40 },
       ],
       labels: { line: {}, area: { 0: { text: 'Long rectangle label', position: 'end' } } },
       params: {},
-      style: {},
+      style: { stroke: '#2962ff' },
     }
     expect(new HitTester().findLabelTarget(60, 90, [drawing], createLineAdapter())).toMatchObject({
       drawingId: 'area-text',
@@ -234,7 +302,7 @@ describe('HitTester', () => {
     for (let index = 0; index < drawing.anchors.length; index++) {
       expect(
         new HitTester().hitTest(anchorScreenX(index), anchorScreenY(index), [drawing], adapter),
-      ).toEqual({ drawing, target: { type: 'anchor', index } })
+      ).toEqual({ drawing, target: { type: 'anchor', index }, cursor: 'default' })
     }
   })
 
@@ -245,10 +313,12 @@ describe('HitTester', () => {
     expect(new HitTester().hitTest(45, 185, [drawing], adapter)).toEqual({
       drawing,
       target: { type: 'all' },
+      cursor: 'move',
     })
     expect(new HitTester().hitTest(145, 165, [drawing], adapter)).toEqual({
       drawing,
       target: { type: 'all' },
+      cursor: 'move',
     })
   })
 
@@ -259,10 +329,12 @@ describe('HitTester', () => {
     expect(new HitTester().hitTest(45, 80, [drawing], adapter)).toEqual({
       drawing,
       target: { type: 'all' },
+      cursor: 'move',
     })
     expect(new HitTester().hitTest(45, 140, [drawing], adapter)).toEqual({
       drawing,
       target: { type: 'all' },
+      cursor: 'move',
     })
   })
 
@@ -273,10 +345,12 @@ describe('HitTester', () => {
     expect(new HitTester().hitTest(45, 90, [drawing], adapter)).toEqual({
       drawing,
       target: { type: 'all' },
+      cursor: 'move',
     })
     expect(new HitTester().hitTest(45, 150, [drawing], adapter)).toEqual({
       drawing,
       target: { type: 'all' },
+      cursor: 'move',
     })
   })
 
@@ -299,7 +373,7 @@ describe('HitTester', () => {
         ...anchor,
       })),
       params: {},
-      style: {},
+      style: { stroke: '#2962ff' },
     }
   }
 
@@ -315,6 +389,7 @@ describe('HitTester', () => {
     expect(new HitTester().hitTest(45, 120, [drawing], createChannelAdapter())).toEqual({
       drawing,
       target: { type: 'all' },
+      cursor: 'move',
     })
   })
 
@@ -325,6 +400,7 @@ describe('HitTester', () => {
     expect(new HitTester().hitTest(45, 110, [drawing], adapter)).toEqual({
       drawing,
       target: { type: 'all' },
+      cursor: 'move',
     })
   })
 
@@ -340,6 +416,7 @@ describe('HitTester', () => {
     expect(new HitTester().hitTest(45, 80, [drawing], createChannelAdapter())).toEqual({
       drawing,
       target: { type: 'all' },
+      cursor: 'move',
     })
   })
 
@@ -350,16 +427,19 @@ describe('HitTester', () => {
     // 斜线中点 (45, 80)、水平线中点 (45, 140)：命中报告线在 LINES 表中的下标。
     expect(new HitTester().hitTest(45, 80, [drawing], adapter, selected)).toEqual({
       drawing,
-      target: { type: 'vertical-handle', lineIndex: 0 },
+      target: { type: 'line-handle', lineIndex: 0 },
+      cursor: 'ns-resize',
     })
     expect(new HitTester().hitTest(45, 140, [drawing], adapter, selected)).toEqual({
       drawing,
-      target: { type: 'vertical-handle', lineIndex: 1 },
+      target: { type: 'line-handle', lineIndex: 1 },
+      cursor: 'ns-resize',
     })
     // 手柄只在选中态可见：未选中时中点按线身命中 → 整体拖拽。
     expect(new HitTester().hitTest(45, 80, [drawing], adapter)).toEqual({
       drawing,
       target: { type: 'all' },
+      cursor: 'move',
     })
   })
 
@@ -370,12 +450,14 @@ describe('HitTester', () => {
       paneId: 'main',
       visible: true,
       anchors: [
-        { id: 'a', type: 'point', time: 1_000, price: 80 },
-        { id: 'b', type: 'point', time: 2_000, price: 100 },
+        { id: 'tl', type: 'point', time: 1_000, price: 80 },
+        { id: 'tr', type: 'point', time: 2_000, price: 80 },
+        { id: 'br', type: 'point', time: 2_000, price: 100 },
+        { id: 'bl', type: 'point', time: 1_000, price: 100 },
       ],
       labels: { line: { 2: { text: '边文本', position: 'center' } }, area: {} },
       params: {},
-      style: {},
+      style: { stroke: '#2962ff' },
     }
 
     // 指针落在底边文字锚点上，区域中心（距 4px）也在热点半径内：line 优先。

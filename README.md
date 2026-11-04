@@ -1,4 +1,4 @@
-High-performance financial chart library with a single-frame generation time of just 2ms, stable scrolling at 190–200fps in a 200Hz environment, native support for AI Agent control, full-link ResizeObserver-driven crisp rendering, and a pluggable architecture.
+High-performance financial charting infrastructure with a single-frame generation time of just 2 ms, stable scrolling at 190–200 fps in a 200 Hz environment, a native AI-Native chart architecture, full-link ResizeObserver-driven crisp rendering, a QuickJS indicator runtime, and support for running scripts against the in-house KCQ financial analysis API to render indicators.
 
 
 <div align="center">
@@ -20,16 +20,7 @@ English | [简体中文](README_CN.md)
 
 A lightweight financial K-line charting library focused on quantitative trading scenarios. **Agent is a first-class citizen** — supports AI Agent direct control of chart operations, providing TradingView-level interaction experience.
 
-<div align="center">
-  <img src="https://files.seeusercontent.com/2026/09/11/8qhO/c13205e.png" width="400" style="border-radius: 12px; margin: 8px;" />
-  <img src="https://files.seeusercontent.com/2026/09/11/r3bV/1b3b978.png" width="400" style="border-radius: 12px; margin: 8px;" />
-  <br/>
-  <img src="https://files.seeusercontent.com/2026/09/11/7Fkg/b602f74.png" width="400" style="border-radius: 12px; margin: 8px;" />
-  <img src="https://files.seeusercontent.com/2026/09/11/4Yxu/11e2d91.jpg" width="400" style="border-radius: 12px; margin: 8px;" />
-  <br/>
-  <img src="https://files.seeusercontent.com/2026/09/11/Wv2q/e549295.png" width="400" style="border-radius: 12px; margin: 8px;" />
-  <img src="https://files.seeusercontent.com/2026/09/11/udP5/Agent.png" width="400" style="border-radius: 12px; margin: 8px;" />
-</div>
+![](https://files.seeusercontent.com/2026/10/19/yfD1/2026-10-19-19_36_21-601360.png)
 
 
 ## 🔀 NexusAI Fork
@@ -62,9 +53,9 @@ KLineChartQuant treats the Agent as a first-class citizen of the chart, equal in
 ## ✨ Core Features
 
 - **Agent Native** - The chart core exposes its capabilities as `@Tool`-decorated domain primitives, and the Agent calls the same primitives as the UI. Tools are a subset of actions: one shared state, one execution path, no bridge layer
+- **Script Indicators** - Write indicators in plain TypeScript. Sandboxed QuickJS execution with time and memory budgets, a built-in editor with completions and hover signatures, and plots that flow through the normal rendering chain
 - **Crisp Rendering** - Full-chain ResizeObserver driven, physical pixel alignment, K-lines, wicks, and lines are sharp and clear on all DPR screens
 - **Plugin Architecture** - Renderer plugin-based design, supporting dynamic registration, configuration, and lifecycle management
-- **Custom Markers** - Supports semantic configuration of custom markers and custom information
 - **High Performance** - Smoothly handles tens of thousands of data points, no lag during zoom or pan; supports **190-200fps on 200Hz displays** with single-frame generation time as low as **2ms**
 - **Multi-Backend Rendering** - Submit drawing primitives once, render via **WebGPU**, **WebGL**, or **Canvas2D**. WebGPU provides hybrid DOM canvas (no `compositeTo` copy), single-command-buffer-per-frame submission with 4x MSAA, and per-instance geometry caching via ResourceTable. Automatic fallback chain: WebGPU → WebGL → Canvas2D. Reaching **190fps on 200Hz displays** with per-frame GPU time under **1ms**
 - **Optimized Interaction** - Stable zoom anchor, precise crosshair cursor, smooth drag
@@ -72,28 +63,36 @@ KLineChartQuant treats the Agent as a first-class citizen of the chart, equal in
 - **Multi-Symbol Comparison** - Supports unlimited number of instruments for trend comparison
 - **Multi-Source Aggregation** - Supports aggregation and unification of multiple data sources
 - **Batch Data Export** - Select a date range and export multiple stocks' K-line data into a single CSV file, with progress indication
-- **Custom Tooltip** - Fully customizable tooltip via named slots (`#kline-tooltip`, `#marker-tooltip`), with engine-provided hover data, position, and styling
+- **Custom Tooltip** - Fully customizable tooltip via the `#kline-tooltip` slot, with engine-provided hover data, position, and styling
+
+
+## ⚡ Performance
+
+KLineChartQuant submits drawing primitives directly to Canvas2D, WebGL2 or WebGPU. The design target is **200 FPS (5 ms per frame)**; the chart shows measured frame generation time and its share of that budget.
+
+Benchmark: 1180 × 640 viewport, DPR 2, 4× MSAA, 300–10,000 visible K-lines, three pooled rounds per scenario. NVIDIA GeForce RTX 4060 Laptop GPU, headless Chrome 155. Reproduce it with [`bench/`](bench/README.md).
+
+![Frame generation time and frame budget share for 12 indicator lines across Canvas2D, WebGL2 and WebGPU, from 300 to 10,000 visible K-lines](docs/Pics/render-bench-local-promo.png)
 
 
 ## 📐 System Architecture
 
-KLineChartQuant is a pnpm monorepo. The framework-agnostic core engine exposes a unified
-`ChartController` (readonly signals + commands); Vue / React / Angular bindings only handle
-mounting, event forwarding, and reactivity bridging. The AI Agent drives the chart through the
-same `@Tool` primitives as the UI, sharing one state source instead of a bridge.
+KLineChartQuant is a pnpm monorepo that publishes one product package, `@363045841yyt/klinechart`.
+The framework-agnostic core engine exposes a unified `ChartController` (readonly signals +
+commands); the Vue layer handles mounting, event forwarding, and reactivity bridging. The AI Agent
+drives the chart through the same `@Tool` primitives as the UI, sharing one state source instead of
+a bridge. Everything below the Vue layer ships inside the product tarball.
 
 ```mermaid
 flowchart TB
-    subgraph app["UI Layer / Framework Bindings"]
+    subgraph app["Product @363045841yyt/klinechart"]
         UI["UI Layer"]
-        VuePkg["@363045841yyt/klinechart<br/>Vue 3 components · useChart"]
-        ReactPkg["@363045841yyt/klinechart-react<br/>KLineChart (direct core) · KLineChartWC (Vue Web Component)"]
-        AngularPkg["@363045841yyt/klinechart-angular"]
+        VuePkg["Vue 3 components<br/>KlineWorkbench · useChart"]
         Agent["AI Agent"]
-        AgentRt["@363045841yyt/klinechart-agent-runtime"]
+        AgentRt["Agent runtime"]
     end
 
-    subgraph core["Core Engine @363045841yyt/klinechart-core"]
+    subgraph core["Core Engine"]
         Ctl["ChartController<br/>signals + commands"]
         Chart["Chart facade"]
         Kernel["StateKernel<br/>Reactive SSOT"]
@@ -101,7 +100,7 @@ flowchart TB
         Pipe["Rendering Pipeline<br/>FrameTransaction · Scene/Layer"]
         GPU["WebGPU / WebGL2 / Canvas2D"]
         Plugin["Plugin Subsystem<br/>PluginHost · RendererPlugin"]
-        Biz["Indicators · Markers · Drawing<br/>Timeshare · Compare · Components"]
+        Biz["Indicators · Drawing<br/>Timeshare · Compare · Components"]
     end
 
     subgraph conn["Market Data Backends"]
@@ -109,17 +108,11 @@ flowchart TB
         Bn["Binance-Connector<br/>Binance spot K-line / trades :8091"]
         Bs["Baostock-Tradingview-Connector<br/>BaoStock / TradingView :8000"]
         Mt["KCQ-MT5-connector<br/>MT5 (Exness) :8090"]
-        Th["KCQ-THS-connector<br/>THS daily bars :8092"]
     end
 
     UI --> VuePkg
-    UI --> ReactPkg
-    UI --> AngularPkg
-    VuePkg -->|"Web Component"| ReactPkg
     Agent --> AgentRt
     VuePkg --> Ctl
-    ReactPkg --> Ctl
-    AngularPkg --> Ctl
     AgentRt -->|"@Tool primitives (same path as UI)"| Ctl
     Ctl --> Chart
     Chart --> Kernel
@@ -133,7 +126,6 @@ flowchart TB
     Bn -->|market data| Data
     Bs -->|market data| Data
     Mt -->|"market data + SSE"| Data
-    Th -->|"market data (daily)"| Data
     Kernel --> Data
     Kernel --> Pipe
 ```
@@ -144,63 +136,106 @@ flowchart TB
 - **Rendering** — submit primitives once, render via WebGPU / WebGL2 / Canvas2D with
   automatic fallback (WebGPU → WebGL → Canvas2D).
 - **Data layer** — unified `SeriesRepository` + incremental buffers + fetch scheduler;
-  multi-source aggregation (gotdx / BaoStock / TradingView / MT5 / THS / mock) and Binance Spot K-lines and trades.
+  multi-source aggregation (gotdx / BaoStock / TradingView / MT5 / mock) and Binance Spot K-lines and trades.
 - **Plugin subsystem** — PluginHost / HookSystem / EventBus / RendererPluginManager;
-  indicators, markers and drawing tools plug in as Scene Layers.
-- **React bindings** — `@363045841yyt/klinechart-react`'s `KLineChart` mounts the core directly
-  (client-only, no Vue runtime); `KLineChartWC` renders the full-UI `<kline-chart>` Custom Element
-  bundled from the Vue package (`@363045841yyt/klinechart/web-component`).
-- **Agent Native** — `@363045841yyt/klinechart-agent-runtime` orchestrates the Agent, which
-  invokes the core's `@Tool`-registered primitives—the same entry points the UI uses.
+  indicators and drawing tools plug in as Scene Layers.
+- **Agent Native** — the bundled Agent runtime orchestrates the Agent, which invokes the core's
+  `@Tool`-registered primitives—the same entry points the UI uses.
 
 See [docs/architecture/architecture.md](docs/architecture/architecture.md) for the full architecture document.
 
 
-## ⚡ Performance
+## 📜 Script Indicators
 
-KLineChartQuant submits drawing primitives directly to Canvas2D, WebGL2 or WebGPU. These measurements come from the reproducible benchmark in [`bench/`](bench/README.md) (`node bench/run.mjs`), sampled on 2026-10-03 with analytic line AA enabled for GPU backends. Configuration: 1180 × 640 viewport, DPR 2, 4× MSAA, 120 warm-up frames and 600 sampled frames per scenario. Hardware: NVIDIA GeForce RTX 4060 Laptop GPU, driver 616.92, headless Chrome 154.0.8037.93, forced to the discrete GPU. Observed FPS is capped by the calibrated 200 Hz refresh rate.
+Indicators can be written as plain TypeScript instead of being compiled ahead of time. A script is one file that declares a single indicator through `defineIndicator`; the engine compiles it once, then runs it bar by bar and collects Plot points. Scripts are data-source and render agnostic — the host supplies the bars, the chart adapter renders the result.
 
-**Measurement scope:** fixed geometry is built once during warm-up and replayed from cache. Frame Prepare P50 measures the cache lookup and geometry retrieval; `0.000 ms` is a rounded value, not zero computation or the cost of rebuilding indicators. CPU Submit measures synchronous backend processing and API submission, not GPU completion. GPU time is measured separately with timer queries; Canvas2D has no page-level GPU timer. This benchmark does not cover continuous geometry rebuilding during scrolling, zooming or data updates, and is not directly comparable to the previous README measurements that rebuilt geometry every frame.
+```js
+defineIndicator({
+  name: 'Volume Tide',
+  position: Position.Sub,
+  onBar() {
+    const RED = '#F08080'
+    const RED_LIGHT = 'rgba(240, 128, 128, 0.5)'
+    const RED_LIGHTER = 'rgba(240, 128, 128, 0.15)'
+    const GREEN = '#008000'
+    const GREEN_LIGHT = 'rgba(0, 128, 0, 0.5)'
+    const GREEN_LIGHTER = 'rgba(0, 128, 0, 0.1)'
+    const GRAY_LIGHTER = 'rgba(128, 128, 128, 0.15)'
 
-### WebGPU Command Submission
+    const barUp = ta.rising(close, 1)
+    const barDn = ta.falling(close, 1)
+    const volumeChange = ta.change(volume)
 
-Seven command buffers submitted as one batched `queue.submit` versus seven separate submissions; 50 warm-up samples, 400 measured samples, 100 repetitions per sample:
+    const volumeColor = barUp
+      ? RED_LIGHTER
+      : barDn ? GREEN_LIGHTER : GRAY_LIGHTER
 
-| Submission | P50 (ms) |
+    plot.Columns(volume, 'Volume columns', {
+      color: volumeColor,
+    })
+
+    const volumeChangeColor = barUp
+      ? (volumeChange > 0 ? RED : RED_LIGHT)
+      : barDn
+        ? (volumeChange > 0 ? GREEN : GREEN_LIGHT)
+        : Color.Gray
+
+    plot.Histogram(volumeChange, 'Volume change columns', {
+      color: volumeChangeColor,
+      size: 12,
+    })
+
+    plot.Line(0, 'Zero line', {
+      color: Color.Gray,
+    })
+  },
+})
+```
+
+Everything a script needs is injected as a global before it runs:
+
+| Global | Meaning |
 | --- | --- |
-| One `queue.submit` (batched) | 0.003 |
-| Seven `queue.submit` (split) | 0.025 |
-| Speedup | **8.33×** |
+| `open` `high` `low` `close` `volume` `time` | price series; `close` reads the current bar, `close[1]` one bar back |
+| `input.int` `input.float` `input.bool` `input.string` | declare a parameter at the top level of `onBar`; the variable reads back the user's value |
+| `plot.Line` `plot.LineBR` `plot.StepLine` `plot.StepLineBR` `plot.Columns` `plot.Histogram` `plot.Point` `plot.Shape` `plot.Char` `plot.Arrow` | emit plot points; the method name selects the shape; each returns a handle |
+| `plot.Candle` `plot.Bar` | emit candles or OHLC bars from four prices; candles support separate body, wick, and border colors; return `void` |
+| `fill(from, to, color, title, options?)` | fill the area between two plots; `from` / `to` are handles returned by `plot.*` |
+| `ta` | built-in technical analysis library |
+| `Position` | `Position.Main` or `Position.Sub` |
+| `Color` | common Material 400 colors, or pass any CSS color string |
+| `defineIndicator` / `defineLibrary` / `importLibrary` | declare the indicator, declare a library, use a library |
 
-### MA5 / MA20 / MA60 (Simple Indicator)
+`defineIndicator` also accepts an optional `title` for the long name and an optional `info` for the description shown in the indicator picker; `name` remains the stable identity and short label.
 
-| Visible K-lines | Backend | Frame Prepare P50 (ms) | CPU Submit P50 (ms) | GPU P50 (ms) | FPS | 1% Low | Frame P99 (ms) | Severe Jank |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1,000 | Canvas2D | 0.000 | 0.700 | N/A | 98.3 | 52.4 | 19.10 | 48.33% |
-| 1,000 | WebGL2 | 0.000 | 0.500 | 0.127 | 199.3 | 163.9 | 6.10 | 0.00% |
-| 1,000 | WebGPU | 0.000 | 0.300 | 0.036 | 200.0 | 192.3 | 5.20 | 0.00% |
-| 5,000 | Canvas2D | 0.000 | 1.100 | N/A | 104.7 | 66.2 | 15.10 | 28.33% |
-| 5,000 | WebGL2 | 0.000 | 1.800 | 0.212 | 199.3 | 192.3 | 5.20 | 0.00% |
-| 5,000 | WebGPU | 0.000 | 0.500 | 0.050 | 200.0 | 192.3 | 5.20 | 0.00% |
-| 10,000 | Canvas2D | 0.000 | 5.600 | N/A | 38.8 | 22.2 | 45.00 | 99.00% |
-| 10,000 | WebGL2 | 0.000 | 2.800 | 0.712 | 199.0 | 192.3 | 5.20 | 0.17% |
-| 10,000 | WebGPU | 0.000 | 1.200 | 0.022 | 199.0 | 181.7 | 5.50 | 0.17% |
+`plot.Line` connects valid points across `null` or `NaN` gaps, like Pine's `plot.style_line`. Use `plot.LineBR` to break the line at gaps, like `plot.style_linebr`. Both accept the same color, size, dash, and offset options and return handles for `fill`. Existing scripts that require gaps to break the line should use `plot.LineBR`.
 
-### Ichimoku (Complex Rendering Workload)
+`plot.StepLine` draws steps with vertical transitions halfway between valid points and connects across gaps. `plot.StepLineBR` breaks at gaps. They correspond to Pine's `plot.style_stepline` and `plot.style_steplinebr`, accept the same options as lines, and return handles for `fill`.
 
-| Visible K-lines | Backend | Frame Prepare P50 (ms) | CPU Submit P50 (ms) | GPU P50 (ms) | FPS | 1% Low | Frame P99 (ms) | Severe Jank |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1,000 | Canvas2D | 0.000 | 0.800 | N/A | 68.5 | 33.9 | 29.50 | 60.00% |
-| 1,000 | WebGL2 | 0.000 | 1.000 | 0.116 | 200.0 | 192.3 | 5.20 | 0.00% |
-| 1,000 | WebGPU | 0.000 | 0.900 | 0.053 | 199.3 | 169.4 | 5.90 | 0.17% |
-| 5,000 | Canvas2D | 0.000 | 5.150 | N/A | 25.8 | 15.5 | 64.60 | 100.00% |
-| 5,000 | WebGL2 | 0.000 | 2.500 | 0.302 | 195.1 | 100.0 | 10.00 | 0.83% |
-| 5,000 | WebGPU | 0.000 | 1.400 | 0.129 | 198.0 | 146.7 | 6.82 | 0.33% |
-| 10,000 | Canvas2D | 0.000 | 7.000 | N/A | 28.6 | 15.4 | 64.90 | 100.00% |
-| 10,000 | WebGL2 | 0.000 | 3.700 | 0.534 | 184.9 | 97.0 | 10.31 | 3.00% |
-| 10,000 | WebGPU | 0.000 | 1.800 | 0.134 | 198.0 | 160.4 | 6.24 | 0.50% |
+Trend calculations live in `ta`: `ta.atr(length)` returns Wilder ATR, and `ta.supertrend(multiplier, atrPeriod)` returns `[trend, direction]` series. Direction is `-1` for up and `1` for down; both series are `NaN` during warm-up. Supertrend preserves the previous core indicator's initial up direction. The built-in `SuperTrend` script uses these results with two `plot.LineBR` calls.
 
-1% Low is the reciprocal of frame interval P99; Severe Jank is the share of intervals exceeding twice the calibrated refresh interval (10 ms here). Results are from one complete repeat run, not selected best cases. Browser scheduling and system load cause variation between runs; these numbers do not establish that analytic AA improves GPU performance or that all workloads avoid regressions. Source: `bench/results/render-bench-analytic-aa-confirmation.json` and `.csv` (local generated artifacts).
+`ta.macd(source, fastLength, slowLength, signalLength)` returns `[DIF, DEA, DIF-DEA]` series. Its EMAs use the first valid value as their seed, matching the previous core MACD; regular `ta.ema` retains its full-window seed. The built-in `MACD` script uses defaults 12/26/9, doubles the histogram, and colors columns by sign and momentum. Values start at the first valid input; the migrated script supports K-line charts.
+
+Parameters are plain `const` declarations, so the variable name is the parameter identity — no `inputs` block and no `params` object:
+
+```js
+onBar() {
+  const period = input.int(20, { title: 'Period', min: 1 })
+  const type = input.string('SMA', { options: ['SMA', 'EMA'] })
+  plot.Line(type === 'SMA' ? ta.sma(close, period) : ta.ema(close, period), 'ma')
+}
+```
+
+The built-in `ta` library covers `sma`, `ema`, `rma`, `swma`, `alma`, `wma`, `vwma`, `rsi`, `highest`, `lowest`, `highestbars`, `lowestbars`, `stoch`, `cmo`, `linreg`, `crossover`, `crossunder`, `rising`, `falling` and `change`. `highestbars` / `lowestbars` return negative bar offsets (0 is the current bar) and resolve ties to the earliest bar, matching Pine. User libraries use the same `defineLibrary` call and join the same global namespace.
+
+- **Sandboxed execution** - Scripts run in an embedded QuickJS runtime with per-run time and memory budgets, so a runaway script fails instead of hanging the host
+- **No future data** - History that is not yet available reads as `NaN`; a script can never look ahead
+- **Real editor** - The chart ships a CodeMirror-based script editor with completions, hover signatures, and signature help generated from the same declarations the compiler uses
+- **Same rendering path** - Plots flow through the engine's normal Plot, axis, and legend chain, so script indicators behave exactly like built-in ones
+
+In `KlineWorkbench`, open the code editor to create, run and add scripts to the chart. The product owns the script service and registers built-in scripts automatically; no separate script package installation is needed. Set `scripts` to `false` before mounting to disable scripting and hide its editor entry.
+
+See the [script docs](packages/script/docs/indicator.md) for the full declaration reference, [libraries](packages/script/docs/library.md), and [Plot API](packages/script/docs/indicator.md#plot).
 
 
 ## 📡 Data Sources
@@ -214,8 +249,7 @@ KLineChart requires a market data backend. Supported data sources:
 | `baostock` | BaoStock A-share daily / weekly / monthly & minute K-lines, served by `Baostock-Tradingview-Connector` | [BaoStock](docs/data-sources/baostock.zh-CN.md) |
 | `tradingview` | TradingView global instruments, served by `Baostock-Tradingview-Connector` | [BaoStock](docs/data-sources/baostock.zh-CN.md) |
 | `mt5` | MT5 (Exness) local terminal: forex / metals / crypto CFDs, served by `KCQ-MT5-connector` | [MT5](docs/data-sources/mt5.zh-CN.md) |
-| `ths` | Tonghuashun (THS): A-share / index / ETF / futures / options **daily** bars, served by `KCQ-THS-connector` | [THS](docs/data-sources/ths.zh-CN.md) |
-| `mock` | Debug only: local MOCK-100 / MOCK-10000 K-lines, no backend needed, always online | — |
+| `mock` | Debug only: local on-demand infinite MOCK daily bars, no backend needed, always online | — |
 
 Backend repos live alongside this one (outside the monorepo).
 
@@ -231,11 +265,10 @@ Then run `pnpm dev` with a `-c` argument to start the frontend and the selected 
 
 ```bash
 pnpm dev                      # frontend only (Vite dev server)
-pnpm dev -c all               # frontend + all backends (gotdx + binance + baostock; mt5 / ths excluded)
+pnpm dev -c all               # frontend + all backends (gotdx + binance + baostock; mt5 excluded)
 pnpm dev -c gotdx baostock    # frontend + selected backends
 pnpm dev -c mt5               # frontend + MT5 local terminal (Windows + logged-in MT5 terminal)
-pnpm dev -c ths               # frontend + THS daily bars (needs THS_API_KEY or ths.api_key in config.json)
-pnpm dev -c tdx               # aliases supported (tdx / g / b / bnb / m / t / all)
+pnpm dev -c tdx               # aliases supported (tdx / g / b / bnb / m / all)
 pnpm dev -c all --lan         # same, dev server bound to 0.0.0.0 (LAN accessible)
 ```
 
@@ -247,23 +280,21 @@ pnpm dev:g                    # frontend + gotdx (Tongdaxin)
 pnpm dev:b                    # frontend + BaoStock / TradingView
 pnpm dev:bnb                  # frontend + Binance spot market data
 pnpm dev:mt5                  # frontend + MT5 local terminal
-pnpm dev:ths                  # frontend + THS daily bars
 pnpm dev:lan:all              # frontend (0.0.0.0) + all backends
 ```
 
-Parallel process logs stay in one terminal and are separated by colored source prefixes: `[vite]`, `[gotdx]`, `[binance]`, `[baostock]`, `[mt5]`, and `[ths]`.
+Parallel process logs stay in one terminal and are separated by colored source prefixes: `[vite]`, `[gotdx]`, `[binance]`, `[baostock]`, and `[mt5]`.
 
 In Windows PowerShell, run `node scripts/dev.mjs -c gotdx` (or use the other `-c` arguments above) to finish shutdown logs before the next prompt after Ctrl+C. `pnpm dev` adds a pnpm process that also receives Ctrl+C; the child script cannot control when pnpm prints `[ELIFECYCLE]`.
 
 Backend only (no frontend):
 
 ```bash
-pnpm connector                # all backends (mt5 / ths excluded)
+pnpm connector                # all backends (mt5 excluded)
 pnpm connector gotdx          # gotdx (Tongdaxin) :8080
 pnpm connector binance        # binance (Binance spot K-line & trades) :8091
 pnpm connector baostock       # BaoStock / TradingView :8000
 pnpm connector mt5            # MT5 local terminal :8090 (Windows + logged-in MT5 terminal)
-pnpm connector ths            # THS daily bars :8092 (needs THS_API_KEY or ths.api_key in config.json)
 ```
 
 For backend only with the same shutdown ordering, run `node scripts/start-connector.mjs gotdx`.
@@ -273,172 +304,176 @@ After `pnpm setup:backends`, no extra setup is needed. The dev server proxies `/
 
 ## 🚀 Quick Start
 
-### 3. Install and Use
+### 1. Install
+
+The product is one package. `vue` is the only peer dependency; the chart engine, Agent runtime, script engine, editor page, Web Workers, public types, stylesheet, and license notices are all inside the tarball.
 
 ```bash
-npm install @363045841yyt/klinechart @363045841yyt/klinechart-core
+pnpm add @363045841yyt/klinechart vue
+# npm install @363045841yyt/klinechart vue
+# yarn add @363045841yyt/klinechart vue
 ```
 
-**Use the component:**
+No `@363045841yyt/klinechart-*` internal package is published or needs to be installed. While v0.11 is in alpha, install the `alpha` dist-tag (`pnpm add @363045841yyt/klinechart@alpha vue`) or pin an exact version.
+
+Import the product stylesheet once in your app entry:
+
+```ts
+import '@363045841yyt/klinechart/style.css'
+```
+
+### 2. Mount the workbench
 
 ```vue
-<template>
-  <div class="app-container" :data-theme="currentTheme">
-    <KlineChart v-model:theme="currentTheme" :custom-data="customData" :settings="chartSettings" />
-  </div>
-</template>
-
 <script setup lang="ts">
-  import { ref } from 'vue'
-  import type { ChartSettings } from '@363045841yyt/klinechart-core'
-  import { type CustomDataSource, KlineChart } from '@363045841yyt/klinechart'
-  import demoData from './demo-data.json'
-
-  const currentTheme = ref<'light' | 'dark'>('dark')
-
-  const customData = ref<CustomDataSource>(demoData as CustomDataSource)
-
-  const chartSettings: ChartSettings = {
-    showGridLines: true,
-    isAsiaMarket: true,
-    showVolumePriceMarkers: false,
-    mainLeftAxisDisplaySetting: 'none',
-    theme: 'dark',
-    colorPresetSettings: {
-      dark: {
-        candleUpBody: '#e85d04',
-        candleDownBody: '#1b4332',
-        crosshairLine: '#faa307',
-        gridMajor: '#3e2723',
-      },
-    },
-  }
+import { KlineWorkbench } from '@363045841yyt/klinechart'
 </script>
 
-<style>
-  .app-container {
-    display: flex;
-    flex-direction: column;
-    height: 80vh;
-  }
-
-  .app-container[data-theme='dark'] {
-    background: #000;
-    color: #e5e7eb;
-  }
-</style>
-```
-
-**Import CSS in main.ts:**
-
-```typescript
-import '@363045841yyt/klinechart/style.css'
-import { createApp } from 'vue'
-import App from './App.vue'
-
-createApp(App).mount('#app')
-```
-
-**Slot Usage — Custom Tooltip:**
-
-```html
-<KlineChart>
-  <template #kline-tooltip="{ hoverData, upColor, downColor }">
-    <div class="custom-tooltip">
-      <div class="custom-tooltip__title">
-        <span>{{ hoverData.stockCode }}</span>
-        <span>{{ formatTimestamp(hoverData.timestamp, { timeZone: 'Asia/Shanghai' }) }}</span>
-      </div>
-      <div
-        class="custom-tooltip__price"
-        :style="{ color: hoverData.close >= hoverData.open ? upColor : downColor }"
-      >
-        {{ hoverData.close.toFixed(2) }}
-      </div>
-      <div class="custom-tooltip__detail">
-        O: {{ hoverData.open.toFixed(2) }}<br />
-        H: {{ hoverData.high.toFixed(2) }}<br />
-        L: {{ hoverData.low.toFixed(2) }}<br />
-        C: {{ hoverData.close.toFixed(2) }}
-      </div>
-    </div>
-  </template>
-</KlineChart>
-```
-
-**Slot Usage — Custom Main-Pane Legend:**
-
-Providing `#legend` fully replaces the default Canvas legend. The slot scope is the full `LegendTemplateContext` (OHLC, timeshare, main indicators, comparisons, layout, colors).
-
-```vue
-<template #legend="{ index, currentBar, timeshare, indicators, comparisons, colors }">
-  <div class="my-legend">
-    <!-- Custom fields added to KLineData[] for PR #98 are exposed through currentBar -->
-    <div v-if="currentBar" class="my-legend__row">
-      <span :style="{ color: currentBar.color }">
-        开盘 {{ currentBar.open.toFixed(2) }} 最高 {{ currentBar.high.toFixed(2) }} 最低
-        {{ currentBar.low.toFixed(2) }} 收盘 {{ currentBar.close.toFixed(2) }}
-      </span>
-      <span v-if="currentBar.volumeText"> Vol {{ currentBar.volumeText }}</span>
-    </div>
-
-    <div v-if="timeshare" class="my-legend__row">
-      <span :style="{ color: timeshare.changeColor }">
-        现价 {{ timeshare.price.toFixed(2) }} 涨幅 {{ timeshare.changePercent.toFixed(2) }}%
-      </span>
-    </div>
-
-    <!-- Using main chart indicator legend data -->
-    <div v-for="indicator in indicators" :key="indicator.name" class="my-legend__row">
-      <span>{{ indicator.name }}:</span>
-      <template v-for="value in indicator.values" :key="value.label">
-        <span :style="{ color: value.color }">
-          {{ value.label }} {{ value.value.toFixed(3) }}
-        </span>
-      </template>
-    </div>
-    <!-- Using comparison commodity data -->
-    <div
-      v-for="comparison in comparisons"
-      :key="comparison.symbol"
-      class="my-legend__row"
-      :style="{ color: comparison.percentColor }"
-    >
-      {{ comparison.symbol }}
-      {{ comparison.percent > 0 ? '+' : '' }}{{ comparison.percent.toFixed(2) }}%
-    </div>
+<template>
+  <div style="height: 700px">
+    <KlineWorkbench />
   </div>
 </template>
 ```
 
-### Host toolbar controls
+The workbench fills its container (`width/height: 100%`), so the host element must have an explicit size.
 
-Use `#toolbar-start` and `#toolbar-end` to place host account or workspace
-controls in the native toolbar. Both slots are optional and inherit the
-resolved chart theme. They stay outside the draggable, scrolling chart controls.
+- `agent` and `scripts` default to `true`. Both are decided at mount time: set either to `false` (and remount) to disable that subsystem. Disabling scripts means no script execution Worker, no editor entry, and no language service.
+- `chart` forwards chart configuration (axes, toolbar, `settings.theme`, `settings.rendererBackend`, …).
+- `initialAgentPanelOpen` controls whether the Agent drawer starts open.
+- Builtin script indicators are prepared before the chart mounts; the editor page and its language service load only when the editor is opened.
+- Advanced Agent APIs live in the same package at `@363045841yyt/klinechart/agent`.
+
+### 3. Provide market data
+
+The chart never accepts a bar array. Implement `MarketDataSource`, register it on a host you own, and pass that host to the workbench.
+
+```ts
+import {
+  InstrumentType,
+  KLineAdjustment,
+  KLinePeriod,
+  createMarketDataHost,
+  type BarsObserver,
+  type DataSourceInstrument,
+  type HistoryRequest,
+  type MarketDataSource,
+} from '@363045841yyt/klinechart'
+
+// `api` and `toInstrument` are your backend adapter and payload mapping (HTTP, WebSocket, file reader, database, …).
+const instrument: DataSourceInstrument = {
+  id: 'BTCUSDT',
+  symbol: 'BTCUSDT',
+  name: 'Bitcoin / USDT',
+  exchange: 'BINANCE',
+  instrumentType: InstrumentType.Crypto,
+  timezone: 'UTC',
+  capabilities: {
+    bars: { periods: [KLinePeriod.Min1, KLinePeriod.Daily], adjustments: [KLineAdjustment.None] },
+    liveBars: true,
+  },
+}
+
+const source: MarketDataSource = {
+  id: 'binance',
+  name: 'Binance Spot',
+  capabilities: {
+    instrumentTypes: [InstrumentType.Crypto],
+    bars: { periods: [KLinePeriod.Min1, KLinePeriod.Daily], adjustments: [KLineAdjustment.None] },
+    liveBars: true,
+  },
+  instruments: {
+    // Powers the symbol picker and instrument switching.
+    async search(query) {
+      const matches = await api.searchSymbols(query.keyword, query.limit, query.signal)
+      return matches.map(toInstrument)
+    },
+    // Resolves the stable id back to identity and capabilities.
+    async resolve(id, signal) {
+      return toInstrument(await api.getSymbol(id, signal))
+    },
+  },
+  bars: {
+    // History pages: `beforeTimestamp` is an exclusive upper bound, omitted means the newest page.
+    async fetch(request: HistoryRequest) {
+      const page = await api.getKlines({
+        symbol: request.instrument.id,
+        period: request.period,
+        before: request.beforeTimestamp,
+        limit: request.limit,
+        signal: request.signal,
+      })
+      return { bars: page.bars, olderData: page.olderData }
+    },
+    // Optional live stream. Return an unsubscribe function.
+    subscribe(request, observer: BarsObserver) {
+      observer.status('connecting')
+      const socket = api.subscribeBars(request.instrument.id, request.period, {
+        onBar: (bar) => observer.update(bar),
+        onCorrection: (bar) => observer.update(bar, { historical: true }),
+        onReset: () => observer.invalidate(),
+        onStatus: (status) => observer.status(status),
+        onError: (error) => observer.error(error),
+      })
+      return () => socket.close()
+    },
+  },
+}
+
+const host = createMarketDataHost()
+const unregister = host.registerDataSource(source)
+```
+
+Pass the host and the selected instrument to the workbench:
 
 ```vue
-<KlineChart>
-  <template #toolbar-start><AccountMenu /></template>
-  <template #toolbar-end><WorkspaceActions /></template>
-</KlineChart>
+<script setup lang="ts">
+import { KlineWorkbench } from '@363045841yyt/klinechart'
+
+const instrument = { sourceId: 'binance', id: 'BTCUSDT' }
+</script>
+
+<template>
+  <div style="height: 700px">
+    <KlineWorkbench
+      :market-data-context="host"
+      :instrument="instrument"
+      period="daily"
+    />
+  </div>
+</template>
 ```
+
+Data contract:
+
+- `bars.fetch` returns `{ bars, olderData }`. Bars are UTC-millisecond OHLCV entries in ascending order; `beforeTimestamp` is an exclusive bound and `limit` is the requested page size.
+- `olderData` is `available`, `exhausted`, or `unknown`. Declare it explicitly — an empty array is not a substitute for “no more history”.
+- `observer.update(bar)` takes a full single-bar snapshot. Same last timestamp replaces, newer appends, older reports a protocol error; `observer.update(bar, { historical: true })` corrects an existing bar; `observer.invalidate()` asks for a reload after deletions or adjustment changes.
+- `observer.status('connecting' | 'connected' | 'disconnected')` and `observer.error(error)` report transport state; reconnection stays the data source's responsibility.
+- A source-level `liveBars` flag derives from `subscribe`; an individual instrument may declare `liveBars: false`.
+- `instrument` and `period` are controlled props: change them to switch the series.
+- The host belongs to your app. `unregister()` removes one source and `host.dispose()` releases everything; unmounting the workbench does not dispose the host.
+- For local development without a backend, register the built-in mock instead: `host.registerDataSource(createMockDataSource())` (MOCK). The default context already contains it, so do not register it twice.
+
+The complete contract, including trades, depth, time-share, and trading-calendar interfaces, is documented in the [data source API](docs/market-data/data-source-api.md).
+
+### License
+
+The complete product includes AGPL-3.0-or-later script modules and is distributed under AGPL-3.0-or-later. Individual Apache-2.0 modules retain their original licenses; module and third-party notices ship with the package.
 
 
 ### 4. (Optional) Add AI Agent Control
 
-The chart core exposes its domain capabilities as `@Tool` primitives. Both the UI and the Agent call them through the same path:
-
-```ts
-import { getRegisteredChartTools } from '@363045841yyt/klinechart-core/controllers'
-```
-
-`getRegisteredChartTools()` returns every tool with its parameter schema, safety level, and unified executor. Hand them to `@363045841yyt/klinechart-agent-runtime`, which orchestrates the Agent inside your app (browser or Electron) against a Provider profile — no MCP bridge, no side-channel state. See [agent-runtime](packages/agent-runtime/README.md).
+`KlineWorkbench` ships the Agent panel. The chart core exposes its domain capabilities as `@Tool`
+primitives, and the Agent calls the same primitives as the UI: one shared state, one execution path,
+no MCP bridge, no side-channel state. Advanced Agent APIs live in the same package at
+`@363045841yyt/klinechart/agent`.
 
 
 ## 📖 More Documentation
 
 - [Rendering Pipeline](docs/rendering/rendering-pipeline.md) - Current paint path: FrameTransaction, Scene/Layer, Renderer backends
+- [Script Indicators](packages/script/docs/indicator.md) - Declaring an indicator in TypeScript: inputs, Plot API, libraries
 
 
 ## 📋 Component Props
@@ -457,7 +492,6 @@ import { getRegisteredChartTools } from '@363045841yyt/klinechart-core/controlle
 | priceLabelWidth | `number` | 60 | Price label extra width for showing change percentage |
 | zoomLevels | `number` | 80 | Total number of zoom levels |
 | initialZoomLevel | `number` | 3 | Initial zoom level (1 ~ zoomLevels) |
-| customData | `CustomDataSource` | — | Inline data bundle: `{ symbol?, period?, data, comparisons? }`. Bypasses the fetcher pipeline entirely. See example above |
 | teleportContainer | `string \| HTMLElement` | — | Teleport target for dropdowns/modals (CSS selector or element). Defaults to internal `.chart-wrapper` |
 
 
@@ -477,20 +511,24 @@ import { getRegisteredChartTools } from '@363045841yyt/klinechart-core/controlle
 - [ ] Support convert the drawing to quant code
 
 
-## 📦 Packages
+## 📦 Package
+
+`@363045841yyt/klinechart` is the only published package. The engine, Agent runtime, script engine,
+editor page, and every other monorepo module ship inside it and are not published separately.
 
 | Package | Description | npm |
 |---------|-------------|-----|
-| `@363045841yyt/klinechart-core` | Headless chart engine + controllers | [npm](https://www.npmjs.com/package/@363045841yyt/klinechart-core) |
-| `@363045841yyt/klinechart` | Vue 3 bindings | [npm](https://www.npmjs.com/package/@363045841yyt/klinechart) |
-| `@363045841yyt/klinechart-react` | React bindings | [npm](https://www.npmjs.com/package/@363045841yyt/klinechart-react) |
-| `@363045841yyt/klinechart-angular` | Angular bindings | [npm](https://www.npmjs.com/package/@363045841yyt/klinechart-angular) |
-| `@363045841yyt/klinechart-agent-runtime` | Framework-neutral Agent runtime (Pi orchestration + host contracts) | [npm](https://www.npmjs.com/package/@363045841yyt/klinechart-agent-runtime) |
+| `@363045841yyt/klinechart` | Vue 3 product: `KlineWorkbench`, `useChart`, and the full chart engine | [npm](https://www.npmjs.com/package/@363045841yyt/klinechart) |
 
 
 ## 🚀 What's New
 
-- **v0.11** Introduced the AI Agent runtime (agent-runtime and AI runtime with OpenAI protocol support and a shared web/Electron Agent workspace) plus `@tool` registration and drawing Agent tools. Drawing gained sub-pane and timeshare support with workspace isolation, multi-select and batch editing, blank-area anchors, inline text editing, marquee group drag, and configurable labels; five-day timeshare, native timeshare indicators, and persistent view workspaces landed alongside WebGL-on-visible-canvas rendering.
+- **v0.11**
+  - **Agent Runtime** - A bundled Agent runtime with OpenAI protocol support, driving the chart through the same `@tool` primitives the UI uses, plus `@tool` registration, drawing Agent tools, and a shared web/Electron Agent workspace
+  - **Script Indicator Engine** - One plain TypeScript file per indicator, executed in a sandboxed QuickJS runtime under time and memory budgets; built-in CodeMirror editor, a `ta` technical-analysis library, and user libraries; plots flow through the normal rendering chain, so a script indicator behaves exactly like a built-in one
+  - **Drawing** - Sub-pane and timeshare drawing with workspace isolation, multi-select and batch editing, blank-area anchors, inline text editing, marquee group drag, and configurable labels
+  - **Timeshare and Workspaces** - Five-day timeshare, native timeshare indicators, and persistent view workspaces
+  - **Rendering** - WebGL rendering directly on the visible canvas
 - **v0.10** Reworked the data layer around a unified MarketDataProvider, added multi-day timeshare, a unified indicator query pipeline shared by charts and Agents, Fibonacci/rectangle/arrow annotation tools, and promoted comparison to a first-class chart mode. Aligned the Vue/React/Angular bindings with the unified provider contract and shipped multiple rendering and state-consistency fixes.
 - **v0.9.0** Self-developed Core-layer reactive state model migration, timing issues eliminated
 - **v0.9.0** Single-path Scene renderer + WebGPU backend (hybrid DOM canvas, no compositeTo), FrameTransaction reactivity, device-lost recovery, auto-fallback WebGPU → WebGL → Canvas2D
@@ -507,7 +545,7 @@ import { getRegisteredChartTools } from '@363045841yyt/klinechart-core/controlle
 - **v0.4** Modern UI, left toolbar, right axis optimization, TradingView-style zoom feel
 
 
-## 📄 License
+## Product license
 
-[Apache-2.0](LICENSE)
+The complete Vue workbench is distributed under [AGPL-3.0-or-later](packages/vue/LICENSE). Individual Apache-2.0 modules retain their original licenses. The product includes module and third-party license notices.
 

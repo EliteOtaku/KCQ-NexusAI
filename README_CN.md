@@ -1,4 +1,4 @@
-高性能金融图表库，单帧生成时间仅需2ms，200hz环境下稳定滚动190-200fps，原生支持 AI Agent 控制，全链路 ResizeObserver 驱动清晰渲染，插件化架构。
+高性能金融图表基础设施，单帧生成时间仅需 2 ms，200 hz 环境下稳定滚动 190-200 fps，原生 AI-Native 图表架构，全链路 ResizeObserver 驱动清晰渲染，QuickJS 指标运行环境，支持自研 KCQ 金融分析 API 运行脚本实现指标渲染。
 
 
 <div align="center">
@@ -20,16 +20,7 @@
 
 轻量级金融 K 线图表库，专注量化交易场景。**Agent 是一等公民** — 支持 AI Agent 直接控制图表操作，提供 TradingView 级别的交互体验。
 
-<div align="center">
-  <img src="https://files.seeusercontent.com/2026/09/11/8qhO/c13205e.png" width="400" style="border-radius: 12px; margin: 8px;" />
-  <img src="https://files.seeusercontent.com/2026/09/11/r3bV/1b3b978.png" width="400" style="border-radius: 12px; margin: 8px;" />
-  <br/>
-  <img src="https://files.seeusercontent.com/2026/09/11/7Fkg/b602f74.png" width="400" style="border-radius: 12px; margin: 8px;" />
-  <img src="https://files.seeusercontent.com/2026/09/11/4Yxu/11e2d91.jpg" width="400" style="border-radius: 12px; margin: 8px;" />
-  <br/>
-  <img src="https://files.seeusercontent.com/2026/09/11/Wv2q/e549295.png" width="400" style="border-radius: 12px; margin: 8px;" />
-  <img src="https://files.seeusercontent.com/2026/09/11/udP5/Agent.png" width="400" style="border-radius: 12px; margin: 8px;" />
-</div>
+![](https://files.seeusercontent.com/2026/10/19/yfD1/2026-10-19-19_36_21-601360.png)
 
 
 ## 🔀 NexusAI Fork 说明
@@ -62,9 +53,9 @@ KLineChartQuant 将 Agent 视为图表的一等公民，与用户等权。它不
 ## ✨ 核心特性
 
 - **Agent 原生** - 图表核心以 `@Tool` 装饰的领域原语对外暴露能力，Agent 与 UI 调用同一套原语。工具是 Action 的子集：共享同一状态、同一条执行链路，无桥接层
+- **脚本指标** - 用 TypeScript 直接编写指标。QuickJS 沙箱执行并带时间与内存预算，内置带补全与悬浮签名的编辑器，Plot 走既有渲染链路
 - **渲染清晰** - 全链路 ResizeObserver 驱动，物理像素对齐，各 DPR 屏幕下 K 线、影线、线条均锐利清晰
 - **插件架构** - 渲染器插件化设计，支持动态注册、配置和生命周期管理
-- **自定义标记** - 支持语义化配置自定义标记和自定义信息
 - **高性能** - 流畅处理万级数据点，无卡顿缩放平移；**200Hz 屏幕下支持 190-200fps**，单帧生成时间低至 **2ms**
 - **多后端渲染** - 统一绘制原语一次提交，支持 **WebGPU**、**WebGL**、**Canvas2D** 三种后端。WebGPU 提供混合 DOM Canvas（无 `compositeTo` 拷贝）、单命令缓冲每帧提交、原生 4x MSAA、基于 ResourceTable 的实例几何缓存。自动降级链路：WebGPU → WebGL → Canvas2D。**200Hz 屏幕下可达 190fps**，每帧 GPU 耗时 **<1ms**
 - **交互优化** - 缩放锚点稳定、十字光标精准、拖拽流畅
@@ -72,28 +63,35 @@ KLineChartQuant 将 Agent 视为图表的一等公民，与用户等权。它不
 - **商品比较** - 支持无限数量商品走势比较
 - **多数据源** - 支持多数据源聚合并可自由扩展
 - **批量数据导出** - 选择时间范围后，批量输入多个股票代码，一键导出合并 CSV 文件，支持进度提示
-- **自定义 Tooltip** - 通过命名插槽（`#kline-tooltip`、`#marker-tooltip`）完全自定义 tooltip，引擎提供悬停数据、位置和样式
+- **自定义 Tooltip** - 通过 `#kline-tooltip` 命名插槽完全自定义 tooltip，引擎提供悬停数据、位置和样式
+
+
+## ⚡ 性能
+
+本项目把渲染原语直接提交到 Canvas2D、WebGL2 或 WebGPU。设计目标是 **200 FPS（每帧 5 ms）**，下图是实测帧生成时间及其占该预算的比例。
+
+基准条件：1180 × 640 视口、DPR 2、4× MSAA、300–10,000 根可见 K 线，每个场景重复 3 轮合并取百分位。硬件为 NVIDIA GeForce RTX 4060 Laptop GPU，无头 Chrome 155。复现命令见 [`bench/`](bench/README.md)。
+
+![12 条指标线在 Canvas2D、WebGL2、WebGPU 下的帧生成时间与帧预算占用（300 至 10,000 根可见 K 线）](docs/Pics/render-bench-local-promo.png)
 
 
 ## 📐 系统架构
 
-KLineChartQuant 是一个 pnpm monorepo。核心引擎不依赖任何 UI 框架，通过统一的
-`ChartController`（只读信号 + 命令方法）对外暴露能力；Vue / React / Angular 绑定层只负责
-挂载、事件转发与响应式桥接。AI Agent 通过与 UI 相同的 `@Tool` 原语直接驱动图表，
-共享同一状态源，而非桥接层。
+KLineChartQuant 是一个 pnpm monorepo，只发布一个产品包 `@363045841yyt/klinechart`。核心引擎不依赖
+任何 UI 框架，通过统一的 `ChartController`（只读信号 + 命令方法）对外暴露能力；Vue 层只负责挂载、
+事件转发与响应式桥接。AI Agent 通过与 UI 相同的 `@Tool` 原语直接驱动图表，共享同一状态源，而非
+桥接层。Vue 层以下的全部模块都随产品 tarball 交付。
 
 ```mermaid
 flowchart TB
-    subgraph app["UI 层 / 框架绑定"]
+    subgraph app["产品 @363045841yyt/klinechart"]
         UI["UI 层"]
-        VuePkg["@363045841yyt/klinechart<br/>Vue 3 组件 + useChart"]
-        ReactPkg["@363045841yyt/klinechart-react<br/>KLineChart（直连 Core）· KLineChartWC（Vue Web Component）"]
-        AngularPkg["@363045841yyt/klinechart-angular"]
+        VuePkg["Vue 3 组件<br/>KlineWorkbench · useChart"]
         Agent["AI Agent"]
-        AgentRt["@363045841yyt/klinechart-agent-runtime"]
+        AgentRt["Agent 运行时"]
     end
 
-    subgraph core["核心引擎 @363045841yyt/klinechart-core"]
+    subgraph core["核心引擎"]
         Ctl["ChartController<br/>只读信号 + 命令方法"]
         Chart["Chart 门面"]
         Kernel["StateKernel<br/>Reactive SSOT"]
@@ -109,17 +107,11 @@ flowchart TB
         Bn["Binance-Connector<br/>Binance 现货 K 线 / 逐笔成交 :8091"]
         Bs["Baostock-Tradingview-Connector<br/>BaoStock / TradingView :8000"]
         Mt["KCQ-MT5-connector<br/>MT5（Exness）:8090"]
-        Th["KCQ-THS-connector<br/>同花顺日线 :8092"]
     end
 
     UI --> VuePkg
-    UI --> ReactPkg
-    UI --> AngularPkg
-    VuePkg -->|"Web Component 接入"| ReactPkg
     Agent --> AgentRt
     VuePkg --> Ctl
-    ReactPkg --> Ctl
-    AngularPkg --> Ctl
     AgentRt -->|"@Tool 原语（与 UI 同路径）"| Ctl
     Ctl --> Chart
     Chart --> Kernel
@@ -133,7 +125,6 @@ flowchart TB
     Bn -->|行情数据| Data
     Bs -->|行情数据| Data
     Mt -->|"行情数据 + SSE"| Data
-    Th -->|"行情数据（日线）"| Data
     Kernel --> Data
     Kernel --> Pipe
 ```
@@ -144,63 +135,106 @@ flowchart TB
 - **渲染** — 图元一次提交，WebGPU / WebGL2 / Canvas2D 三后端渲染，自动降级
   （WebGPU → WebGL → Canvas2D）。
 - **数据层** — 统一 `SeriesRepository` + 增量缓冲 + 拉取调度；多数据源聚合
-  （gotdx / BaoStock / TradingView / MT5 / 同花顺 THS / mock）与 Binance 现货 K 线 / 逐笔成交。
+  （gotdx / BaoStock / TradingView / MT5 / mock）与 Binance 现货 K 线 / 逐笔成交。
 - **插件子系统** — PluginHost / HookSystem / EventBus / RendererPluginManager；
   指标、标记、画图以 Scene Layer 形式接入。
-- **React 绑定** — `@363045841yyt/klinechart-react` 的 `KLineChart` 直接挂载 Core（仅客户端加载，
-  不含 Vue 运行时）；`KLineChartWC` 渲染由 Vue 包打包、带完整 UI 的 `<kline-chart>` 自定义元素
-  （`@363045841yyt/klinechart/web-component`）。
-- **Agent 原生** — `@363045841yyt/klinechart-agent-runtime` 编排 Agent，直接调用核心
-  `@Tool` 注册的原语——与 UI 使用同一入口。
+- **Agent 原生** — 随包交付的 Agent 运行时编排 Agent，直接调用核心 `@Tool` 注册的原语——
+  与 UI 使用同一入口。
 
 完整架构文档见 [docs/architecture/architecture.md](docs/architecture/architecture.md)。
 
 
-## ⚡ 性能
+## 📜 脚本指标
 
-本项目可将渲染原语直接提交到 Canvas2D、WebGL2 或 WebGPU。以下数据来自 [`bench/`](bench/README.md) 的可复现基准（`node bench/run.mjs`），采样日期为 2026-10-03，GPU 后端已启用线条解析 AA。配置：1180 × 640 视口、DPR 2、4× MSAA，每个场景预热 120 帧、采集 600 帧。硬件：NVIDIA GeForce RTX 4060 Laptop GPU，驱动 616.92，无头 Chrome 154.0.8037.93，强制使用独显。观测帧率受校准后的 200 Hz 刷新率上限约束。
+指标不必提前编译，可以直接用 TypeScript 编写。一份脚本就是一个文件，通过 `defineIndicator` 声明单个指标；引擎只编译一次，随后逐 bar 执行并收集 Plot 点。脚本与数据源、渲染后端无关——宿主提供 K 线，图表适配层负责绘制结果。
 
-**测量范围**：固定几何在预热阶段构建一次，随后从缓存重放。「帧准备 P50」测量缓存查找与几何读取；`0.000 ms` 是保留三位小数后的结果，不代表没有计算，也不代表重新计算指标的成本。「CPU 提交」测量同步后端处理和 API 提交，不代表 GPU 已完成；GPU 时间由独立计时查询测量，Canvas2D 无页面级 GPU 计时接口。本基准不覆盖滚动、缩放或行情更新时的持续几何重建，与此前逐帧重建几何的 README 数据不能直接比较。
+```js
+defineIndicator({
+  name: '成交量潮汐',
+  position: Position.Sub,
+  onBar() {
+    const RED = '#F08080'
+    const RED_LIGHT = 'rgba(240, 128, 128, 0.5)'
+    const RED_LIGHTER = 'rgba(240, 128, 128, 0.15)'
+    const GREEN = '#008000'
+    const GREEN_LIGHT = 'rgba(0, 128, 0, 0.5)'
+    const GREEN_LIGHTER = 'rgba(0, 128, 0, 0.1)'
+    const GRAY_LIGHTER = 'rgba(128, 128, 128, 0.15)'
 
-### WebGPU 命令提交
+    const barUp = ta.rising(close, 1)
+    const barDn = ta.falling(close, 1)
+    const volumeChange = ta.change(volume)
 
-7 个命令缓冲通过一次 `queue.submit` 集中提交与 7 次拆分提交对比；预热 50 个样本、采集 400 个样本，每个样本重复 100 次：
+    const volumeColor = barUp
+      ? RED_LIGHTER
+      : barDn ? GREEN_LIGHTER : GRAY_LIGHTER
 
-| 提交方式 | P50 (ms) |
+    plot.Columns(volume, 'Volume columns', {
+      color: volumeColor,
+    })
+
+    const volumeChangeColor = barUp
+      ? (volumeChange > 0 ? RED : RED_LIGHT)
+      : barDn
+        ? (volumeChange > 0 ? GREEN : GREEN_LIGHT)
+        : Color.Gray
+
+    plot.Histogram(volumeChange, 'Volume change columns', {
+      color: volumeChangeColor,
+      size: 12,
+    })
+
+    plot.Line(0, 'Zero line', {
+      color: Color.Gray,
+    })
+  },
+})
+```
+
+脚本运行前，宿主会注入所需的全部全局变量：
+
+| 全局 | 含义 |
 | --- | --- |
-| 一次 `queue.submit`（合并） | 0.003 |
-| 七次 `queue.submit`（拆分） | 0.025 |
-| 加速比 | **8.33×** |
+| `open` `high` `low` `close` `volume` `time` | 行情序列；`close` 取当前 K 线，`close[1]` 取前一根 |
+| `input.int` `input.float` `input.bool` `input.string` | 在 `onBar` 顶层声明参数，变量本身就是用户设置的值 |
+| `plot.Line` `plot.LineBR` `plot.StepLine` `plot.StepLineBR` `plot.Columns` `plot.Histogram` `plot.Point` `plot.Shape` `plot.Char` `plot.Arrow` | 输出绘图点，方法名决定图形；每个方法返回可被 `fill` 引用的句柄 |
+| `plot.Candle` `plot.Bar` | 接收 OHLC 四个价格，输出蜡烛或美国线；蜡烛支持独立实体、影线、边框色，返回 `void` |
+| `fill(from, to, color, title, options?)` | 填充两个 Plot 之间的区域；`from` / `to` 是 `plot.*` 返回的句柄 |
+| `ta` | 内置技术分析函数库 |
+| `Position` | `Position.Main` 主图或 `Position.Sub` 副图 |
+| `Color` | Material 400 常用色，也可直接写任意 CSS 颜色字符串 |
+| `defineIndicator` / `defineLibrary` / `importLibrary` | 声明指标、声明库、使用库 |
 
-### MA5 / MA20 / MA60（简单指标）
+`defineIndicator` 还接受可选的 `title` 和 `info`，分别用于指标选择器里的长名称和说明文本；`name` 仍是稳定身份和短名。
 
-| 可见 K 线 | 后端 | 帧准备 P50 (ms) | CPU 提交 P50 (ms) | GPU P50 (ms) | 帧率 | 1% Low | 帧间隔 P99 (ms) | 严重卡顿率 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1,000 | Canvas2D | 0.000 | 0.700 | N/A | 98.3 | 52.4 | 19.10 | 48.33% |
-| 1,000 | WebGL2 | 0.000 | 0.500 | 0.127 | 199.3 | 163.9 | 6.10 | 0.00% |
-| 1,000 | WebGPU | 0.000 | 0.300 | 0.036 | 200.0 | 192.3 | 5.20 | 0.00% |
-| 5,000 | Canvas2D | 0.000 | 1.100 | N/A | 104.7 | 66.2 | 15.10 | 28.33% |
-| 5,000 | WebGL2 | 0.000 | 1.800 | 0.212 | 199.3 | 192.3 | 5.20 | 0.00% |
-| 5,000 | WebGPU | 0.000 | 0.500 | 0.050 | 200.0 | 192.3 | 5.20 | 0.00% |
-| 10,000 | Canvas2D | 0.000 | 5.600 | N/A | 38.8 | 22.2 | 45.00 | 99.00% |
-| 10,000 | WebGL2 | 0.000 | 2.800 | 0.712 | 199.0 | 192.3 | 5.20 | 0.17% |
-| 10,000 | WebGPU | 0.000 | 1.200 | 0.022 | 199.0 | 181.7 | 5.50 | 0.17% |
+`plot.Line` 跨过 `null` 或 `NaN` 空值连接前后有效点，对应 Pine 的 `plot.style_line`；`plot.LineBR` 在空值处断开，对应 `plot.style_linebr`。两者支持相同的颜色、尺寸、虚线和偏移选项，都返回可供 `fill` 引用的句柄。已有脚本若依赖空值断线，应改用 `plot.LineBR`。
 
-### Ichimoku（复杂渲染工况）
+`plot.StepLine` 绘制阶梯线，在相邻有效点的水平中点垂直跳变，并跨空值连接；`plot.StepLineBR` 在空值处断开。两者分别对应 Pine 的 `plot.style_stepline` 和 `plot.style_steplinebr`，复用折线选项，返回可供 `fill` 引用的句柄。
 
-| 可见 K 线 | 后端 | 帧准备 P50 (ms) | CPU 提交 P50 (ms) | GPU P50 (ms) | 帧率 | 1% Low | 帧间隔 P99 (ms) | 严重卡顿率 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1,000 | Canvas2D | 0.000 | 0.800 | N/A | 68.5 | 33.9 | 29.50 | 60.00% |
-| 1,000 | WebGL2 | 0.000 | 1.000 | 0.116 | 200.0 | 192.3 | 5.20 | 0.00% |
-| 1,000 | WebGPU | 0.000 | 0.900 | 0.053 | 199.3 | 169.4 | 5.90 | 0.17% |
-| 5,000 | Canvas2D | 0.000 | 5.150 | N/A | 25.8 | 15.5 | 64.60 | 100.00% |
-| 5,000 | WebGL2 | 0.000 | 2.500 | 0.302 | 195.1 | 100.0 | 10.00 | 0.83% |
-| 5,000 | WebGPU | 0.000 | 1.400 | 0.129 | 198.0 | 146.7 | 6.82 | 0.33% |
-| 10,000 | Canvas2D | 0.000 | 7.000 | N/A | 28.6 | 15.4 | 64.90 | 100.00% |
-| 10,000 | WebGL2 | 0.000 | 3.700 | 0.534 | 184.9 | 97.0 | 10.31 | 3.00% |
-| 10,000 | WebGPU | 0.000 | 1.800 | 0.134 | 198.0 | 160.4 | 6.24 | 0.50% |
+趋势计算由 `ta` 提供：`ta.atr(length)` 返回 Wilder ATR；`ta.supertrend(multiplier, atrPeriod)` 返回 `[趋势线, 方向]` 两个序列，方向 `-1` 为上涨、`1` 为下跌，预热期间两者均为 `NaN`。Supertrend 保留旧 core 指标的上涨初始方向，内置 `SuperTrend` 脚本通过两条 `plot.LineBR` 绘制计算结果。
 
-1% Low 为帧间隔 P99 的倒数；严重卡顿率为帧间隔超过两倍校准刷新间隔（此处 10 ms）的比例。表格取自一次完整复测，未挑选各场景的最佳值。浏览器调度和系统负载会导致轮次波动；这些数据不能证明解析 AA 提升 GPU 性能，也不能保证所有场景没有性能回退。来源：`bench/results/render-bench-analytic-aa-confirmation.json` 与 `.csv`（本地生成产物）。
+`ta.macd(source, fastLength, slowLength, signalLength)` 返回 `[DIF, DEA, DIF-DEA]` 三个序列，沿用旧 MACD 的首值 EMA 初始化，通用 `ta.ema` 的完整窗口初始化保持不变。内置 `MACD` 默认参数为 12/26/9，柱体翻倍，并按正负、增减绘制四色；从首个有效输入逐根输出，迁移脚本支持 K 线视图。
+
+参数就是普通的 `const` 声明，变量名即参数身份——不需要 `inputs`，也没有 `params` 对象：
+
+```js
+onBar() {
+  const period = input.int(20, { title: '周期', min: 1 })
+  const type = input.string('SMA', { options: ['SMA', 'EMA'] })
+  plot.Line(type === 'SMA' ? ta.sma(close, period) : ta.ema(close, period), 'ma')
+}
+```
+
+内置 `ta` 库提供 `sma`、`ema`、`rma`、`swma`、`alma`、`wma`、`vwma`、`rsi`、`highest`、`lowest`、`highestbars`、`lowestbars`、`stoch`、`cmo`、`linreg`、`crossover`、`crossunder`、`rising`、`falling` 与 `change`。`highestbars` / `lowestbars` 返回负偏移（0 为当前根），并列极值取更早一根，与 Pine 一致。用户库使用同一套 `defineLibrary` 调用，进入同一个全局命名空间。
+
+- **沙箱执行** — 脚本在内嵌 QuickJS 运行时中执行，每次运行都有时间和内存预算，跑飞的脚本会失败退出而不是拖垮宿主
+- **不接触未来数据** — 历史不足时序列返回 `NaN`，脚本永远无法读取未来
+- **真实编辑器** — 图表内置基于 CodeMirror 的脚本编辑器，补全、悬浮签名与参数提示均来自编译器所用的同一份声明
+- **同一渲染链路** — Plot 走引擎既有的绘图、坐标轴与图例通道，脚本指标与内置指标行为一致
+
+在 `KlineWorkbench` 中打开代码编辑器，即可创建、运行脚本并添加到图表。产品统一管理脚本服务并自动注册内置脚本，无需安装其他脚本包。挂载前设置 `scripts=false` 可禁用脚本并隐藏编辑入口。
+
+完整声明参考见[脚本文档](packages/script/docs/indicator.md)，另有[函数库](packages/script/docs/library.md)与 [Plot API](packages/script/docs/indicator.md#plot)。
 
 
 ## 📡 数据源
@@ -214,8 +248,7 @@ KLineChart 需要行情数据后端支持。支持的数据源如下：
 | `baostock` | BaoStock A 股日 / 周 / 月及分钟 K 线，由 `Baostock-Tradingview-Connector` 提供 | [BaoStock](docs/data-sources/baostock.zh-CN.md) |
 | `tradingview` | TradingView 全球品种，由 `Baostock-Tradingview-Connector` 提供 | [BaoStock](docs/data-sources/baostock.zh-CN.md) |
 | `mt5` | MT5（Exness）本地终端：外汇 / 金属 / 加密 CFD，由 `KCQ-MT5-connector` 提供 | [MT5](docs/data-sources/mt5.zh-CN.md) |
-| `ths` | 同花顺（A 股 / 指数 / ETF / 期货 / 期权）**日线**，由 `KCQ-THS-connector` 提供 | [同花顺 THS](docs/data-sources/ths.zh-CN.md) |
-| `mock` | 调试用：本地生成 MOCK-100 / MOCK-10000 K 线，无需后端，探测恒为在线 | — |
+| `mock` | 调试用：本地按需生成无限 MOCK 日线，无需后端，探测恒为在线 | — |
 
 后端仓库与本仓库同级（不在 monorepo 内）。
 
@@ -231,11 +264,10 @@ pnpm setup:backends
 
 ```bash
 pnpm dev                      # 仅前端（Vite 开发服务器）
-pnpm dev -c all               # 前端 + 全部后端（gotdx + binance + baostock，不含 mt5 / ths）
+pnpm dev -c all               # 前端 + 全部后端（gotdx + binance + baostock，不含 mt5）
 pnpm dev -c gotdx baostock    # 前端 + 指定的后端
 pnpm dev -c mt5               # 前端 + MT5 本地终端（Windows + 已登录 MT5 (Exness) 终端）
-pnpm dev -c ths               # 前端 + 同花顺日线（需 THS_API_KEY 或 config.json 的 ths.api_key）
-pnpm dev -c tdx               # 支持别名（tdx / g / b / bnb / m / t / all）
+pnpm dev -c tdx               # 支持别名（tdx / g / b / bnb / m / all）
 pnpm dev -c all --lan         # 同上，前端绑定 0.0.0.0（局域网可访问）
 ```
 
@@ -247,23 +279,21 @@ pnpm dev:g                    # 前端 + gotdx 通达信
 pnpm dev:b                    # 前端 + BaoStock / TradingView
 pnpm dev:bnb                  # 前端 + Binance 现货行情
 pnpm dev:mt5                  # 前端 + MT5 本地终端
-pnpm dev:ths                  # 前端 + 同花顺日线
 pnpm dev:lan:all              # 前端（0.0.0.0）+ 全部后端
 ```
 
-并行进程的日志集中在同一终端，并用彩色来源前缀区分：`[vite]`、`[gotdx]`、`[binance]`、`[baostock]`、`[mt5]`、`[ths]`。
+并行进程的日志集中在同一终端，并用彩色来源前缀区分：`[vite]`、`[gotdx]`、`[binance]`、`[baostock]`、`[mt5]`。
 
 Windows PowerShell 下如果要求 Ctrl+C 后先输出完关闭日志、最后才显示新提示符，请直接运行 `node scripts/dev.mjs -c gotdx`（其他 `-c` 参数同上）。`pnpm dev` 会额外启动一个 pnpm 进程，它自己也会收到 Ctrl+C，无法由子脚本控制它何时输出 `[ELIFECYCLE]`。
 
 仅启动后端（不带前端）：
 
 ```bash
-pnpm connector                # 全部后端（不含 mt5 / ths）
+pnpm connector                # 全部后端（不含 mt5）
 pnpm connector gotdx          # gotdx 通达信（:8080）
 pnpm connector binance        # Binance 现货 K 线 / 逐笔成交（:8091）
 pnpm connector baostock       # BaoStock / TradingView（:8000）
 pnpm connector mt5            # MT5 本地终端（:8090，Windows + 已登录 MT5 (Exness) 终端）
-pnpm connector ths            # 同花顺日线（:8092，需 THS_API_KEY 或 config.json 的 ths.api_key）
 ```
 
 仅启动后端且需要相同的退出顺序时，运行 `node scripts/start-connector.mjs gotdx`。
@@ -273,159 +303,175 @@ pnpm connector ths            # 同花顺日线（:8092，需 THS_API_KEY 或 co
 
 ## 🚀 快速开始
 
-### 3. 安装并使用
+### 1. 安装
+
+产品只有一个包。`vue` 是唯一的 peer 依赖；图表引擎、Agent 运行时、脚本引擎、编辑器页、Web Worker、公开类型、样式与许可证声明都在 tarball 内。
 
 ```bash
-npm install @363045841yyt/klinechart @363045841yyt/klinechart-core
+pnpm add @363045841yyt/klinechart vue
+# npm install @363045841yyt/klinechart vue
+# yarn add @363045841yyt/klinechart vue
 ```
 
-**使用组件：**
+不需要安装任何 `@363045841yyt/klinechart-*` 内部包：它们不对外发布。v0.11 处于 alpha 阶段，当前请安装 `alpha` dist-tag（`pnpm add @363045841yyt/klinechart@alpha vue`）或固定具体版本。
+
+在应用入口引入一次产品样式：
+
+```ts
+import '@363045841yyt/klinechart/style.css'
+```
+
+### 2. 挂载工作台
 
 ```vue
-<template>
-  <div class="app-container" :data-theme="currentTheme">
-    <KlineChart v-model:theme="currentTheme" :custom-data="customData" :settings="chartSettings" />
-  </div>
-</template>
-
 <script setup lang="ts">
-  import { ref } from 'vue'
-  import type { ChartSettings } from '@363045841yyt/klinechart-core'
-  import { type CustomDataSource, KlineChart } from '@363045841yyt/klinechart'
-  import demoData from './demo-data.json'
-
-  const currentTheme = ref<'light' | 'dark'>('dark')
-
-  const customData = ref<CustomDataSource>(demoData as CustomDataSource)
-
-  const chartSettings: ChartSettings = {
-    showGridLines: true,
-    isAsiaMarket: true,
-    showVolumePriceMarkers: false,
-    mainLeftAxisDisplaySetting: 'none',
-    theme: 'dark',
-    colorPresetSettings: {
-      dark: {
-        candleUpBody: '#e85d04',
-        candleDownBody: '#1b4332',
-        crosshairLine: '#faa307',
-        gridMajor: '#3e2723',
-      },
-    },
-  }
+import { KlineWorkbench } from '@363045841yyt/klinechart'
 </script>
 
-<style>
-  .app-container {
-    display: flex;
-    flex-direction: column;
-    height: 80vh;
-  }
-
-  .app-container[data-theme='dark'] {
-    background: #000;
-    color: #e5e7eb;
-  }
-</style>
-```
-
-**Import CSS in main.ts：**
-
-```typescript
-import '@363045841yyt/klinechart/style.css'
-import { createApp } from 'vue'
-import App from './App.vue'
-
-createApp(App).mount('#app')
-```
-
-**插槽用法 — 自定义 Tooltip：**
-
-```html
-<KlineChart>
-  <template #kline-tooltip="{ hoverData, upColor, downColor }">
-    <div class="custom-tooltip">
-      <div class="custom-tooltip__title">
-        <span>{{ hoverData.stockCode }}</span>
-        <span>{{ formatTimestamp(hoverData.timestamp, { timeZone: 'Asia/Shanghai' }) }}</span>
-      </div>
-      <div
-        class="custom-tooltip__price"
-        :style="{ color: hoverData.close >= hoverData.open ? upColor : downColor }"
-      >
-        {{ hoverData.close.toFixed(2) }}
-      </div>
-      <div class="custom-tooltip__detail">
-        O: {{ hoverData.open.toFixed(2) }}<br />
-        H: {{ hoverData.high.toFixed(2) }}<br />
-        L: {{ hoverData.low.toFixed(2) }}<br />
-        C: {{ hoverData.close.toFixed(2) }}
-      </div>
-    </div>
-  </template>
-</KlineChart>
-```
-
-**插槽用法 — 自定义主图左上角图例：**
-
-提供 `#legend` 时完全替换 Canvas 默认图例；作用域为完整 `LegendTemplateContext`（OHLC、分时、主图指标、对比品种、布局与颜色）。
-
-```vue
-<template #legend="{ index, currentBar, timeshare, indicators, comparisons, colors }">
-  <div class="my-legend">
-    <!-- PR #98 为 KLineData[] 添加的自定义字段会展开通过 currentBar 暴露 -->
-    <div v-if="currentBar" class="my-legend__row">
-      <span :style="{ color: currentBar.color }">
-        开盘 {{ currentBar.open.toFixed(2) }} 最高 {{ currentBar.high.toFixed(2) }} 最低
-        {{ currentBar.low.toFixed(2) }} 收盘 {{ currentBar.close.toFixed(2) }}
-      </span>
-      <span v-if="currentBar.volumeText"> Vol {{ currentBar.volumeText }}</span>
-    </div>
-
-    <div v-if="timeshare" class="my-legend__row">
-      <span :style="{ color: timeshare.changeColor }">
-        现价 {{ timeshare.price.toFixed(2) }} 涨幅 {{ timeshare.changePercent.toFixed(2) }}%
-      </span>
-    </div>
-
-    <!-- 使用主图指标图例数据 -->
-    <div v-for="indicator in indicators" :key="indicator.name" class="my-legend__row">
-      <span>{{ indicator.name }}:</span>
-      <template v-for="value in indicator.values" :key="value.label">
-        <span :style="{ color: value.color }">
-          {{ value.label }} {{ value.value.toFixed(3) }}
-        </span>
-      </template>
-    </div>
-    <!-- 使用比较商品数据 -->
-    <div
-      v-for="comparison in comparisons"
-      :key="comparison.symbol"
-      class="my-legend__row"
-      :style="{ color: comparison.percentColor }"
-    >
-      {{ comparison.symbol }}
-      {{ comparison.percent > 0 ? '+' : '' }}{{ comparison.percent.toFixed(2) }}%
-    </div>
+<template>
+  <div style="height: 700px">
+    <KlineWorkbench />
   </div>
 </template>
 ```
+
+工作台会铺满容器（`width/height: 100%`），宿主元素必须给出明确高度。
+
+- `agent` 与 `scripts` 默认开启，且在挂载时确定：设为 `false` 并重新挂载才会禁用对应子系统。关闭脚本后不会创建脚本执行 Worker，也不显示编辑器入口与语言服务。
+- `chart` 转发图表配置（坐标轴、工具栏、`settings.theme`、`settings.rendererBackend` 等）。
+- `initialAgentPanelOpen` 控制 Agent 抽屉是否初始展开。
+- 内置脚本指标会在图表挂载前准备；编辑器页与语言服务只在打开编辑器时加载。
+- 高级 Agent 接口在同一包的 `@363045841yyt/klinechart/agent` 子入口。
+
+### 3. 提供行情
+
+图表不接受 K 线数组。应用实现 `MarketDataSource`，注册到宿主自己创建的行情实例，再把该实例传给工作台。
+
+```ts
+import {
+  InstrumentType,
+  KLineAdjustment,
+  KLinePeriod,
+  createMarketDataHost,
+  type BarsObserver,
+  type DataSourceInstrument,
+  type HistoryRequest,
+  type MarketDataSource,
+} from '@363045841yyt/klinechart'
+
+// `api` 与 `toInstrument` 代表你的后端适配层与数据映射（HTTP、WebSocket、文件或数据库皆可）。
+const instrument: DataSourceInstrument = {
+  id: 'BTCUSDT',
+  symbol: 'BTCUSDT',
+  name: 'Bitcoin / USDT',
+  exchange: 'BINANCE',
+  instrumentType: InstrumentType.Crypto,
+  timezone: 'UTC',
+  capabilities: {
+    bars: { periods: [KLinePeriod.Min1, KLinePeriod.Daily], adjustments: [KLineAdjustment.None] },
+    liveBars: true,
+  },
+}
+
+const source: MarketDataSource = {
+  id: 'binance',
+  name: 'Binance Spot',
+  capabilities: {
+    instrumentTypes: [InstrumentType.Crypto],
+    bars: { periods: [KLinePeriod.Min1, KLinePeriod.Daily], adjustments: [KLineAdjustment.None] },
+    liveBars: true,
+  },
+  instruments: {
+    // 支撑品种搜索与切换。
+    async search(query) {
+      const matches = await api.searchSymbols(query.keyword, query.limit, query.signal)
+      return matches.map(toInstrument)
+    },
+    // 按稳定 ID 还原身份与能力。
+    async resolve(id, signal) {
+      return toInstrument(await api.getSymbol(id, signal))
+    },
+  },
+  bars: {
+    // 历史分页：beforeTimestamp 是排他上界，省略表示最新一页。
+    async fetch(request: HistoryRequest) {
+      const page = await api.getKlines({
+        symbol: request.instrument.id,
+        period: request.period,
+        before: request.beforeTimestamp,
+        limit: request.limit,
+        signal: request.signal,
+      })
+      return { bars: page.bars, olderData: page.olderData }
+    },
+    // 可选实时流；返回取消订阅函数。
+    subscribe(request, observer: BarsObserver) {
+      observer.status('connecting')
+      const socket = api.subscribeBars(request.instrument.id, request.period, {
+        onBar: (bar) => observer.update(bar),
+        onCorrection: (bar) => observer.update(bar, { historical: true }),
+        onReset: () => observer.invalidate(),
+        onStatus: (status) => observer.status(status),
+        onError: (error) => observer.error(error),
+      })
+      return () => socket.close()
+    },
+  },
+}
+
+const host = createMarketDataHost()
+const unregister = host.registerDataSource(source)
+```
+
+把宿主与选中的品种传给工作台：
+
+```vue
+<script setup lang="ts">
+import { KlineWorkbench } from '@363045841yyt/klinechart'
+
+const instrument = { sourceId: 'binance', id: 'BTCUSDT' }
+</script>
+
+<template>
+  <div style="height: 700px">
+    <KlineWorkbench
+      :market-data-context="host"
+      :instrument="instrument"
+      period="daily"
+    />
+  </div>
+</template>
+```
+
+数据契约：
+
+- `bars.fetch` 返回 `{ bars, olderData }`。K 线为 UTC 毫秒 OHLCV，按时间升序；`beforeTimestamp` 为排他上界，`limit` 为请求页大小。
+- `olderData` 只能是 `available`、`exhausted` 或 `unknown`，必须显式声明；不能用空数组表示“没有更多历史”。
+- `observer.update(bar)` 提交完整单根快照：末根时间相同则替换，较新则追加，较旧按协议错误处理；`observer.update(bar, { historical: true })` 修正已有历史；`observer.invalidate()` 在删除历史或复权变化后请求重查。
+- `observer.status('connecting' | 'connected' | 'disconnected')` 与 `observer.error(error)` 上报连接状态；重连策略仍属于数据源。
+- 源级 `liveBars` 由 `subscribe` 实现派生；单个品种可以声明 `liveBars: false`。
+- `instrument` 与 `period` 是受控属性，修改即切换序列。
+- 宿主生命周期归应用所有：`unregister()` 注销单个来源，`host.dispose()` 释放全部资源；卸载工作台不会销毁宿主。
+- 本地开发没有后端时，注册内置 mock：`host.registerDataSource(createMockDataSource())`（MOCK）。默认宿主已内置该来源，不要重复注册。
+
+包含逐笔、盘口、分时与交易日历接口的完整契约见[数据源 API](docs/market-data/data-source-api.md)。
+
+### 许可证
+
+完整产品包含 AGPL-3.0-or-later 脚本模块，按 AGPL-3.0-or-later 交付。内部 Apache-2.0 模块保留各自许可证；模块与第三方声明随包发布。
 
 
 ### 4.（可选）启用 AI Agent 控制
 
-图表核心以 `@Tool` 原语对外暴露领域能力，UI 与 Agent 通过同一条路径调用：
-
-```ts
-import { getRegisteredChartTools } from '@363045841yyt/klinechart-core/controllers'
-```
-
-`getRegisteredChartTools()` 返回每个工具的参数 schema、safety 等级与统一执行器。将它们交给 `@363045841yyt/klinechart-agent-runtime`，即可在应用内（浏览器或 Electron）基于 Provider profile 编排 Agent——无 MCP 桥接，无旁路状态副本。详见 [agent-runtime](packages/agent-runtime/README.md)。
+`KlineWorkbench` 自带 Agent 面板。图表核心以 `@Tool` 原语对外暴露领域能力，Agent 与 UI 调用同一批
+原语：同一份状态、同一条执行路径，无 MCP 桥接，无旁路状态副本。高级 Agent API 位于同一个包的
+`@363045841yyt/klinechart/agent` 子入口。
 
 
 ## 📖 更多文档
 
 - [渲染链路](docs/rendering/rendering-pipeline.md) - 当前绘制路径：FrameTransaction、Scene/Layer、Renderer 后端
+- [脚本指标](packages/script/docs/indicator.md) - 用 TypeScript 声明指标：输入参数、Plot API、函数库
 
 
 ## 📋 组件 Props
@@ -444,7 +490,6 @@ import { getRegisteredChartTools } from '@363045841yyt/klinechart-core/controlle
 | priceLabelWidth | `number` | 60 | 价格标签额外宽度（用于显示涨跌幅） |
 | zoomLevels | `number` | 80 | 缩放级别总数 |
 | initialZoomLevel | `number` | 3 | 初始缩放级别（1 ~ zoomLevels） |
-| customData | `CustomDataSource` | — | 内联数据包：`{ symbol?, period?, data, comparisons? }`。完全绕过数据请求器，直接使用传入的数据渲染 |
 | teleportContainer | `string \| HTMLElement` | — | 下拉/弹窗的 Teleport 目标容器（CSS 选择器或元素）。默认渲染到内部 `.chart-wrapper` |
 
 
@@ -464,20 +509,24 @@ import { getRegisteredChartTools } from '@363045841yyt/klinechart-core/controlle
 - [ ] 支持将绘制的图形转换为量化代码
 
 
-## 📦 包列表
+## 📦 发布包
+
+`@363045841yyt/klinechart` 是唯一对外发布的包。引擎、Agent 运行时、脚本引擎、编辑器页面等所有
+monorepo 模块都随该包交付，不再单独发布。
 
 | 包名 | 说明 | npm |
 |------|------|-----|
-| `@363045841yyt/klinechart-core` | 无头图表引擎 + 控制器 | [npm](https://www.npmjs.com/package/@363045841yyt/klinechart-core) |
-| `@363045841yyt/klinechart` | Vue 3 绑定 | [npm](https://www.npmjs.com/package/@363045841yyt/klinechart) |
-| `@363045841yyt/klinechart-react` | React 绑定 | [npm](https://www.npmjs.com/package/@363045841yyt/klinechart-react) |
-| `@363045841yyt/klinechart-angular` | Angular 绑定 | [npm](https://www.npmjs.com/package/@363045841yyt/klinechart-angular) |
-| `@363045841yyt/klinechart-agent-runtime` | 框架无关的 Agent 运行时（Pi 编排 + 宿主契约） | [npm](https://www.npmjs.com/package/@363045841yyt/klinechart-agent-runtime) |
+| `@363045841yyt/klinechart` | Vue 3 完整产品：`KlineWorkbench`、`useChart` 与图表引擎 | [npm](https://www.npmjs.com/package/@363045841yyt/klinechart) |
 
 
 ## 🚀 What's New
 
-- **v0.11** 引入 AI Agent 运行时（agent-runtime 与 AI runtime，支持 OpenAI 协议与浏览器内对话，Web/Electron 共享 Agent 工作区）及 @tool 注册基础设施与绘图 Agent 工具。绘图工具支持子图与分时绘制、workspace 隔离、多选批量编辑、空白区域锚点、单行内联文本编辑、框选成组拖拽与标签位置配置；同时新增五日分时、分时指标原生支持与持久化视图工作区，并完成 WebGL 可见画布直绘等性能优化。
+- **v0.11**
+  - **Agent 运行时** - 随包交付的 Agent 运行时，支持 OpenAI 协议，Agent 通过与 UI 相同的 `@tool` 原语驱动图表；新增 @tool 注册基础设施、绘图 Agent 工具，以及 Web/Electron 共享的 Agent 工作区
+  - **脚本指标引擎** - 一个指标就是一个纯 TypeScript 文件，在带时间与内存配额的 QuickJS 沙箱中运行；内置 CodeMirror 编辑器、`ta` 技术分析库与用户自定义库；绘图走同一条渲染链路，脚本指标与内置指标行为一致
+  - **绘图工具** - 支持子图与分时绘制、workspace 隔离、多选批量编辑、空白区域锚点、单行内联文本编辑、框选成组拖拽与标签位置配置
+  - **分时与工作区** - 五日分时、分时指标原生支持与持久化视图工作区
+  - **渲染** - WebGL 可见画布直绘
 - **v0.10** 以统一 MarketDataProvider 重构数据层，新增多日分时、图表与 Agent 共享的统一指标查询管线、Fibonacci/矩形/箭头标注工具，并将对比模式升格为独立图表模式。Vue/React/Angular 绑定对齐统一 Provider 契约，同时修复多项渲染与状态一致性问题。
 - **v0.9.0** 自研 Core 层响应式模型迁移，时序问题消除
 - **v0.9.0** 单路径 Scene 渲染器 + WebGPU 后端（混合 DOM Canvas，无 compositeTo）、FrameTransaction 响应式、设备丢失恢复、自动降级 WebGPU → WebGL → Canvas2D
@@ -494,7 +543,7 @@ import { getRegisteredChartTools } from '@363045841yyt/klinechart-core/controlle
 - **v0.4** 现代化 UI，左侧工具栏、右轴优化、TradingView 式缩放手感
 
 
-## 📄 License
+## 产品许可证
 
-[Apache-2.0](LICENSE)
+完整 Vue 工作台按 [AGPL-3.0-or-later](packages/vue/LICENSE) 交付。内部 Apache-2.0 模块保留各自许可证；产品包含模块与第三方许可证声明。
 

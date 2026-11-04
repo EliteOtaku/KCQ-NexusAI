@@ -2,6 +2,10 @@
 
 Framework-independent K-line chart runtime with a signal-based state kernel, multi-backend rendering, and no UI framework dependency.
 
+> **Internal module.** This package is not published to npm. It ships inside the product package
+> [`@363045841yyt/klinechart`](../vue/README.md); install only that package. The import paths below
+> resolve through the workspace inside this monorepo.
+
 ## Overview
 
 `@363045841yyt/klinechart-core` is the runtime behind the KLineChartQuant framework bindings. It owns chart state, viewport and pane calculation, input handling, data coordination, and rendering. It creates and manages the chart DOM and canvases, but leaves application UI to Vue, React, Angular, or a custom adapter.
@@ -12,16 +16,6 @@ The public application boundary is `ChartController`:
 - Change chart state through controller methods.
 - Forward browser input events from a custom host when needed.
 - Dispose the controller when its host is unmounted.
-
-## Installation
-
-```bash
-npm install @363045841yyt/klinechart-core
-# or
-pnpm add @363045841yyt/klinechart-core
-# or
-yarn add @363045841yyt/klinechart-core
-```
 
 ## Quick Start
 
@@ -59,7 +53,7 @@ const unsubscribe = chart.viewport.subscribe(() => {
 
 // Indicator implementations load on demand; the catalog is available synchronously.
 await chart.loadIndicators(['MA'])
-chart.addIndicator('MA', 'main')
+chart.addIndicator('MA')
 chart.zoomIn()
 
 // Call both when the host is removed.
@@ -135,9 +129,9 @@ import {
 
 ### Mount Options
 
-`ChartMountOptions` accepts the host `container` and optional initial data or symbols. It also supports initial zoom, light or dark theme preference, chart settings, market sessions, layout dimensions, and pre-existing DOM layers for framework hosts.
+`ChartMountOptions` accepts the host `container`, market-data context and initial symbols. It also supports initial zoom, theme, settings, market sessions, dimensions and pre-existing DOM layers.
 
-Use `data` for immediately available K-line data. Use `symbols` to drive the registered market-data provider pipeline. For application-owned data, `applyCustomData()` provides an atomic bundle that bypasses fetching.
+Use `symbols` to select instruments from the registered market-data Provider pipeline. Data is owned by the Provider runtime.
 
 ### Readonly State
 
@@ -158,7 +152,7 @@ Use `data` for immediately available K-line data. Use `symbols` to drive the reg
 `chart.legend` manages indicator, comparison and custom legend entries. Creation returns a stable legend ID used by subsequent queries and mutations.
 
 ```typescript
-const id = chart.legend.create({ kind: 'indicator', definitionId: 'MA', role: 'main' })
+const id = chart.legend.create({ kind: 'indicator', definitionId: 'MA' })
 if (id) {
   chart.legend.update(id, { hidden: true })
   chart.legend.get(id)
@@ -174,10 +168,6 @@ Comparison legends expose the real price, change relative to the comparison base
 ### Data and Modes
 
 ```typescript
-chart.setData(nextBars)
-chart.appendData(laterBars)
-chart.updateData(revisedBars)
-
 chart.setSymbols([
   { symbol: '000001', market: 'CN', period: 'daily', source: 'baostock' },
 ])
@@ -187,7 +177,7 @@ chart.removeComparisonSymbol('000002')
 chart.switchToTimeShareForDate(20240102)
 ```
 
-For fetch-backed data, register providers and symbols through the market-data API. `setCurrentSymbol()` and `setCurrentPeriod()` update the current selection without fetching; `resetToFetcher()` returns a custom-data chart to the provider pipeline.
+Register providers through the market-data API and use instrument selection to request their data. The public controller exposes selection and read-only data, without array injection methods.
 
 ### Viewport, Theme, and Input
 
@@ -211,7 +201,7 @@ When Core owns the default DOM scaffold, its interaction bindings are installed 
 
 ```typescript
 await chart.loadIndicators(['MACD', 'RSI'])
-const id = chart.addIndicator('MACD', 'sub', { fast: 12, slow: 26, signal: 9 })
+const id = chart.addIndicator('MACD', { fast: 12, slow: 26, signal: 9 })
 if (id) chart.updateIndicatorParams(id, { fast: 10, slow: 20, signal: 7 })
 
 chart.createSubPane('rsi-pane', 'RSI', { period1: 6, period2: 12, period3: 24 })
@@ -269,11 +259,5 @@ Canvas preference: Canvas2D
 ```
 
 The default synchronous host attempts WebGL and falls back to Canvas2D. WebGPU is selected through renderer settings and can degrade at runtime if the device is lost.
-
-## Related Packages
-
-- `@363045841yyt/klinechart` - Vue 3 bindings
-- `@363045841yyt/klinechart-react` - React bindings
-- `@363045841yyt/klinechart-angular` - Angular bindings
 
 {{include:_license.md}}

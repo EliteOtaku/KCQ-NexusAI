@@ -1,150 +1,26 @@
-/** 新实例计算链路的 inline 与 Worker 执行器适配。 */
-import type { KLineData } from '@/foundation/types/price.js'
-import type { TradeSnapshot } from '../../../../data/trades/types.js'
-import type { IndicatorCalculationOutput } from '../domain/instanceCalculationPlan.js'
-import {
-  INSTANCE_WORKER_PROTOCOL_VERSION,
-  type InstanceWorkerResponse,
-  isInstanceWorkerResponse,
-  type SerializedIndicatorCalculationDefinition,
-} from '../worker/instanceWorkerProtocol.js'
+/** 指标执行适配；Script 的 Worker 由 Script 服务管理，Core 不另建计算 Worker。 */
 import type { IndicatorCalculationDefinition } from './instanceCalculationRuntime.js'
 import type { IndicatorCalculationExecutor } from './instanceCalculationScheduler.js'
-import { diffTradeSnapshot, IndicatorInstanceExecutionRuntime } from './instanceExecutionRuntime.js'
+import { IndicatorInstanceExecutionRuntime } from './instanceExecutionRuntime.js'
+import type { IndicatorMarketData } from './marketDataTypes.js'
 
-/** inline 执行器：可在运行中追加按需加载的定义。 */
 export type InlineIndicatorCalculationExecutor = IndicatorCalculationExecutor & {
   addDefinitions(definitions: Iterable<IndicatorCalculationDefinition>): void
+  updateDefinitions(definitions: Iterable<IndicatorCalculationDefinition>): void
+  removeDefinitions(ids: readonly string[]): void
 }
 
-/** Worker 执行器：追加定义以序列化描述下发，可释放 Worker。 */
-export type WorkerIndicatorCalculationExecutor = IndicatorCalculationExecutor & {
-  dispose(): void
-  addDefinitions(definitions: readonly SerializedIndicatorCalculationDefinition[]): void
-}
-
-/** 不依赖 Worker 的直接执行器；测试、SSR 和降级路径使用同一执行语义。 */
-export function createInlineIndicatorCalculationExecutor(
-  definitions: Iterable<IndicatorCalculationDefinition>,
-): InlineIndicatorCalculationExecutor {
-  const runtime = new IndicatorInstanceExecutionRuntime(definitions)
-  const executor: InlineIndicatorCalculationExecutor = {
-    /** 追加按需加载后的定义；已有身份的同一定义幂等。 */
-    addDefinitions(next: Iterable<IndicatorCalculationDefinition>): void {
-      for (const definition of next) runtime.addDefinition(definition)
-    },
-    async setData(data, dataRevision, trades) {
-      // inline 无结构化克隆开销，成交始终按整段替换下发，与 Worker 共享同一运行时合并路径。
-      runtime.setData(
-        data,
-        dataRevision,
-        trades === undefined ? undefined : { mode: 'replace', snapshot: trades },
-      )
-    },
-    async execute(plan) {
-      return runtime.execute(plan)
-    },
-  }
-  return Object.freeze(executor)
-}
-
-/** Worker 执行器；每个请求都以 requestId 严格关联，过期结果由调用方版本门控。 */
-export function createWorkerIndicatorCalculationExecutor(input: {
-  readonly worker: Worker
-  readonly definitions: readonly SerializedIndicatorCalculationDefinition[]
-}): WorkerIndicatorCalculationExecutor {
-  let nextRequestId = 0
-  let ready = false
-  let disposed = false
-  let previousTrades: TradeSnapshot | undefined
-  const pending = new Map<
-    number,
-    {
-      resolve: (outputs: readonly IndicatorCalculationOutput[]) => void
-      reject: (error: Error) => void
-    }
-  >()
-  let readyResolve: (() => void) | null = null
-  let readyReject: ((error: Error) => void) | null = null
-  const readyPromise = new Promise<void>((resolve, reject) => {
-    readyResolve = resolve
-    readyReject = reject
-  })
-
-  const fail = (error: Error): void => {
-    readyReject?.(error)
-    readyReject = null
-    for (const request of pending.values()) request.reject(error)
-    pending.clear()
-  }
-  input.worker.onmessage = (event: MessageEvent<unknown>) => {
-    if (!isInstanceWorkerResponse(event.data)) return
-    const response: InstanceWorkerResponse = event.data
-    if (response.type === 'ready') {
-      if (response.protocolVersion !== INSTANCE_WORKER_PROTOCOL_VERSION) {
-        fail(new Error(`Unsupported indicator Worker protocol: ${response.protocolVersion}`))
-        return
-      }
-      ready = true
-      readyResolve?.()
-      readyResolve = null
-      return
-    }
-    if (response.type === 'error') {
-      const error = new Error(response.message)
-      if (response.requestId === undefined) fail(error)
-      else {
-        const request = pending.get(response.requestId)
-        pending.delete(response.requestId)
-        request?.reject(error)
-      }
-      return
-    }
-    const request = pending.get(response.requestId)
-    pending.delete(response.requestId)
-    request?.resolve(response.outputs)
-  }
-  input.worker.onerror = () => fail(new Error('Indicator Worker execution failed'))
-  input.worker.postMessage({
-    type: 'init',
-    protocolVersion: INSTANCE_WORKER_PROTOCOL_VERSION,
-    definitions: input.definitions,
-  })
-
-  const executor: WorkerIndicatorCalculationExecutor = {
-    /** 追加按需加载后的定义；消息按序到达，先于之后的计算请求生效。 */
-    addDefinitions(definitions: readonly SerializedIndicatorCalculationDefinition[]): void {
-      if (disposed || definitions.length === 0) return
-      input.worker.postMessage({ type: 'define', definitions })
-    },
-    async setData(data: KLineData[], dataRevision: number, trades?: TradeSnapshot): Promise<void> {
-      await readyPromise
-      if (disposed) throw new Error('Indicator Worker executor is disposed')
-      input.worker.postMessage({
-        type: 'setData',
-        data,
-        dataRevision,
-        // 引用前缀扩展时只传新增批次，避免全量成交结构化克隆。
-        tradesDiff: trades === undefined ? undefined : diffTradeSnapshot(previousTrades, trades),
-      })
-      previousTrades = trades
-    },
-    async execute(plan, dataRevision): Promise<readonly IndicatorCalculationOutput[]> {
-      await readyPromise
-      if (!ready || disposed) throw new Error('Indicator Worker executor is unavailable')
-      const requestId = ++nextRequestId
-      return new Promise((resolve, reject) => {
-        pending.set(requestId, { resolve, reject })
-        input.worker.postMessage({ type: 'execute', requestId, dataRevision, plan })
-      })
-    },
-    dispose(): void {
-      if (disposed) return
-      disposed = true
-      input.worker.postMessage({ type: 'dispose' })
-      fail(new Error('Indicator Worker executor is disposed'))
-      input.worker.terminate()
-    },
-  }
-  return Object.freeze(executor)
+/** 委派到注册定义的计算端口，原生扩展与 Script 服务使用相同调度语义。 */
+export function createInlineIndicatorCalculationExecutor(definitions: Iterable<IndicatorCalculationDefinition>, marketData?: () => IndicatorMarketData): InlineIndicatorCalculationExecutor {
+  const runtime = new IndicatorInstanceExecutionRuntime(definitions, marketData)
+  return Object.freeze({
+    /** 追加定义不修改已有任务。 */
+    addDefinitions(next: Iterable<IndicatorCalculationDefinition>): void { for (const definition of next) runtime.addDefinition(definition) },
+    /** 替换定义并失效任务缓存。 */
+    updateDefinitions(next: Iterable<IndicatorCalculationDefinition>): void { for (const definition of next) runtime.updateDefinition(definition) },
+    /** 移除定义及关联任务。 */
+    removeDefinitions(ids: readonly string[]): void { for (const id of ids) runtime.removeDefinition(id) },
+    async setData(data, revision) { runtime.setData(data, revision) },
+    async execute(plan) { return runtime.execute(plan) },
+  } satisfies InlineIndicatorCalculationExecutor)
 }

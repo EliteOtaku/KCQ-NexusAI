@@ -7,14 +7,9 @@
  * 只在 createMockCanvasContext 内保留唯一一处集中强转。
  */
 import { vi } from 'vitest'
-import type { MARenderState } from '@/core/indicators/state/maState'
-import {
-  INDICATOR_INSTANCE_CATALOG_SERVICE,
-  type IndicatorInstanceCatalog,
-  type IndicatorInstanceDescriptor,
-} from '@/engine/indicators/instances/api/indicatorRenderBinding'
 import { createAxisLabelsFrame } from '@/engine/renderers/impl/labels/index'
 import { getPhysicalKLineConfig } from '@/engine/viewport/klineConfig'
+import { resolveThemeColors } from '@/foundation/tokens/index.js'
 import { ChartDataViewId } from '@/foundation/types/chartView'
 import { createDisplayTimeFormatter } from '@/foundation/utils/dateFormat'
 import type { IndicatorRenderStateReader, PaneInfo, PluginHost, RenderContext } from '@/plugin'
@@ -45,11 +40,17 @@ export interface MockCanvasContext extends CanvasRenderingContext2D {
   dashedPaths: Array<Array<{ x: number; y: number }>>
 }
 
+/** Canvas2D stub 的差异项；GPU 后端用例需要 ownerDocument 与画布物理尺寸。 */
+export interface MockCanvasContextOptions {
+  readonly canvas?: { width: number; height: number; ownerDocument: Document | null }
+}
+
 /**
  * 构造绘制路径可观测的 Canvas2D stub。
  * 所有绘图方法均为 vi.fn；stroke 会记录 lineWidth 与路径，供绘制序列断言。
+ * 目标画布默认是 800×600 的物理尺寸；GPU 后端用例可传入物理尺寸与 ownerDocument。
  */
-export function createMockCanvasContext(): MockCanvasContext {
+export function createMockCanvasContext(options: MockCanvasContextOptions = {}): MockCanvasContext {
   let path: Array<{ x: number; y: number }> = []
   let lineDash: number[] = []
   const strokeLineWidths: number[] = []
@@ -59,7 +60,7 @@ export function createMockCanvasContext(): MockCanvasContext {
 
   const ctx = {
     // 部分渲染器通过 ctx.canvas.width 读取画布尺寸，这里给出最小可用画布描述。
-    canvas: { width: 800, height: 600 },
+    canvas: options.canvas ?? { width: 800, height: 600 },
     save: vi.fn(),
     restore: vi.fn(),
     translate: vi.fn(),
@@ -122,6 +123,7 @@ export function createMockCanvasContext(): MockCanvasContext {
     shadowOffsetY: 0,
     filter: 'none',
     imageSmoothingEnabled: true,
+    getTransform: vi.fn(() => ({ a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 })),
     strokeLineWidths,
     strokedPaths,
     dashedPaths,
@@ -142,8 +144,9 @@ const DEFAULT_PANE_CAPABILITIES: PaneInfo['capabilities'] = {
 const DEFAULT_PANE_Y_AXIS: PaneInfo['yAxis'] = {
   priceToY: (price) => price * 10,
   yToPrice: (y) => y / 10,
-  getPaddingTop: () => 0,
-  getPaddingBottom: () => 0,
+  getContentTop: () => 0,
+  getContentBottom: () => 200,
+  getContentHeight: () => 200,
   getDisplayRange: () => ({ minPrice: 0, maxPrice: 200 }),
   getScaleType: () => 'linear',
   getBasePrice: () => null,
@@ -196,6 +199,7 @@ export function createMockRenderContext(overrides: MockRenderContextOverrides = 
       const index = data.findIndex((item) => item.timestamp === timestamp)
       return index >= 0 ? index : null
     },
+    getTimestampAtLogicalIndex: (index: number) => data[index]?.timestamp ?? null,
     pane: createMockPaneInfo(pane),
     range: { start: 0, end: count },
     scrollLeft: 0,
@@ -232,30 +236,6 @@ export function createContextWithInstanceState<T>(
     indicatorStateReader: createMockStateReader(instanceId, state),
     ...overrides,
   })
-}
-
-/** 构造测试用 MARenderState：默认 100 根、5 个周期，并保留各周期不同的预热窗口。 */
-export function createMARenderState(overrides: Partial<MARenderState> = {}): MARenderState {
-  const series: Record<number, (number | undefined)[]> = {
-    5: Array.from({ length: DEFAULT_BAR_COUNT }, () => 105),
-    10: Array.from({ length: DEFAULT_BAR_COUNT }, () => 110),
-    20: Array.from({ length: DEFAULT_BAR_COUNT }, () => 120),
-    30: Array.from({ length: DEFAULT_BAR_COUNT }, () => 130),
-    60: Array.from({ length: DEFAULT_BAR_COUNT }, () => 160),
-  }
-  // 起始若干索引置空，覆盖 5/10/20 周期各自的预热窗口。
-  for (let i = 0; i < 4; i++) series[5]![i] = undefined
-  for (let i = 0; i < 9; i++) series[10]![i] = undefined
-  for (let i = 0; i < 19; i++) series[20]![i] = undefined
-
-  return {
-    timestamp: 1_000_000_000_000,
-    series,
-    enabledPeriods: [5, 10, 20, 30, 60],
-    visibleMin: 105,
-    visibleMax: 160,
-    ...overrides,
-  }
 }
 
 /** 构造完整 PluginHost，只覆盖调用方声明的字段；共享状态默认由内存 Map 承载。 */
@@ -295,30 +275,8 @@ function createMockPluginHost(overrides: Partial<PluginHost> = {}): PluginHost {
 }
 
 /** 构造只按 instanceId 命中返回的帧状态读取 stub。 */
-export function createMockStateReader(
-  instanceId: string,
-  state?: unknown,
-): IndicatorRenderStateReader {
+function createMockStateReader(instanceId: string, state?: unknown): IndicatorRenderStateReader {
   // biome-ignore lint/suspicious/noExplicitAny: vitest 无法把泛型 spy 赋给泛型方法，any 返回可保持可间谍性
   const get = vi.fn((key: string): any => (key === instanceId ? state : undefined))
   return { get } satisfies IndicatorRenderStateReader
-}
-
-/** 构造按名解析注册服务的 PluginHost stub。 */
-function createMockServiceHost(services: Record<string, unknown>): PluginHost {
-  return createMockPluginHost({
-    // biome-ignore lint/suspicious/noExplicitAny: 见 createMockStateReader，泛型 getService 需要 any 返回
-    getService: vi.fn((name: string): any => services[name]),
-  })
-}
-
-/** 构造只提供主图实例清单服务的 PluginHost，图例等消费者据此枚举实例。 */
-export function createMockIndicatorInstanceHost(
-  mainInstances: ReadonlyArray<IndicatorInstanceDescriptor>,
-): PluginHost {
-  const catalog: IndicatorInstanceCatalog = {
-    listMainInstances: () => mainInstances,
-    listPaneInstances: () => [],
-  }
-  return createMockServiceHost({ [INDICATOR_INSTANCE_CATALOG_SERVICE]: catalog })
 }

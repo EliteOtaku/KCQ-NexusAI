@@ -10,13 +10,16 @@ permissions:
   contents: write
   id-token: write
 
+env:
+  TZ: Asia/Shanghai
+
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-vue-product
   cancel-in-progress: false
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
         with:
@@ -28,7 +31,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: 22.18.0
+          node-version: 26.13.0
           cache: pnpm
           registry-url: 'https://registry.npmjs.org'
 
@@ -45,50 +48,27 @@ jobs:
       - name: Build packages
         run: pnpm build:packages
 
-      - name: Publish to npm
-        shell: bash
+      - name: Product quality gates
         run: |
-          set -euo pipefail
+          pnpm type-check
+          pnpm test:packages:ci
+          pnpm --filter @363045841yyt/klinechart lint:publish
+          pnpm lint:types
 
-          # 根据 tag 名判断 npm dist-tag
-          # 用 bash glob 而非 grep，避免 GH Actions 环境中 regex 差异导致匹配失败
-          TAG="${GITHUB_REF_NAME#v}"
-          case "$TAG" in
-            *-alpha.*) PRERELEASE=true; NPM_TAG=alpha ;;
-            *-beta.*)  PRERELEASE=true; NPM_TAG=beta  ;;
-            *-rc.*)    PRERELEASE=true; NPM_TAG=rc    ;;
-            *)         PRERELEASE=false; NPM_TAG=latest ;;
-          esac
+      - name: Pack and verify the Vue product
+        run: |
+          pnpm pack:product
+          pnpm exec playwright install --with-deps chromium
+          pnpm test:product
 
-          echo "Publishing version $TAG with npm tag '$NPM_TAG' (prerelease=$PRERELEASE)"
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: vue-product
+          path: artifacts/product
 
-          # 只发布已构建产物：构建已在上一步 pnpm build:packages 完成。
-          # pnpm pack 打包时会把 workspace: 协议原生替换为具体版本，npm publish 只负责上传 tarball；
-          # 因此无需就地改写 package.json，也不会在发布阶段再触发 pnpm 脚本与依赖校验。
-          # 注意不要改用 pnpm publish：自 pnpm 11 起它是原生实现，npm OIDC 可信发布尚未支持。
-          publish_package() {
-            local package_dir="$1"
-            local pack_dir
-            pack_dir="$(mktemp -d)"
-            (
-              cd "$GITHUB_WORKSPACE/packages/$package_dir"
-              pnpm pack --ignore-scripts --pack-destination "$pack_dir" >/dev/null
-              npm publish "$pack_dir"/*.tgz --access public --tag "$NPM_TAG"
-            )
-            rm -rf "$pack_dir"
-          }
-
-          # 发布顺序：core -> agent-runtime -> vue。
-          # vue 把 core / agent-runtime 声明为 peerDependency（workspace:^ → ^${TAG}），
-          # 必须先发布前两者，否则 vue 的 peer 范围指向 npm 上尚不存在的版本。
-          echo "====== 开始发布 Core 包 ======"
-          publish_package core
-
-          echo "====== 开始发布 Agent Runtime 包 ======"
-          publish_package agent-runtime
-
-          echo "====== 开始发布 Vue 包 ======"
-          publish_package vue
+      - name: Publish verified Vue product to npm
+        run: node scripts/publish-product.mjs
 
       - name: Generate release notes
         id: notes
@@ -258,7 +238,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-24.04, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -269,12 +249,12 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: 22.18
+          node-version: 26.13.0
           cache: pnpm
           registry-url: 'https://registry.npmjs.org'
 
       - name: Cache Electron
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cache/electron
@@ -288,11 +268,15 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build core
-        run: pnpm --filter @363045841yyt/klinechart-core build
+      - name: Setup Go for the bundled connectors
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+          # Go 源码在独立仓库里按 commit 克隆，仓库内没有 go.sum 可供缓存判定。
+          cache: false
 
-      - name: Build vue
-        run: pnpm --filter @363045841yyt/klinechart build
+      - name: Build Vue product and its internal resources
+        run: pnpm build:product
 
       - name: Build & package desktop
         run: pnpm --filter @363045841yyt/klinechart-desktop build

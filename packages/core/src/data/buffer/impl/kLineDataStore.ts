@@ -97,6 +97,8 @@ export class KLineDataStore {
     const oldLength = this._data.length
     const oldEarliestTs = oldLength > 0 ? this._data[0]!.timestamp : null
     const merged = mergeSortedData(this._data, [...incoming])
+    // 命中既有历史时事实没有变化，不发布通知，避免共享消费者反复触发重算。
+    if (merged === this._data) return { prependedCount: 0, advancedEarliest: false }
     const newEarliestTs = merged[0]?.timestamp ?? null
     const advancedEarliest =
       oldEarliestTs !== null && newEarliestTs !== null && newEarliestTs < oldEarliestTs
@@ -200,6 +202,15 @@ export class KLineDataStore {
     this.timestampIndex.rebuild(this._data)
     this._loadedTimeRange = null
     this._dataSignal.set({ data: [], kind: DATA_CHANGE_KINDS.replace, prependedCount: 0 })
+  }
+
+  /** 历史修正只修改既有时间点；低频修正允许使计算快照整体失效。 */
+  correctBar(bar: KLineData): void {
+    const index = this.timestampIndex.get(bar.timestamp)
+    if (index === null) throw new RangeError('Historical correction must target an existing bar')
+    const next = [...this._data]
+    next[index] = bar
+    this.setInlineData(next)
   }
 
   /** 根据当前缓存更新已加载的时间窗口。 */

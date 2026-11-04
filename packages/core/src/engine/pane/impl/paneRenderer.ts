@@ -1,4 +1,6 @@
 /** 管理单个 Pane 的画布分配、尺寸、上下文和运行时状态。 */
+import type { PrimitiveSurface } from '@/rendering/primitives/types.js'
+import type { Renderer } from '@/rendering/render/Renderer.js'
 import {
   DEFAULT_PRICE_LABEL_WIDTH,
   type PaneRendererContexts,
@@ -29,12 +31,15 @@ function releaseCanvas(canvas: HTMLCanvasElement | undefined): void {
    正式图元与左轴表面按需创建；隐藏 pane 的后备存储归零
    持有 Pane 实例（布局、Y 轴、价格范围）
    响应 Chart 的 resize / layout 信号
-   GPU 绘制经 ChartRenderer.sceneRenderer（SharedWebGLSurface），本类不再持有 per-pane surface */
+   Scene 选择本类持有的目标；GPU 后端只执行原语，不额外挂载可见画布 */
 export class PaneRenderer {
   private dom: PaneRendererDom
   private pane: import('./layout/pane.js').Pane
   private opt: ResolvedPaneRendererOptions
   private readonly surfaces: PaneSurfaceFactory | undefined
+  /** 主图带的可见 GPU 表面；按后端实例缓存，切换后端时重建。 */
+  private mainSurface: PrimitiveSurface | null = null
+  private mainSurfaceOwner: Renderer | null = null
   private contexts: PaneRendererContexts | null = null
   private metrics: PaneMetrics | null = null
   private visible = true
@@ -77,6 +82,45 @@ export class PaneRenderer {
       }
     }
     return this.contexts
+  }
+
+  /**
+   * 返回主图带的可见 GPU 表面；切换后端时重建画布。
+   *
+   * 一个 canvas 只能有一种上下文类型，WebGL → WebGPU 不能复用同一张画布，
+   * 必须丢弃旧画布后重新创建，否则新后端的 `getContext` 会返回 null。
+   */
+  getMainGpuSurface(backend: Renderer): PrimitiveSurface | null {
+    const create = backend.primitives.createSurface
+    // 后端不再支持直出（如切到 Canvas）时，必须移除旧 GPU 画布，否则它会残留在
+    // 2D 主画布下面，透明区域露出上一帧的旧像素。
+    if (!create) {
+      this.mainSurface?.dispose()
+      this.mainSurface = null
+      this.mainSurfaceOwner = null
+      releaseCanvas(this.dom.mainGpuCanvas)
+      this.dom = { ...this.dom, mainGpuCanvas: undefined }
+      return null
+    }
+    const ownerChanged = this.mainSurfaceOwner !== null && this.mainSurfaceOwner !== backend
+    if (ownerChanged) {
+      this.mainSurface?.dispose()
+      this.mainSurface = null
+      this.mainSurfaceOwner = null
+      releaseCanvas(this.dom.mainGpuCanvas)
+      this.dom = { ...this.dom, mainGpuCanvas: undefined }
+    }
+    if (!this.dom.mainGpuCanvas && this.surfaces) {
+      this.dom = { ...this.dom, mainGpuCanvas: this.surfaces.createMainGpuCanvas() }
+    }
+    const canvas = this.dom.mainGpuCanvas
+    if (!canvas) return null
+    if (this.mainSurface && this.mainSurfaceOwner === backend) return this.mainSurface
+    this.mainSurfaceOwner = backend
+    this.mainSurface = create(canvas)
+    // 新画布（或切换后端后的画布）按当前布局定尺寸，否则会以 1×1 呈现。
+    this.applyMetrics()
+    return this.mainSurface
   }
 
   /**
@@ -123,11 +167,16 @@ export class PaneRenderer {
     if (visible) return
     this.metrics = null
     if (this.surfaces) {
+      this.mainSurface?.dispose()
+      this.mainSurface = null
+      this.mainSurfaceOwner = null
+      releaseCanvas(this.dom.mainGpuCanvas)
       releaseCanvas(this.dom.drawingCanvas)
       releaseCanvas(this.dom.leftYAxisCanvas)
       releaseCanvas(this.dom.leftYAxisOverlayCanvas)
       this.dom = {
         ...this.dom,
+        mainGpuCanvas: undefined,
         drawingCanvas: undefined,
         leftYAxisCanvas: undefined,
         leftYAxisOverlayCanvas: undefined,
@@ -141,10 +190,10 @@ export class PaneRenderer {
 
   /** 当前存在的全部表面（常驻 + 已创建的按需表面），供释放、定位与诊断使用。 */
   getAllocatedCanvases(): HTMLCanvasElement[] {
-    const { drawingCanvas, leftYAxisCanvas, leftYAxisOverlayCanvas } = this.dom
+    const { mainGpuCanvas, drawingCanvas, leftYAxisCanvas, leftYAxisOverlayCanvas } = this.dom
     return [
       ...this.residentCanvases(),
-      ...[drawingCanvas, leftYAxisCanvas, leftYAxisOverlayCanvas].filter(
+      ...[mainGpuCanvas, drawingCanvas, leftYAxisCanvas, leftYAxisOverlayCanvas].filter(
         (canvas): canvas is HTMLCanvasElement => canvas !== undefined,
       ),
     ]
@@ -214,6 +263,9 @@ export class PaneRenderer {
     const mainWidth = Math.round(width * dpr)
     const mainHeight = Math.round(height * dpr)
     PaneRenderer.resizeCanvas(mainCanvas, mainWidth, mainHeight, dpr)
+    if (this.dom.mainGpuCanvas) {
+      PaneRenderer.resizeCanvas(this.dom.mainGpuCanvas, mainWidth, mainHeight, dpr)
+    }
     if (this.dom.drawingCanvas) {
       PaneRenderer.resizeCanvas(this.dom.drawingCanvas, mainWidth, mainHeight, dpr)
     }
@@ -245,6 +297,9 @@ export class PaneRenderer {
 
   /** 销毁 PaneRenderer 实例：移除全部表面并归零后备存储。 */
   destroy() {
+    this.mainSurface?.dispose()
+    this.mainSurface = null
+    this.mainSurfaceOwner = null
     for (const canvas of this.getAllocatedCanvases()) releaseCanvas(canvas)
     this.contexts = null
   }

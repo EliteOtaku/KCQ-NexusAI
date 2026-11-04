@@ -1,0 +1,91 @@
+## 📜 Script Indicators
+
+Indicators can be written as plain TypeScript instead of being compiled ahead of time. A script is one file that declares a single indicator through `defineIndicator`; the engine compiles it once, then runs it bar by bar and collects Plot points. Scripts are data-source and render agnostic — the host supplies the bars, the chart adapter renders the result.
+
+```js
+defineIndicator({
+  name: 'Volume Tide',
+  position: Position.Sub,
+  onBar() {
+    const RED = '#F08080'
+    const RED_LIGHT = 'rgba(240, 128, 128, 0.5)'
+    const RED_LIGHTER = 'rgba(240, 128, 128, 0.15)'
+    const GREEN = '#008000'
+    const GREEN_LIGHT = 'rgba(0, 128, 0, 0.5)'
+    const GREEN_LIGHTER = 'rgba(0, 128, 0, 0.1)'
+    const GRAY_LIGHTER = 'rgba(128, 128, 128, 0.15)'
+
+    const barUp = ta.rising(close, 1)
+    const barDn = ta.falling(close, 1)
+    const volumeChange = ta.change(volume)
+
+    const volumeColor = barUp
+      ? RED_LIGHTER
+      : barDn ? GREEN_LIGHTER : GRAY_LIGHTER
+
+    plot.Columns(volume, 'Volume columns', {
+      color: volumeColor,
+    })
+
+    const volumeChangeColor = barUp
+      ? (volumeChange > 0 ? RED : RED_LIGHT)
+      : barDn
+        ? (volumeChange > 0 ? GREEN : GREEN_LIGHT)
+        : Color.Gray
+
+    plot.Histogram(volumeChange, 'Volume change columns', {
+      color: volumeChangeColor,
+      size: 12,
+    })
+
+    plot.Line(0, 'Zero line', {
+      color: Color.Gray,
+    })
+  },
+})
+```
+
+Everything a script needs is injected as a global before it runs:
+
+| Global | Meaning |
+| --- | --- |
+| `open` `high` `low` `close` `volume` `time` | price series; `close` reads the current bar, `close[1]` one bar back |
+| `input.int` `input.float` `input.bool` `input.string` | declare a parameter at the top level of `onBar`; the variable reads back the user's value |
+| `plot.Line` `plot.LineBR` `plot.StepLine` `plot.StepLineBR` `plot.Columns` `plot.Histogram` `plot.Point` `plot.Shape` `plot.Char` `plot.Arrow` | emit plot points; the method name selects the shape; each returns a handle |
+| `plot.Candle` `plot.Bar` | emit candles or OHLC bars from four prices; candles support separate body, wick, and border colors; return `void` |
+| `fill(from, to, color, title, options?)` | fill the area between two plots; `from` / `to` are handles returned by `plot.*` |
+| `ta` | built-in technical analysis library |
+| `Position` | `Position.Main` or `Position.Sub` |
+| `Color` | common Material 400 colors, or pass any CSS color string |
+| `defineIndicator` / `defineLibrary` / `importLibrary` | declare the indicator, declare a library, use a library |
+
+`defineIndicator` also accepts an optional `title` for the long name and an optional `info` for the description shown in the indicator picker; `name` remains the stable identity and short label.
+
+`plot.Line` connects valid points across `null` or `NaN` gaps, like Pine's `plot.style_line`. Use `plot.LineBR` to break the line at gaps, like `plot.style_linebr`. Both accept the same color, size, dash, and offset options and return handles for `fill`. Existing scripts that require gaps to break the line should use `plot.LineBR`.
+
+`plot.StepLine` draws steps with vertical transitions halfway between valid points and connects across gaps. `plot.StepLineBR` breaks at gaps. They correspond to Pine's `plot.style_stepline` and `plot.style_steplinebr`, accept the same options as lines, and return handles for `fill`.
+
+Trend calculations live in `ta`: `ta.atr(length)` returns Wilder ATR, and `ta.supertrend(multiplier, atrPeriod)` returns `[trend, direction]` series. Direction is `-1` for up and `1` for down; both series are `NaN` during warm-up. Supertrend preserves the previous core indicator's initial up direction. The built-in `SuperTrend` script uses these results with two `plot.LineBR` calls.
+
+`ta.macd(source, fastLength, slowLength, signalLength)` returns `[DIF, DEA, DIF-DEA]` series. Its EMAs use the first valid value as their seed, matching the previous core MACD; regular `ta.ema` retains its full-window seed. The built-in `MACD` script uses defaults 12/26/9, doubles the histogram, and colors columns by sign and momentum. Values start at the first valid input; the migrated script supports K-line charts.
+
+Parameters are plain `const` declarations, so the variable name is the parameter identity — no `inputs` block and no `params` object:
+
+```js
+onBar() {
+  const period = input.int(20, { title: 'Period', min: 1 })
+  const type = input.string('SMA', { options: ['SMA', 'EMA'] })
+  plot.Line(type === 'SMA' ? ta.sma(close, period) : ta.ema(close, period), 'ma')
+}
+```
+
+The built-in `ta` library covers `sma`, `ema`, `rma`, `swma`, `alma`, `wma`, `vwma`, `rsi`, `highest`, `lowest`, `highestbars`, `lowestbars`, `stoch`, `cmo`, `linreg`, `crossover`, `crossunder`, `rising`, `falling` and `change`. `highestbars` / `lowestbars` return negative bar offsets (0 is the current bar) and resolve ties to the earliest bar, matching Pine. User libraries use the same `defineLibrary` call and join the same global namespace.
+
+- **Sandboxed execution** - Scripts run in an embedded QuickJS runtime with per-run time and memory budgets, so a runaway script fails instead of hanging the host
+- **No future data** - History that is not yet available reads as `NaN`; a script can never look ahead
+- **Real editor** - The chart ships a CodeMirror-based script editor with completions, hover signatures, and signature help generated from the same declarations the compiler uses
+- **Same rendering path** - Plots flow through the engine's normal Plot, axis, and legend chain, so script indicators behave exactly like built-in ones
+
+In `KlineWorkbench`, open the code editor to create, run and add scripts to the chart. The product owns the script service and registers built-in scripts automatically; no separate script package installation is needed. Set `scripts` to `false` before mounting to disable scripting and hide its editor entry.
+
+See the [script docs]({{root}}packages/script/docs/indicator.md) for the full declaration reference, [libraries]({{root}}packages/script/docs/library.md), and [Plot API]({{root}}packages/script/docs/indicator.md#plot).

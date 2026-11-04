@@ -151,8 +151,12 @@ export interface PaneInfo {
   yAxis: {
     priceToY(price: number): number
     yToPrice(y: number): number
-    getPaddingTop(): number
-    getPaddingBottom(): number
+    /** 内容区上边界：视觉留白之后，价格从这里开始绘制。 */
+    getContentTop(): number
+    /** 内容区下边界。 */
+    getContentBottom(): number
+    /** 内容区高度。 */
+    getContentHeight(): number
     getDisplayRange(baseRange?: { maxPrice: number; minPrice: number }): {
       maxPrice: number
       minPrice: number
@@ -289,6 +293,23 @@ export interface DrawingFrameProjection {
   primitives: ReadonlyArray<DrawingPrimitive>
   yAxisRanges: ReadonlyArray<YAxisRange>
   xAxisRanges: ReadonlyArray<XAxisRange>
+  /**
+   * 本帧可用于磁吸的线段（Pane 局部坐标）。
+   * 只统计已提交层，会话覆盖（拖拽中的图元）不进入候选。
+   */
+  snapLines: ReadonlyArray<SnapLine>
+}
+
+/** 一条可参与磁吸的线段；所属图元用于排除正在拖拽的对象。 */
+export interface SnapLine {
+  readonly drawingId: string
+  readonly a: Point
+  readonly b: Point
+  /**
+   * 该线段在领域内的精确价格（水平线段才有）；缺省表示只能由屏幕 Y 反算。
+   * 有了它，吸附到水平线时写回的 price 与该线自身的 price 完全相等。
+   */
+  readonly price?: number
 }
 
 /** Y轴刻度（位置+值），由 RenderContext 构建时预计算，所有 Y 轴渲染器共用 */
@@ -299,9 +320,10 @@ export interface YAxisTick {
   value: number
 }
 
-/** 五日分时中单个交易日的帧级几何。 */
-export interface FiveDayTimeShareDayGeometry {
-  tradingDate: string
+/** 分时中单个交易日的帧级几何；单日视图只有一组。 */
+export interface TimeShareDayGeometry {
+  /** 交易日；单日视图不提供。 */
+  tradingDate?: string
   dataStartIndex: number
   dataEndIndex: number
   startX: number
@@ -310,19 +332,23 @@ export interface FiveDayTimeShareDayGeometry {
   separatorX?: number
 }
 
-/** 五日分时共享几何，由帧准备阶段生成并供所有 renderer 消费。 */
-export interface FiveDayTimeShareGeometry {
-  sessionSlots: number
-  contentWidth: number
-  days: ReadonlyArray<FiveDayTimeShareDayGeometry>
-  /** 首尾交易日边界和日间分隔线的世界坐标。 */
-  verticalGridLineXs: ReadonlyArray<number>
+/** 一段连续可绘制的分时槽位；槽位缺失或跨交易日即断开。 */
+export interface TimeShareSegmentGeometry {
+  dataStartIndex: number
+  dataEndIndex: number
+  startX: number
+  endX: number
 }
 
-/** MarkerManager 接口（用于 RenderContext） */
-export interface MarkerManagerLike {
-  getCustomMarkers(): unknown[]
-  setCustomMarkerPosition(id: string, x: number, y: number, size: number, shape: string): void
+/** 分时共享几何，由帧准备阶段生成并供所有 renderer 消费。 */
+export interface TimeShareGeometry {
+  sessionSlots: number
+  contentWidth: number
+  days: ReadonlyArray<TimeShareDayGeometry>
+  /** 连续槽位段；renderer 只在这些段内连线。 */
+  segments: ReadonlyArray<TimeShareSegmentGeometry>
+  /** 首尾交易日边界和日间分隔线的世界坐标；单日为空。 */
+  verticalGridLineXs: ReadonlyArray<number>
 }
 
 /** 当前帧读取指标渲染投影的只读接口。 */
@@ -349,8 +375,10 @@ export interface RenderDataContext {
   dataView: ChartDataView
   /** 多日分时的原子业务快照。 */
   timeShareRange?: import('../../data/provider/types.js').TimeShareRange
-  /** 五日分时的帧级共享几何。 */
-  fiveDayTimeShareGeometry?: FiveDayTimeShareGeometry
+  /** 分时昨收基准；单日与五日共用同一来源（五日为第一交易日）。 */
+  timeShareBaseline?: number
+  /** 分时帧级共享几何；单日与五日由同一函数生成。 */
+  timeShareGeometry?: TimeShareGeometry
   /** 当前图表实例解析后的市场交易时段 */
   marketSession?: import('../utils/sessionTimeLabels.js').MarketSessionConfig
   comparisonData?: ReadonlyMap<string, ReadonlyArray<KLineData>>
@@ -363,9 +391,16 @@ export interface RenderDataContext {
   /** 由活动数据 Buffer 提供的唯一时间戳到逻辑索引解析。 */
   getLogicalIndexAtTimestamp: (timestamp: number) => number | null
   /** 逻辑索引 → X 轴时间戳；未来槽位仅由数据源交易日历提供，无对应值时为 null。 */
-  getTimestampAtLogicalIndex?: (index: number) => number | null
+  getTimestampAtLogicalIndex: (index: number) => number | null
   /** 当前图表的显示时区 formatter；仅用于普通 K 线的日期显示与边界。 */
   displayTimeFormatter: import('../utils/dateFormat.js').DisplayTimeFormatter
+}
+
+/** 数据空间 → 屏幕的线性变换：x 减去 offsetX，y 乘以 yScale 再加 yOffset。 */
+export interface DataTransform {
+  offsetX: number
+  yScale: number
+  yOffset: number
 }
 
 /** 渲染几何子契约：Pane、视口、K 线位置与缩放。 */
@@ -373,6 +408,8 @@ export interface RenderGeometryContext {
   pane: PaneInfo
   range: { start: number; end: number }
   scrollLeft: number
+  /** 数据空间原语（世界 x、价格 y）的每帧变换；非线性轴不提供。 */
+  dataTransform?: DataTransform
   kWidth: number
   kGap: number
   dpr: number
@@ -388,8 +425,6 @@ export interface RenderGeometryContext {
   visiblePriceExtrema?:
     | import('../../engine/viewport/visiblePriceExtrema.js').VisiblePriceExtrema
     | null
-  /** 本帧可视极值跨越右轴文字数量级边界，允许低频实测并调整宽度。 */
-  requiresRightAxisWidthMeasurement?: boolean
   viewport: {
     scrollLeft: number
     plotWidth: number
@@ -422,7 +457,6 @@ export interface RenderOverlayContext {
   countdown?: string
   /** 十字线指向的 K 线索引（无十字线时为 null） */
   crosshairIndex?: number | null
-  markerManager?: MarkerManagerLike
   /** 绘图系统预先生成的当前 Pane 帧投影。 */
   drawingProjection?: DrawingFrameProjection
   /** 会话图元（拖拽覆盖、预览和框选）的独立投影。 */
@@ -437,7 +471,7 @@ export interface RenderIndicatorContext {
   indicatorAvailability?: IndicatorAvailabilityReader
   /**
    * Scene 本帧 Renderer（Scene.paint 注入）。
-   * 业务绘制经 drawInstances / drawLines；失败 fail-closed 走 2D。
+   * 业务绘制提交公共原语并写入 Scene 指定的 ctx；失败由统一提交器完整回退。
    */
   sceneRenderer?: import('../../rendering/render/Renderer.js').Renderer
 }
@@ -505,21 +539,18 @@ export interface RenderContext
     RenderSurfaceContext,
     RenderThemeContext {}
 
-/** 绘图渲染 primitive 契约：仅保留 `RenderContext`/`DrawingFrameProjection` 依赖的屏幕原语。 */
-
-export type DrawingStyle = {
-  stroke?: string
-  strokeWidth?: number
-  strokeStyle?: 'solid' | 'dashed' | 'dotted'
-  fill?: string
-  fillOpacity?: number
-  pointRadius?: number
-  textColor?: string
-  fontSize?: number
+/** 只提交原语的业务帧：去掉 ctx，从类型上排除直接绘制与状态变更。 */
+export type PrimitiveRenderContext = Omit<RenderContext, 'ctx'> & {
+  /** 目标已绑定的原语提交器；Scene 注入，直接绘制（测试）时可缺省。 */
+  primitives?: import('../../rendering/primitives/types.js').PrimitivePaint
+  /** 仅用于文字度量；禁止用于绘制。Scene 注入当前目标，测试注入替身。 */
+  measureContext?: CanvasRenderingContext2D
 }
 
-/** 绘图线段文字在线段语义方向上的位置。 */
-export type DrawingLabelPosition = 'start' | 'center' | 'end'
+/** 绘图渲染 primitive 契约：样式引用公共图形模型，屏幕图元由 foundation 拥有。 */
+import type { DrawingLabelPosition, DrawingStyle } from '@363045841yyt/klinechart-plot-contracts'
+
+export type { DrawingLabelPosition, DrawingStyle } from '@363045841yyt/klinechart-plot-contracts'
 
 /** 图元附属文字；位置由所属图元在渲染期计算。 */
 export type PrimitiveTextAttachment = {
@@ -553,7 +584,7 @@ export type PointPrimitive = {
   point: Point
   role?: PointRole
   text?: PrimitiveTextAttachment
-  style?: DrawingStyle
+  style: DrawingStyle
 }
 
 export type LinePrimitive = {
@@ -563,7 +594,7 @@ export type LinePrimitive = {
   extend?: 'none' | 'left' | 'right' | 'both'
   showEndpoints?: boolean
   text?: PrimitiveTextAttachment
-  style?: DrawingStyle
+  style: DrawingStyle
 }
 
 export type AreaPrimitive = {
@@ -571,7 +602,7 @@ export type AreaPrimitive = {
   points: Point[]
   closed: boolean
   text?: PrimitiveTextAttachment
-  style?: DrawingStyle
+  style: DrawingStyle
 }
 
 export type TextPrimitive = {
@@ -580,7 +611,7 @@ export type TextPrimitive = {
   text: string
   align?: 'left' | 'center' | 'right'
   baseline?: 'top' | 'middle' | 'bottom'
-  style?: DrawingStyle
+  style: DrawingStyle
 }
 
 /** 箭头图元：由渲染器作为一个整体绘制轴线和实心箭头头部。 */
@@ -591,7 +622,7 @@ export type ArrowPrimitive = {
   headLength?: number
   headAngle?: number
   text?: PrimitiveTextAttachment
-  style?: DrawingStyle
+  style: DrawingStyle
 }
 
 export type DrawingPrimitive =

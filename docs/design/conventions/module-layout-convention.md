@@ -58,7 +58,7 @@ data/
 - 新增 `GENERIC_ERROR_CODES`（`INVALID_PARAM` / `INVALID_STATE` / `DISPOSED` / `NOT_REGISTERED`），供入参与生命周期类错误统一引用；`SUBPANE_ERROR_CODES` 的两个值改为引用它。
 - fetch 族（`FETCH_FAILED` / `FETCH_ABORTED` / `UNSUPPORTED_CAPABILITY` / `INSTRUMENT_NOT_FOUND`）在 `provider/impl/router.ts`、`provider/protocol/impl/provider.ts`、`provider/impl/instrumentSearch.ts`、`live/impl/barsLive.ts` 改为 `ERROR_CODES.*`。
 - 通用码在 17 个生产文件（scale / input / rendering / engine / foundation / data 等）改为 `GENERIC_ERROR_CODES.*`；测试断言保留字面量。
-- 领域族具名常量（`SCALE_ERROR_CODES` / `FOOTPRINT_ERROR_CODES` / `AVWAP_ERROR_CODES` / `INDICATOR_ERROR_CODES` / `HEATMAP_ERROR_CODES` / `MTF_ERROR_CODES` / `CHART_TYPE_ERROR_CODES` / `REPLAY_ERROR_CODES` / `DEPTH_ERROR_CODES`）已补齐，对应调用点全部改为引用常量。
+- 领域族具名常量（`SCALE_ERROR_CODES` / `FOOTPRINT_ERROR_CODES` / `AVWAP_ERROR_CODES` / `HEATMAP_ERROR_CODES` / `MTF_ERROR_CODES` / `CHART_TYPE_ERROR_CODES` / `REPLAY_ERROR_CODES` / `DEPTH_ERROR_CODES`）已补齐，对应调用点全部改为引用常量。
 
 未纳入：`MarketDataErrorCode`（`errorCode()` 的返回值）是 data 层独立领域词汇，不是 `KLineChartError` 码；`protocol/types.ts` 的 `SOURCE_REJECTION_CODES` 是「可流转错误码集合」的定义本身；`errors-help.ts` 的 `HINTS` 是「码 → 恢复提示」定义表；测试断言保留字面量。
 
@@ -86,7 +86,7 @@ data/
 
 ### 2. 子模块语义划分
 
-模块内按职责切成 6 个子模块，每个子模块采用 `<sub>/types.ts + <sub>/impl/` 分层（对齐 `engine/marker/shape` 既有先例）；契约类型从 impl 抽出到各层 `types.ts`，`types.ts` 不依赖同模块 impl。
+模块内按职责切成 6 个子模块，每个子模块采用 `<sub>/types.ts + <sub>/impl/` 分层（对齐 `engine/frame` 既有先例）；契约类型从 impl 抽出到各层 `types.ts`，`types.ts` 不依赖同模块 impl。
 
 | 子模块 | 职责 |
 |--------|------|
@@ -105,7 +105,7 @@ data/
 
 - 常量不带 `: DrawingToolId` 标注，保留字面量类型，`switch` 才能正常收窄；需要完整联合类型的信号（`drawingState.drawingTool`、Vue 的 `drawingToolId`）显式标注。`CURSOR_DRAWING_TOOL_ID` / `BOX_SELECT_DRAWING_TOOL_ID` 保留为 `DrawingTool.Cursor` / `DrawingTool.BoxSelect` 的别名，engine、controllers、features/agent 与 Vue 的运行时比较一律引用常量，禁止散落字面量；仅测试断言与纯类型声明可保留字面量。
 - `DrawingKind`（`engine/drawing/types.ts`）是与 `DrawingToolId` 不同的词汇表（如 `h-line` → `horizontal-line`），其字符串字面量不受本约束影响，两者通过 `getDrawingKind` 单点映射。
-- Vue 侧 `range-select` 是纯 UI 模式 id（不写进 kernel `DrawingToolId`），统一由 `packages/vue/src/components/toolbarToolIds.ts` 的 `RANGE_SELECT_UI_TOOL_ID` 提供。
+- Vue 侧 `range-select` 是纯 UI 模式 id（不写进 kernel `DrawingToolId`），统一由 `packages/vue/src/components/toolbar/toolbarToolIds.ts` 的 `RANGE_SELECT_UI_TOOL_ID` 提供。
 
 ### 4. 公开入口收口
 

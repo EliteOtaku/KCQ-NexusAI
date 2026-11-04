@@ -12,13 +12,11 @@ import type { InteractionController } from '../controller/interaction.js'
 import type { ChartDataManager } from '../data/chartDataManager.js'
 import type { DrawingSelectionMarquee, DrawingStoreDeps } from '../drawing/index.js'
 import type { ChartIndicatorManager } from '../indicators/chartIndicatorManager.js'
-import type { MarkerManagerDeps } from '../marker/registry.js'
 import type { PaneRenderer } from '../pane/index.js'
 import type { MainPriceAxisStateModule } from '../state/mainPriceAxisState.js'
 import type { OptionsStateModule } from '../state/optionsState.js'
 import type { ViewportStateModule } from '../state/viewportState.js'
 import type { ZoomStateModule } from '../state/zoomState.js'
-import type { VisiblePriceExtrema } from '../viewport/visiblePriceExtrema.js'
 
 /** 已解析的图表选项：kWidth / kGap 必填，由样式与配置派生。 */
 export type ResolvedChartOptions = Omit<ChartOptions, 'kWidth' | 'kGap'> & {
@@ -30,7 +28,7 @@ export type ResolvedChartOptions = Omit<ChartOptions, 'kWidth' | 'kGap'> & {
 export interface RendererDependencies {
   /** 帧开始时读取一次的时间源，测试可注入。 */
   clock?: Clock
-  /** 当前主品种的市场时段，倒计时显示与刷新共用。 */
+  /** 当前主品种的市场时段，供分时几何与市场时间标签使用。 */
   getMarketSession: () => typeof ASHARE_MARKET_SESSION | undefined
   getDom: () => ChartDom
   getOption: () => ResolvedChartOptions
@@ -48,6 +46,8 @@ export interface RendererDependencies {
   options: OptionsStateModule
   /** scroll / dpr / plot 几何 SSOT */
   viewport: ViewportStateModule
+  /** 绘制前统一提交容器尺寸变化，避免观察器提前清空像素。 */
+  commitPendingLayout: () => void
   /** 由 Chart 的 ViewportScrollBridge 在 render frame 内提交原生滚动。 */
   commitViewportScroll: (targetScrollLeft: number) => void
   getDataManager: () => ChartDataManager
@@ -56,19 +56,23 @@ export interface RendererDependencies {
   dataView$: ReadonlySignal<ChartDataView>
   primaryRenderer$?: ReadonlySignal<import('../chartModel/index.js').PrimaryRendererType>
   settings$: ReadonlySignal<ChartSettings>
+  footprintState$: ReadonlySignal<
+    import('../../components/footprint/types.js').FootprintRenderState | null
+  >
   mainPriceAxis: MainPriceAxisStateModule
-  customMarkers$: MarkerManagerDeps['customMarkers$']
   drawings$: DrawingStoreDeps['drawings$']
   selectedDrawingIds$: DrawingStoreDeps['selectedDrawingIds$']
   getOverlay?: DrawingStoreDeps['getOverlay']
   /** 绘图交互会话中的临时框选，不进入持久化图元列表。 */
   getSelectionMarquee?: () => DrawingSelectionMarquee | null
+  /** 绘图磁吸命中点，渲染为会话层高亮圆点。 */
+  getSnapIndicator?: () => import('../../engine/drawing/index.js').DrawingSnapIndicator | null
   /** 完整帧的所有 Pane 统一交给图例管理器投影。 */
   projectLegendFrame: (contexts: ReadonlyArray<RenderContext>) => void
   getLegendConfiguration: () => ReadonlyArray<import('../legend/types.js').LegendEntry>
   clearLegendFrame: () => void
-  /** 可视区极值跨数量级时才请求右轴实测与布局更新。 */
-  commitRightAxisWidthMeasurement?: (extrema: VisiblePriceExtrema) => void
+  /** 提交所有可见 Pane 的估算轴宽，返回布局是否变化。 */
+  commitAxisWidths?: (widths: import('../axisWidth/types.js').AxisWidths) => boolean
 }
 
 /** 数据版本、展示参数与轴映射快照；横轴坐标按值比较。 */

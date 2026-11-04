@@ -8,11 +8,11 @@
  * Mutation methods are imperative — adapters call them in event handlers.
  */
 
+import type { Bar, IndicatorMarketContext } from '@363045841yyt/klinechart-plot-contracts'
 import type {
-  AssetClass,
-  BarAggregation,
   InstrumentCapabilities,
   InstrumentDescriptor,
+  InstrumentType,
 } from '../data/provider/types.js'
 import type {
   IndicatorInstance,
@@ -33,13 +33,11 @@ import type {
   UpdateDrawingPatch,
 } from '../engine/drawing/index.js'
 import type { LayoutApi } from '../engine/layout/types.js'
-import type { CustomMarkerEntity } from '../engine/marker/registry.js'
 import type { CreatePaneInput, PanePatch, PaneSpec } from '../engine/pane/types.js'
 import type { ChartAgentController } from '../features/agent/types.js'
 import type { AlertController } from '../features/alerts/types.js'
 import type { ChartSettings } from '../foundation/config/chartSettings.js'
-import type { Plugin, PluginConfig, RenderContext } from '../foundation/plugin/types.js'
-import type { Layer } from '@/rendering/scene/types.js'
+import type { Plugin, PluginConfig } from '../foundation/plugin/types.js'
 import type { ReadonlySignal } from '../foundation/reactivity/index.js'
 import type { ChartDataView } from '../foundation/types/chartView.js'
 import type { ChartRendererAccess } from './renderers/index.js'
@@ -136,7 +134,7 @@ export type DataSourceParams = Readonly<Record<string, string | number | boolean
 export interface SymbolInfo {
   /** 统一行情模型提供的稳定品种 ID；旧目录结果可暂时缺失。 */
   id?: string
-  assetClass?: AssetClass
+  instrumentType?: InstrumentType
   sessionId?: string
   capabilities?: InstrumentCapabilities
   tickSize?: number
@@ -176,24 +174,6 @@ export interface SymbolSpec {
   incremental?: boolean
 }
 
-/** User-provided K-line data bundle — bypasses the fetcher pipeline entirely */
-export interface CustomDataSource {
-  market: string
-  symbol?: string
-  period?: string
-  adjust?: string
-  /** Display description for the symbol catalog (defaults to symbol code) */
-  description?: string
-  /** Exchange code for the symbol catalog */
-  exchange?: string
-  /** Data source label for the symbol catalog */
-  source?: string
-  /** Main chart K-line data (required) */
-  data: ReadonlyArray<KLineData>
-  /** Comparison products keyed by symbol */
-  comparisons?: Record<string, ReadonlyArray<KLineData>>
-}
-
 // ---------------------------------------------------------------------------
 // Indicator metadata
 // ---------------------------------------------------------------------------
@@ -211,14 +191,12 @@ export interface IndicatorParamDef {
 }
 
 export interface IndicatorDefinition {
+  source?: import('../engine/indicators/indicatorMetadata.js').IndicatorSource
   id: string
   label: string
   name?: string
   description?: string
   role: IndicatorPaneRole
-  indicatorType: import('../engine/indicators/indicatorMetadata.js').IndicatorType
-  indicatorTypeLabel?: string
-  indicatorTypeOrder?: number
   params: ReadonlyArray<IndicatorParamDef>
 }
 
@@ -326,6 +304,13 @@ export interface DrawingViewportPort {
   getPaneInfo(paneId: string): PaneLayoutInfo | undefined
   /** 根据图表局部 Y 坐标查找所属 Pane。 */
   getPaneAtY(y: number): PaneLayoutInfo | undefined
+  /** 当前 Pane 已提交层的图元线段（Pane 局部坐标），供磁吸候选。 */
+  getSnapLines(paneId: string): ReadonlyArray<import('../engine/drawing/index.js').SnapLine>
+  /** 指定逻辑下标处该 Pane 的指标值，供磁吸候选。 */
+  getIndicatorValues(
+    paneId: string,
+    barIndex: number,
+  ): ReadonlyArray<import('../engine/drawing/index.js').SnapIndicatorValue>
 }
 
 /**
@@ -363,7 +348,8 @@ export interface DrawingControllerCallbacks {
 
 export interface ChartMountOptions {
   container: HTMLElement
-  data?: ReadonlyArray<KLineData>
+  /** 宿主持有的行情管理实例；多个图表可以显式共享。 */
+  marketDataContext?: import('../data/management/impl/context.js').MarketDataContext
   symbols?: ReadonlyArray<SymbolSpec>
   initialZoomLevel?: number
   zoomLevels?: number
@@ -402,6 +388,10 @@ export interface ChartMountOptions {
 export type IndicatorLoadingMode = 'on-demand' | 'all'
 
 export interface ChartController extends DrawingChartAdapter, ChartRendererAccess, LayoutApi {
+  /** 一次临时指标计算，共享当前行情与 Request 上下文，完成后释放行情使用权。 */
+  withIndicatorData<T>(
+    compute: (bars: readonly Bar[], market: IndicatorMarketContext) => Promise<T>,
+  ): Promise<T>
   /** 在完整绘制帧结束时同步调用捕获函数，返回其异步合成结果。 */
   captureFrame<T>(
     capture: (frame: import('./screenshot/types.js').ChartFrameCaptureContext) => T | Promise<T>,
@@ -414,10 +404,18 @@ export interface ChartController extends DrawingChartAdapter, ChartRendererAcces
   copyDrawings(ids: ReadonlyArray<string>): ReadonlyArray<DrawingObject>
   /** Stable, serializable Agent context and deterministic query facade. */
   readonly agent: ChartAgentController
+  /**
+   * 注册 Agent 工具宿主：宿主的 @Tool 标注方法会成为 Agent 可调用工具，
+   * 调用时按方法函数身份在已注册宿主中解析执行目标。幂等（同一宿主重复注册只保留一份）。
+   */
+  registerToolHost(host: object): void
+  /** 移除先前注册的 Agent 工具宿主。 */
+  unregisterToolHost(host: object): void
   // ---- Signals ----
   readonly viewport: ReadonlySignal<ChartViewport>
   /** 右轴当前有效 CSS 宽度（包含用户配置的最小宽度）。 */
   readonly rightAxisEffectiveWidth: ReadonlySignal<number>
+  readonly leftAxisEffectiveWidth: ReadonlySignal<number>
   readonly data: ReadonlySignal<ReadonlyArray<KLineData>>
   readonly dataLoading: ReadonlySignal<boolean>
   /** 主品种最近一次显式拉取失败原因；成功或重置后为 null */
@@ -440,6 +438,8 @@ export interface ChartController extends DrawingChartAdapter, ChartRendererAcces
   readonly chartMode: ReadonlySignal<ChartDataView>
   /** 最近一次 K 线周期；分时返回操作使用该值。 */
   readonly lastBarPeriod: ReadonlySignal<string>
+  /** 当前就绪品种是否支持原始逐笔成交；足迹显示模式据此置灰入口。 */
+  readonly footprintSupported: ReadonlySignal<boolean>
   readonly indicators: ReadonlySignal<ReadonlyArray<IndicatorInstance>>
   /** 当前布局的指标收藏唯一数据源。 */
   readonly favoriteIndicatorIds: ReadonlySignal<ReadonlyArray<string>>
@@ -506,8 +506,6 @@ export interface ChartController extends DrawingChartAdapter, ChartRendererAcces
   // ---- Data ----
   /** 设置 kline 主品种/周期；对比集合独立，由 setComparisonSpecs 管理。 */
   setSymbols(next: ReadonlyArray<SymbolSpec>): void
-  /** 声明非对比视图的缺省聚合口径（如 Exness 走 europe-traditional）；须在 setSymbols 前调用生效。 */
-  setDefaultBarAggregation(value: BarAggregation): void
   /** Register symbols into the available symbol catalog for UI pickers */
   registerSymbols(symbols: ReadonlyArray<SymbolInfo>): void
   /** 设置 K 线主图的原生比较折线集合，不改变 chartMode 或主品种。 */
@@ -516,24 +514,14 @@ export interface ChartController extends DrawingChartAdapter, ChartRendererAcces
   removeComparisonSymbol(symbol: string): void
   /** 隐藏或显示比较折线，保留品种选择及图例。 */
   setComparisonHidden(identity: string, hidden: boolean): void
-  /** Inject comparison product data directly (bypasses fetcher) */
-  setComparisonData(symbol: string, data: ReadonlyArray<KLineData>): void
   /** Update the main symbol code without triggering a fetch */
   setCurrentSymbol(symbol: string): void
   /** Update the K-line period without triggering a fetch */
   setCurrentPeriod(period: string): void
   /** Switch to time-share view for a specific date (YYYYMMDD), e.g. after double-clicking a daily bar */
   switchToTimeShareForDate(dateYYYYMMDD: number): void
-  /** Inject a complete custom data bundle (bypasses fetcher pipeline) */
-  applyCustomData(source: CustomDataSource): void
   /** 清除当前图表实例的行情缓存。 */
   clearMarketDataCache(): void
-  resetToFetcher(spec: SymbolSpec): void
-  setData(next: ReadonlyArray<KLineData>): void
-  /** 实时帧写入：末尾窗口 replace-on-conflict（forming bar 更新不被保旧弃新吞掉）。 */
-  updateBars(next: ReadonlyArray<KLineData>): void
-  appendData(next: ReadonlyArray<KLineData>): void
-  updateData(next: ReadonlyArray<KLineData>): void
   getData(): ReadonlyArray<KLineData>
   /** 返回 K 线逻辑索引对应的时间戳，供双击切换分时等 UI 操作使用。 */
   getTimestampAtLogicalIndex(index: number): number | null
@@ -551,28 +539,6 @@ export interface ChartController extends DrawingChartAdapter, ChartRendererAcces
   zoomToLevel(level: number, anchorX?: number): void
   zoomIn(anchorX?: number): void
   zoomOut(anchorX?: number): void
-
-  // ---- Renderer layers（#283 官方注册面；Layer 契约，同对象兼容旧插件）----
-  /** 注册第三方渲染层（幂等；Layer.pane 声明绘制目标，Layer.id 查询/移除）。 */
-  useRenderer(layer: Layer<RenderContext>): void
-  /** 按名称移除渲染层。 */
-  removeRenderer(name: string): void
-  /** 获取已注册渲染层实例。 */
-  getRenderer(name: string): Layer<RenderContext> | undefined
-  /** 请求重绘（#283 后替代 scheduleDraw；缺省 UpdateLevel.All）。 */
-  requestRender(): void
-
-  /** 声明非对比视图的缺省聚合口径（下游 MT5 品牌口径特性；须在 setSymbols 前调用生效）。 */
-  setDefaultBarAggregation(value: BarAggregation): void
-
-  // ---- Agent tool hosts ----
-  /**
-   * 注册 Agent 工具宿主：宿主的 @Tool 标注方法会成为 Agent 可调用工具，
-   * 调用时按方法函数身份在已注册宿主中解析执行目标。幂等（同一宿主重复注册只保留一份）。
-   */
-  registerToolHost(host: object): void
-  /** 移除先前注册的 Agent 工具宿主。 */
-  unregisterToolHost(host: object): void
 
   // ---- Interaction ----
   handlePointerEvent(e: PointerEvent, drawingController?: DrawingControllerCallbacks): boolean
@@ -596,11 +562,7 @@ export interface ChartController extends DrawingChartAdapter, ChartRendererAcces
    * 同步指标方法只接受已加载的定义，调用前先 await 本方法。
    */
   loadIndicators(definitionIds: ReadonlyArray<string>): Promise<void>
-  addIndicator(
-    definitionId: string,
-    role: IndicatorRole,
-    params?: Record<string, unknown>,
-  ): string | null
+  addIndicator(definitionId: string, params?: Record<string, unknown>): string | null
   removeIndicator(instanceId: string): boolean
   /** 调整主图指标的 Legend 顺序。 */
   moveMainIndicator(definitionId: string, direction: 'up' | 'down'): boolean
@@ -646,10 +608,6 @@ export interface ChartController extends DrawingChartAdapter, ChartRendererAcces
   updatePaneContent(paneId: string, params: Record<string, unknown>): boolean
   clearPanes(): void
 
-  // ---- Drawing / Markers ----
-  updateCustomMarkers(markers: ReadonlyArray<CustomMarkerEntity>): void
-  clearCustomMarkers(): void
-
   // ---- Interaction sub-methods ----
   setTooltipSize(size: { width: number; height: number }): void
   setTooltipAnchorPositioning(enabled: boolean): void
@@ -662,6 +620,10 @@ export interface ChartController extends DrawingChartAdapter, ChartRendererAcces
   getLeftLoadBufferWidth(): number
   /** scroll to the rightmost position (latest data) */
   scrollToRight(): void
+  /** 按 K 线根数水平平移视口；正数向右、负数向左。 */
+  scrollByBars(bars: number): void
+  /** 重置视图：恢复初始缩放级别并复位主图价格轴。 */
+  resetChart(): void
 
   // ---- Settings ----
   updateSettingsFacade(settings: Record<string, unknown>): void

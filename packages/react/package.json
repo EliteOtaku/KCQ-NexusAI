@@ -1,6 +1,7 @@
 {
   "name": "@363045841yyt/klinechart-react",
-  "version": "0.0.0",
+  "private": true,
+  "version": "0.11.0-alpha.10",
   "description": "React bindings for @363045841yyt/klinechart: direct core mount and the full-UI Web Component.",
   "license": "Apache-2.0",
   "type": "module",
@@ -27,7 +28,7 @@
     "access": "public"
   },
   "scripts": {
-    "dev": "vite --config preview/vite.config.ts",
+    "dev": "node ../../scripts/vite-dev.mjs --config preview/vite.config.ts",
     "build": "tsc -p tsconfig.build.json",
     "prepublishOnly": "npm run build",
     "test": "vitest run",
@@ -53,7 +54,7 @@
     "react": "^18.0.0 || ^19.0.0"
   },
   "dependencies": {
-    "@363045841yyt/klinechart": "workspace:*"
+    "@363045841yyt/klinechart-web-component": "workspace:*"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.3",

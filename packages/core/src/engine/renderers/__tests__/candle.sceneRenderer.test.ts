@@ -7,7 +7,7 @@ import {
 } from '@/engine/__tests__/helpers/renderTestKit'
 import type { RenderContext } from '@/foundation/plugin/index'
 import { createMockRenderer } from '@/rendering/render/__tests__/helpers/rendererTestKit'
-import type { Renderer } from '@/rendering/render/Renderer'
+import type { Renderer, RendererName } from '@/rendering/render/Renderer'
 import { createCandleLayer } from '../candle'
 
 /** 以主图身份调用 K 线 Layer.paint；sceneRenderer 由上下文携带。 */
@@ -25,8 +25,9 @@ function makePane(): MockPaneInfoOverrides {
     priceRange: { minPrice: 90, maxPrice: 110 },
     yAxis: {
       getDisplayRange: () => ({ maxPrice: 110, minPrice: 90 }),
-      getPaddingTop: () => 10,
-      getPaddingBottom: () => 10,
+      getContentTop: () => 10,
+      getContentBottom: () => 390,
+      getContentHeight: () => 380,
       getScaleType: () => 'linear',
       priceToY: (p) => 200 - (p - 100),
     },
@@ -65,51 +66,134 @@ function makeBars(length: number) {
   }))
 }
 
-function makeSceneRenderer(capsName = 'webgl2') {
+/** 观察公共矩形原语；坐标单位与 Canvas 完全一致。 */
+function makeSceneRenderer(capsName: RendererName = 'webgl2') {
   const r = createMockRenderer({ capsName })
   return {
     r,
-    drawInstances: r.drawInstances,
-    writeBuffer: r.writeBuffer,
+    submit: r.primitives.paint,
+    rectangles: () =>
+      r.primitives.paint.mock.calls.flatMap(([, commands]) =>
+        commands.flatMap((command) => {
+          if (command.kind === 'rect')
+            return [[command.x, command.y, command.width, command.height]]
+          if (command.kind !== 'rects') return []
+          const rects: Array<[number, number, number, number]> = []
+          for (let offset = 0; offset < command.data.length; offset += 4)
+            rects.push([
+              command.data[offset]!,
+              command.data[offset + 1]!,
+              command.data[offset + 2]!,
+              command.data[offset + 3]!,
+            ])
+          return rects
+        }),
+      ),
   }
 }
 
 describe('candle sceneRenderer path', () => {
-  it('draws via sceneRenderer.drawInstances on webgl', () => {
-    const { r, drawInstances } = makeSceneRenderer()
+  it.each(['webgl2', 'webgpu', 'canvas2d'] as const)(
+    'draws full-width high-low bodies on %s and invalidates retained OHLC geometry',
+    (capsName) => {
+      const renderer = makeSceneRenderer(capsName)
+      const layer = createCandleLayer()
+      const context = createCtx(renderer.r, {
+        data: makeBars(2),
+        range: { start: 0, end: 2 },
+        kLineCenters: [10, 20],
+        kWidthPx: 11,
+        dataRevision: 1,
+      })
+      layer.paint({
+        ...context,
+        paneId: 'main',
+        clear: false,
+        settings: { klineShape: 'ohlc-bar' },
+      })
+      expect(renderer.rectangles()).toHaveLength(6)
+      renderer.submit.mockClear()
+      layer.paint({
+        ...context,
+        paneId: 'main',
+        clear: false,
+        settings: { klineShape: 'high-low' },
+      })
+      const rectangles = renderer.rectangles()
+      expect(rectangles).toHaveLength(2)
+      for (const rect of rectangles) {
+        expect(rect[1]).toBe(105)
+        expect(rect[2]).toBe(11)
+        expect(rect[3]).toBe(190)
+      }
+      layer.dispose()
+    },
+  )
 
-    const ctx = createCtx(r, {
-      data: makeBars(5),
-      range: { start: 0, end: 5 },
-      kLinePositions: [0, 10, 20, 30, 40],
-      kLineCenters: [4, 14, 24, 34, 44],
-      settings: { rendererBackend: 'webgl', showVolumePriceMarkers: false },
-    })
+  it.each(['line', 'area'] as const)(
+    'draws close prices for %s without candle geometry',
+    (klineShape) => {
+      const renderer = makeSceneRenderer()
+      const data = makeBars(3)
+      paint(
+        createCtx(renderer.r, {
+          data,
+          range: { start: 0, end: 3 },
+          kLineCenters: [10, 20, 30],
+          settings: { klineShape },
+        }),
+      )
+      const commands = renderer.submit.mock.calls.flatMap(([, primitives]) => primitives)
+      const stroke = commands.find((command) => command.kind === 'stroke')
+      expect(stroke?.kind).toBe('stroke')
+      if (stroke?.kind !== 'stroke') return
+      expect(stroke.paths).toEqual([
+        [
+          { x: 10, y: 198 },
+          { x: 20, y: 198 },
+          { x: 30, y: 198 },
+        ],
+      ])
+      expect(renderer.rectangles()).toEqual([])
+      const fills = commands.filter((command) => command.kind === 'fill')
+      expect(fills).toHaveLength(klineShape === 'area' ? 1 : 0)
+      if (klineShape === 'area') {
+        expect(fills[0]?.paths[0]?.slice(3)).toEqual([
+          { x: 30, y: 390 },
+          { x: 20, y: 390 },
+          { x: 10, y: 390 },
+        ])
+      }
+    },
+  )
 
-    paint(ctx)
+  it.each([
+    { capsName: 'webgl2', backend: 'webgl', klineShape: 'candlestick' },
+    { capsName: 'webgl2', backend: 'webgl', klineShape: 'footprint' },
+    { capsName: 'webgpu', backend: 'webgpu', klineShape: 'candlestick' },
+  ] as const)(
+    'draws $klineShape through the scene primitive target on $backend',
+    ({ capsName, backend, klineShape }) => {
+      const { r, submit } = makeSceneRenderer(capsName)
 
-    expect(drawInstances).toHaveBeenCalled()
-  })
+      const ctx = createCtx(r, {
+        data: makeBars(5),
+        range: { start: 0, end: 5 },
+        kLinePositions: [0, 10, 20, 30, 40],
+        kLineCenters: [4, 14, 24, 34, 44],
+        settings: { rendererBackend: backend, klineShape },
+      })
 
-  it('draws via sceneRenderer.drawInstances when sceneRenderer is webgpu', () => {
-    const { r, drawInstances } = makeSceneRenderer('webgpu')
+      paint(ctx)
 
-    const ctx = createCtx(r, {
-      data: makeBars(3),
-      range: { start: 0, end: 3 },
-      kLinePositions: [0, 10, 20],
-      kLineCenters: [4, 14, 24],
-      settings: { rendererBackend: 'webgpu', showVolumePriceMarkers: false },
-    })
+      expect(submit).toHaveBeenCalledOnce()
+      expect(submit.mock.calls[0]?.[0]).toBe(ctx.ctx)
+    },
+  )
 
-    paint(ctx)
-
-    expect(drawInstances).toHaveBeenCalled()
-  })
-
-  it('falls to Canvas2D when drawInstances returns false (fail-closed)', () => {
-    const { r, drawInstances } = makeSceneRenderer()
-    drawInstances.mockReturnValue(false)
+  it('falls to Canvas2D on the same target when primitive execution fails', () => {
+    const { r, submit } = makeSceneRenderer()
+    submit.mockReturnValue(false)
     const ctx2d = createMockCanvasContext()
 
     const ctx = createCtx(r, {
@@ -118,7 +202,7 @@ describe('candle sceneRenderer path', () => {
       range: { start: 0, end: 3 },
       kLinePositions: [0, 10, 20],
       kLineCenters: [4, 14, 24],
-      settings: { rendererBackend: 'webgl', showVolumePriceMarkers: false },
+      settings: { rendererBackend: 'webgl' },
     })
 
     paint(ctx)
@@ -128,6 +212,54 @@ describe('candle sceneRenderer path', () => {
 })
 
 describe('candle preparation', () => {
+  it('足迹模式在没有历史成交时仍绘制全部可见空心 K 线和影线', () => {
+    const canvas = createMockCanvasContext()
+    const context = createCtx(undefined, {
+      ctx: canvas,
+      data: makeBars(5),
+      range: { start: 0, end: 5 },
+      kLineCenters: [4, 14, 24, 34, 44],
+      kWidthPx: 8,
+      settings: { klineShape: 'footprint' },
+    })
+    paint(context)
+    const footprintRects = [...vi.mocked(canvas.fillRect).mock.calls]
+    expect(footprintRects).toHaveLength(30)
+    vi.mocked(canvas.fillRect).mockClear()
+    paint({ ...context, settings: { klineShape: 'hollow-candlestick' } })
+    expect(vi.mocked(canvas.fillRect).mock.calls).toEqual(footprintRects)
+  })
+
+  it('同一行情版本切换美国线使缓存失效，GPU 与 Canvas 使用相同矩形', () => {
+    const canvas = createMockCanvasContext()
+    const layer = createCandleLayer()
+    const context = createCtx(undefined, {
+      ctx: canvas,
+      data: makeBars(1),
+      range: { start: 0, end: 1 },
+      kLineCenters: [100],
+      kWidthPx: 11,
+      dataRevision: 1,
+      settings: { klineShape: 'candlestick' },
+    })
+    layer.paint(context)
+    vi.mocked(canvas.fillRect).mockClear()
+    const barContext = { ...context, settings: { klineShape: 'ohlc-bar' } } as const
+    layer.paint(barContext)
+    const rects = vi.mocked(canvas.fillRect).mock.calls
+    expect(rects).toHaveLength(3)
+    const [stem, open, close] = rects
+    if (!stem || !open || !close) throw new Error('Missing OHLC geometry')
+    expect(open[0] + open[2]).toBe(stem[0])
+    expect(close[0]).toBe(stem[0] + stem[2])
+    for (const backend of ['webgl2', 'webgpu'] as const) {
+      const { r, rectangles } = makeSceneRenderer(backend)
+      layer.paint({ ...barContext, sceneRenderer: r })
+      expect(rectangles()).toEqual(rects)
+    }
+    layer.dispose()
+  })
+
   it.each([1, 1.25, 1.5, 2, 3].flatMap((dpr) => [false, true].map((down) => ({ dpr, down }))))(
     'hollow candles preserve transparent interiors and backend geometry at DPR=$dpr down=$down',
     ({ dpr, down }) => {
@@ -142,7 +274,7 @@ describe('candle preparation', () => {
         kWidthPx: 11,
         dpr,
         dataRevision: 1,
-        settings: { klineShape: 'hollow-candlestick', showVolumePriceMarkers: false },
+        settings: { klineShape: 'hollow-candlestick' },
       })
       layer.paint(context)
       const rectangles = vi.mocked(canvas.fillRect).mock.calls
@@ -159,15 +291,10 @@ describe('candle preparation', () => {
       ).toBe(false)
       for (const rectangle of rectangles)
         for (const value of rectangle) expect(value * dpr).toBeCloseTo(Math.round(value * dpr), 4)
-      for (const backend of ['webgl2', 'webgpu']) {
-        const { r, writeBuffer } = makeSceneRenderer(backend)
+      for (const backend of ['webgl2', 'webgpu'] as const) {
+        const { r, rectangles: submittedRectangles } = makeSceneRenderer(backend)
         layer.paint({ ...context, sceneRenderer: r })
-        const actual = writeBuffer.mock.calls.flatMap(([, values]) =>
-          values instanceof Float32Array ? [...values] : [],
-        )
-        expect(actual).toEqual(
-          rectangles.flatMap((rectangle) => rectangle.map((value) => Math.round(value * dpr))),
-        )
+        expect(submittedRectangles()).toEqual(rectangles)
       }
       // 同一数据版本切换形态必须重建几何。
       vi.mocked(canvas.fillRect).mockClear()
@@ -187,7 +314,6 @@ describe('candle preparation', () => {
         kLineCenters: [100],
         kWidthPx: 5,
         dpr,
-        settings: { showVolumePriceMarkers: false },
       }),
     )
     const rectangles = vi.mocked(canvas.fillRect).mock.calls
@@ -204,7 +330,7 @@ describe('candle preparation', () => {
     ({ dpr, bodyPx }) => {
       const canvas = createMockCanvasContext()
       const layer = createCandleLayer()
-      const { r, writeBuffer } = makeSceneRenderer()
+      const { r, submit, rectangles: submittedRectangles } = makeSceneRenderer()
       const context = createCtx(undefined, {
         ctx: canvas,
         dataRevision: 1,
@@ -212,7 +338,6 @@ describe('candle preparation', () => {
         range: { start: 0, end: 1 },
         kLineCenters: [100],
         dpr,
-        settings: { showVolumePriceMarkers: false },
       })
       // 实体宽度和数据版本不变，验证级别切换独立使影线缓存失效。
       for (const { zoomLevel, wickPx } of [
@@ -223,7 +348,7 @@ describe('candle preparation', () => {
         { zoomLevel: 9, wickPx: 1 },
       ]) {
         vi.mocked(canvas.fillRect).mockClear()
-        writeBuffer.mockClear()
+        submit.mockClear()
         const projected = { ...context, kWidthPx: bodyPx, kWidth: bodyPx / dpr, zoomLevel }
         layer.paint(projected)
         const rectangles = vi.mocked(canvas.fillRect).mock.calls
@@ -241,19 +366,13 @@ describe('candle preparation', () => {
           expect(leftMargin * dpr).toBeCloseTo(Math.round(leftMargin * dpr), 5)
         }
         layer.paint({ ...projected, sceneRenderer: r })
-        const batches = writeBuffer.mock.calls.map(([, data]) => data)
-        expect(batches).toHaveLength(2)
-        const wicks = batches[1]
-        const bodies = batches[0]
-        if (!(bodies instanceof Float32Array)) throw new Error('Missing body geometry')
-        expect(wicks).toBeInstanceOf(Float32Array)
-        if (!(wicks instanceof Float32Array)) throw new Error('Missing wick geometry')
-        expect(wicks[2]).toBe(wickPx)
-        expect(wicks[6]).toBe(wickPx)
-        for (const offset of [0, 4]) {
-          // GPU 批次直接存整数物理像素，几何中心必须完全相等。
-          expect(Number.isInteger(wicks[offset])).toBe(true)
-          expect(wicks[offset]! + wicks[offset + 2]! / 2).toBe(bodies[0]! + bodies[2]! / 2)
+        expect(submit).toHaveBeenCalledOnce()
+        const submitted = submittedRectangles()
+        expect(submitted).toEqual(rectangles)
+        for (const wick of submitted.slice(1)) {
+          expect(wick[2]! * dpr).toBeCloseTo(wickPx, 5)
+          expect(wick[0]! * dpr).toBeCloseTo(Math.round(wick[0]! * dpr), 5)
+          expect(wick[0]! + wick[2]! / 2).toBeCloseTo(body[0] + body[2] / 2, 5)
         }
       }
       layer.dispose()
@@ -279,7 +398,6 @@ describe('candle preparation', () => {
       ],
       range: { start: 0, end: 1 },
       kLineCenters: [10],
-      settings: { showVolumePriceMarkers: false },
     })
     const layer = createCandleLayer()
     layer.paint(context)
@@ -349,7 +467,6 @@ describe('candle preparation', () => {
       scrollLeft: 0.4,
       dpr,
       kWidthPx: 5,
-      settings: { showVolumePriceMarkers: false },
     })
     paint(context)
 
@@ -380,54 +497,6 @@ describe('candle preparation', () => {
       [body.x, bodyY, body.width, bodyH],
       [wick.x, upperTop / dpr, wick.width, Math.max(1, upperBottom - upperTop) / dpr],
       [wick.x, lowerTop / dpr, wick.width, Math.max(1, lowerBottom - lowerTop) / dpr],
-    ])
-  })
-
-  it('does not analyze volume when markers are below the zoom threshold', () => {
-    const volumeRead = vi.fn(() => 1000)
-    const data = makeBars(5).map((bar) => ({
-      ...bar,
-      get volume() {
-        return volumeRead()
-      },
-    }))
-    const manager = {
-      getCustomMarkers: () => [],
-      setCustomMarkerPosition: () => {},
-      register: vi.fn((_marker: { id: string }) => {}),
-    }
-    const context = createCtx(undefined, {
-      sceneRenderer: undefined,
-      data,
-      range: { start: 0, end: 5 },
-      kLineCenters: [4, 14, 24, 34, 44],
-      zoomLevel: 1,
-      markerManager: manager,
-    })
-    paint(context)
-    expect(volumeRead).not.toHaveBeenCalled()
-  })
-
-  it('registers visible volume price markers in their original order', () => {
-    const manager = {
-      getCustomMarkers: () => [],
-      setCustomMarkerPosition: () => {},
-      register: vi.fn((_marker: { id: string }) => {}),
-    }
-    const data = makeBars(3)
-    data[2] = { ...data[2]!, close: 98 }
-    const context = createCtx(undefined, {
-      sceneRenderer: undefined,
-      data,
-      range: { start: 0, end: 3 },
-      kLineCenters: [4, 14, 24],
-      markerManager: manager,
-      zoomLevel: 2,
-    })
-    paint(context)
-    expect(manager.register.mock.calls.map(([marker]) => marker.id)).toEqual([
-      'mk_price-volume_1',
-      'mk_price-volume_2',
     ])
   })
 })

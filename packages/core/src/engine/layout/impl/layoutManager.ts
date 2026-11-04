@@ -59,6 +59,7 @@ function requireName(name: string): string {
 export class LayoutManager implements LayoutApi {
   private readonly persistence = createIndexedDbPersistence<LayoutArchive>({
     databaseName: '@363045841yyt/klinechart-layouts',
+    databaseVersion: LAYOUT_DOCUMENT_VERSION,
     storeName: 'layouts',
     key: 'documents',
     flushOnPageHide: false,
@@ -76,6 +77,8 @@ export class LayoutManager implements LayoutApi {
   private readonly errorSignal = createSignal<string | null>(null)
   private timer: ReturnType<typeof setTimeout> | undefined
   private coalescedTimer: ReturnType<typeof setTimeout> | undefined
+  /** 最近一次高频变化的时间；检查触发时据此判断是否已静止。 */
+  private coalescedAt = 0
   private applying = false
   private disposed = false
   private lastConfiguration = ''
@@ -93,8 +96,8 @@ export class LayoutManager implements LayoutApi {
       exportLayout(): LayoutDocument
       applyLayout(document: LayoutDocument): void
       createLayout(): LayoutDocument
-      /** 恢复前准备文档依赖（如按需加载其指标实现）；完成后再原子写入状态。 */
-      prepareLayout?(document: LayoutDocument): Promise<void>
+      /** 配置发布后加载指标内容；不得阻塞窗格布局恢复。 */
+      loadContent?(document: LayoutDocument): Promise<void>
     },
   ) {
     globalThis.addEventListener?.('pagehide', this.onPageHide)
@@ -208,17 +211,12 @@ export class LayoutManager implements LayoutApi {
 
   /** 将文档交给图表领域入口恢复；文档由本管理器或调用方按契约构造。 */
   async applyLayout(document: LayoutDocument): Promise<void> {
-    await this.prepare(document)
-    this.applyPrepared(document)
+    this.applySnapshot(document)
+    await this.dependencies.loadContent?.(document)
   }
 
-  /** 等待文档依赖就绪，使恢复后的首帧即为完整状态。 */
-  private async prepare(document: LayoutDocument): Promise<void> {
-    await this.dependencies.prepareLayout?.(document)
-  }
-
-  /** 同步写入已准备好的文档；恢复期间的状态通知不触发自动保存。 */
-  private applyPrepared(document: LayoutDocument): void {
+  /** 同步恢复完整配置；恢复期间的状态通知不触发自动保存。 */
+  private applySnapshot(document: LayoutDocument): void {
     this.applying = true
     try {
       this.dependencies.applyLayout(structuredClone(document))
@@ -248,13 +246,13 @@ export class LayoutManager implements LayoutApi {
       )
     } else if (stored) {
       const active = this.archive.documents[this.archive.activeId] ?? fallback
-      await this.prepare(active)
-      this.applyPrepared(active)
+      this.applySnapshot(active)
       this.archive = { ...this.archive, activeId: active.id }
     }
     this.loaded = true
     this.markClean()
     this.publish()
+    await this.dependencies.loadContent?.(this.requireDocument(this.archive.activeId))
   }
 
   /** 挂载时恢复上次使用的归档，失败通过只读错误信号展示。 */
@@ -282,16 +280,29 @@ export class LayoutManager implements LayoutApi {
   }
 
   /**
-   * 高频来源（视口逐帧滚动、缩放）只登记待检查，静止后比较一次配置；
-   * 否则每帧都要导出并序列化整份布局。离开页面、销毁与补写前会先完成待检查。
+   * 高频来源（视口逐帧滚动、缩放）只登记待检查，静止后比较一次配置。
+   *
+   * 每帧都 clear + set 定时器纯属浪费：这里记下最近一次变化时间，已经排定的检查
+   * 按剩余时间自行续排。滚动期间定时器操作从每帧一次降到每个静止窗口一次。
    */
   scheduleCoalescedAutoSave(): void {
     if (this.applying || this.disposed) return
-    clearTimeout(this.coalescedTimer)
+    this.coalescedAt = Date.now()
+    if (this.coalescedTimer !== undefined) return
+    this.armCoalescedCheck(COALESCED_CHECK_IDLE_MS)
+  }
+
+  /** 排定一次静止检查；触发时若期间仍有变化，只续排剩余时间，不重新计满窗口。 */
+  private armCoalescedCheck(delay: number): void {
     this.coalescedTimer = setTimeout(() => {
+      const remaining = COALESCED_CHECK_IDLE_MS - (Date.now() - this.coalescedAt)
+      if (remaining > 0) {
+        this.armCoalescedCheck(remaining)
+        return
+      }
       this.coalescedTimer = undefined
       this.scheduleAutoSave()
-    }, COALESCED_CHECK_IDLE_MS)
+    }, delay)
   }
 
   /** 立即执行尚未到期的合并检查。 */
@@ -353,16 +364,15 @@ export class LayoutManager implements LayoutApi {
       clearTimeout(this.timer)
       const previous = this.exportLayout()
       const next = this.requireDocument(input.id)
-      await this.prepare(next)
       try {
-        this.applyPrepared(next)
+        this.applySnapshot(next)
         await this.saveDocuments(this.archive.documents, input.id)
       } catch (error) {
-        // 回滚目标是当前状态，其依赖已就绪。
-        this.applyPrepared(previous)
+        this.applySnapshot(previous)
         throw error
       }
       this.markClean()
+      await this.dependencies.loadContent?.(next)
     })
   }
 
@@ -416,10 +426,10 @@ export class LayoutManager implements LayoutApi {
       if (this.shouldAutoSave()) await this.saveActive()
       const id = crypto.randomUUID()
       const document = { ...this.dependencies.createLayout(), id, name: requireName(input.name) }
-      await this.prepare(document)
       await this.saveDocuments({ ...this.archive.documents, [id]: document }, id)
-      this.applyPrepared(document)
+      this.applySnapshot(document)
       this.markClean()
+      await this.dependencies.loadContent?.(document)
       return id
     })
   }

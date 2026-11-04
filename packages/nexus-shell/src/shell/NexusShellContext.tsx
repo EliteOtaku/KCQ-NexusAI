@@ -8,11 +8,7 @@ import type {
   DrawingToolId,
   InstrumentDescriptor,
 } from '@363045841yyt/klinechart-core/controllers'
-import {
-  EUROPE_TRADITIONAL_BAR_AGGREGATION,
-  marketDataProviderRegistry,
-  ORIGINAL_BAR_AGGREGATION,
-} from '@363045841yyt/klinechart-core/controllers'
+import { marketDataProviderRegistry } from '@363045841yyt/klinechart-core/controllers'
 import {
   createContext,
   type ReactNode,
@@ -25,7 +21,7 @@ import {
 } from 'react'
 import { loadLastUsedTemplate, markTemplateUsed } from './drawingTemplates'
 import type { ShellToolId } from './drawingTools'
-import { buildMockBundle, MOCK_SYMBOLS } from './mockData'
+import { MOCK_SOURCE_ID, MOCK_SYMBOLS } from './mockData'
 import { ALL_PERIODS } from './periods'
 import { ChartPointerBridge, type MagnetMode, type MeasureSession } from './pointerBridge'
 import { EMPTY_IDS, useSignal } from './reactivity'
@@ -220,10 +216,10 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
     // demo 基线：主图 MA + 副图成交量（失败静默，目录缺失不阻塞壳）。
     try {
       if (!nextCtrl.indicators.peek().some((item) => item.definitionId === 'MA')) {
-        nextCtrl.addIndicator('MA', 'main')
+        nextCtrl.addIndicator('MA')
       }
       if (!nextCtrl.indicators.peek().some((item) => item.definitionId === 'VOLUME')) {
-        nextCtrl.addIndicator('VOLUME', 'sub')
+        nextCtrl.addIndicator('VOLUME')
       }
     } catch {
       /* 目录未就绪时跳过 */
@@ -405,14 +401,9 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
   }, [ctrl, setTheme, shellTheme])
 
   // ── 数据接线 ──
-  // mock：一次性注入本地生成数据；网络源：走 fetcher 管线（setSymbols，左翻自动补历史）。
-  // 网络源未选品种时先回落 mock 数据，避免空图。
+  // 网络源与演示源都走 setSymbols：演示源同样注册在行情上下文，由路由按 source 取数据。
   useEffect(() => {
     if (!ctrl) return
-    // 缺省聚合口径按数据源声明：MT5（Exness）走传统欧洲口径，底层修正周日短棒。
-    ctrl.setDefaultBarAggregation(
-      dataSource === 'mt5' ? EUROPE_TRADITIONAL_BAR_AGGREGATION : ORIGINAL_BAR_AGGREGATION,
-    )
     // 品种/周期切换后视口对齐最新数据：数据根数随周期变化，保持 scrollLeft 会让
     // 视口漂进未来区（#261 右缘空白放开后不再钳制），TV 同款行为即切周期看最新。
     // rAF 双帧等待数据注入后的视口布局生效，microtask 时域尚未完成滚动重算。
@@ -425,7 +416,7 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
           id: sourceInstrument.id,
           instrument: sourceInstrument,
           symbol: sourceInstrument.symbol,
-          market: sourceInstrument.assetClass,
+          market: sourceInstrument.instrumentType,
           exchange: sourceInstrument.exchange,
           period,
           source: dataSource,
@@ -434,7 +425,16 @@ export function NexusShellProvider({ children }: { children: ReactNode }) {
       queueMicrotask(scrollToLatest)
       return
     }
-    ctrl.applyCustomData(buildMockBundle(symbol, period))
+    ctrl.setSymbols([
+      {
+        id: symbol,
+        symbol,
+        market: MOCK_SOURCE_ID,
+        exchange: 'MOCK',
+        period,
+        source: MOCK_SOURCE_ID,
+      },
+    ])
     queueMicrotask(scrollToLatest)
   }, [ctrl, dataSource, sourceInstrument, period, symbol])
 

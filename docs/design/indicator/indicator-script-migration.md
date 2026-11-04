@@ -1,0 +1,152 @@
+# 内置指标迁移到脚本框架
+
+## 目标
+
+把 core 中「纯逐 bar 数值序列」类内置指标改为脚本指标（`packages/script/scripts/*.ts`），
+删除对应的原生定义、calculator、renderer 与 state 契约：一个指标只有一处实现。
+
+非目标：`kind: system` 的系统定义（分时、最新价、极值标记等渲染型定义）不参与迁移。
+结构类与成交分布定义已在 Box/Label 批次（#333）完成脚本化。
+
+## 目录契约
+
+脚本走中立定义 `IndicatorDefinition`，core 经 `registerPlotIndicator` 翻译成 `IndicatorMetadata`。
+指标不声明业务分类，目录根据来源、收藏与搜索展示列表，UI 只保留主图或副图位置标签。
+
+## 脚本身份：name 是身份，title/info 是展示
+
+脚本的 `name` 是稳定身份与选择器短名；可选 `title` 设置选择器 item-name（长名称），
+可选 `info` 设置选择器里的说明文本，缺省回落到 `name` / 不展示说明。core 的
+`IndicatorMetadata` / `IndicatorDescriptor` 增加 `title` 与 `info`，`registerPlotIndicator`
+只负责转发；`indicatorCatalog` 对脚本使用 `title ?? displayName` 与 `def.info`，
+不再从 `uiMeta` 读取脚本名称或说明。原生 `@Indicator` 仍使用 `displayName` 与 `uiMeta`
+（结构、区域、成交量分布等）。
+
+落地：
+
+- 契约新增字段：`IndicatorSourceDefinition`、`IndicatorDefinition`、`QuickJSScriptDefinition`
+  与 VM 元数据读取都支持可选 `title` 与 `info`。
+- `registerPlotIndicator` 落 `displayName: definition.name`、`title: definition.title`、
+  `info: definition.info`；脚本选择器的短名仍是 `name`，长名称读 `title`，说明读 `info`。
+- 内置脚本把原 `uiMeta.name` / `uiMeta.description` 搬到 `defineIndicator.title` / `info`
+  （`BOLL` + `布林带` + 布林带说明等）；`uiMeta` 只保留原生定义。
+- `name` 仍是稳定身份；`title` / `info` 可随脚本更新，不改变指标实例身份。
+
+## 明确不引入的东西
+
+这些不是计算框架的职责，脚本自身就能表达，因此不往契约里加：
+
+| 事项 | 处理方式 |
+| --- | --- |
+| 配色 | 脚本里直接写 CSS 串，常用色可用内置 `Color` 枚举（固定色值，仍不做 token/role 通道）；颜色本就是指标自身配置。 |
+| 坐标轴范围 | `plotRange` 已按输出数据计算，输出 0~100 就渲染 0~100，无需声明。 |
+| 参考线（如 RSI 80/50/20） | 脚本自己 `plot.Line(80, 'overbought', { dash: [4, 4], color })` 画。 |
+| 逐线显隐 | 只有同族平行多线才声明逐线布尔 `input`（如 MA5/MA10/MA20、RSI6/12/24）；一个整体的多条线（BOLL 通道、KDJ 的 K/D/J）不做开关。 |
+| 图形尺寸 | 所有 Plot 类型共用公共 `size: ShapeSize`（`auto/tiny/small/normal/large/huge`），各自不再声明 `width`/`radius`/`minHeight`/`maxHeight`；枚举到像素的换算只在渲染层 `plotSize.ts` 一处，`auto` 保持各类型原有基准尺寸。 |
+| 轴精度、图例数值 | 沿用通用默认；不迁移 `getTitleInfo` / 专用 scale 插件。 |
+
+## 分发与执行边界
+
+迁移指标由 Script 包的 `scripts/*.ts` 单独实现，生成器自动纳入 `builtinScriptSources`。
+应用通过 script-chart 的 `createScriptService([], { builtinSources })` 注册；core 不内置脚本引擎。
+仅使用 core 的消费者需要显式接入 Script 包才能使用迁移指标，不保留原生兼容实现。
+脚本沿用通用 inline 执行入口，不再出现在 core Worker calculator 映射中。
+
+本批仅支持 K 线视图，不声明分时视图能力。分时输入和投影不属于本批迁移范围。
+
+## 批次
+
+| 批次 | 指标 | 说明 |
+| --- | --- | --- |
+| 第一批（已迁移） | `rsi` `mom` `roc` `wma` `boll` `donchian` `fastk` `wmsr` `stoch` | 仅 K 线；保留原默认参数、预热及计算规则；只有 RSI 是周期族多线，保留逐线开关 |
+| 状态机与振荡类（待迁移） | `sar` `obv` `pvt` `vwap` `mfi` `cmf` `trix` `uo` `hv` `parkinson` `chaikinVol` | SuperTrend、MACD 已迁移并补齐 `ta.atr` / `ta.supertrend` / `ta.macd`；本行其余指标按需迁移 |
+| STC（已迁移） | `stc` | 用 `ta.macd` 取 DIF，两次 `ta.stoch`，`derive` 自递推做 factor 平滑 |
+| 组合类（已迁移） | `ao` `cci` `hma` `kst` `dma` | 除 `ta.hma` / `ta.cci` 外均由现有 `ta.sma` / `ta.roc` 与全局 `derive` 组合，不新增计算原语 |
+| 均线与通道批次（已迁移） | `atr` `ma` `expma` `dema` `tema` `t3` `trima` `gmma` `ene` `vma` `vwma` `keltner` `dpo` `pivot` `ichimoku` | TA 增加 DEMA、TEMA、T3、TRIMA；其他组合由脚本表达，删除原生定义及其相关测试 |
+| Fib 与 FRAMA（已迁移） | `fib` `frama` | Fib 使用横线阶梯与最高/最低偏移；FRAMA 用现有极值原语加顶层递推状态 |
+| ALMA 与 SMMA（已迁移） | `alma` `smma` | 直接用 `ta.alma` / `ta.rma`；ALMA 采用 Pine 默认 `floor=false`，不再复刻旧 core 的 floor 取整 |
+| ZLEMA（已迁移） | `zlema` | 零滞后源用 `derive` 组合，EMA 交给 `ta.ema`，不新增 TA 原语 |
+| KAMA / VIDYA / LSMA（已迁移） | `kama` `vidya` `lsma` | KAMA 用 `derive` + `ta.sum`；VIDYA 用 `ta.cmo`；LSMA 用 `ta.linreg` |
+| Fisher 与 StochRSI（已迁移） | `fisher` `stochRSI` | Fisher 用 `derive` + `ta.highest/lowest` + 顶层递推；StochRSI 用 `ta.rsi` + `ta.highest/lowest` + `ta.sma` |
+| 已迁移（Box/Label 批次） | `structure` `zones` `volumeProfile` | 依赖 Box/Label 绘图 API 与解析式描边 |
+| 保留 | 5 个 system 定义 | 需要自定义 Layer 与分时数据源 |
+
+## 落地切片（每片独立可测）
+
+1. **ta 原语**（已完成）：`sum` / `stddev` / `mom` / `roc`；本批补充 `highestbars` / `lowestbars` / `rma` / `swma` / `alma` / `cmo` / `linreg` / `stoch`，含参考实现对照与线性复杂度用例。`highestbars` / `lowestbars` 返回负偏移（0 为当前根），并列极值取更早一根，与 Pine 一致。
+2. **业务分类字段**（已完成）：如上。
+3. **第一批脚本 + 删除原生实现**（已完成）：删除原生定义、专用 scale、calculator、
+   Worker 映射与静态身份条目，重新生成原生目录；保留其他指标仍依赖的通用计算原语。
+   指标数值测试归 Script 包，core 通用布局、图例、投影测试改用仍在 core 的定义。
+4. **分发**（已完成）：随 Script 包自动发现，script-chart 验证整份内置目录注册和实际计算。
+
+## 计算规则
+
+- RSI 使用通用 `ta.rsi`（Wilder 平滑，窗口内无下跌含平盘为 100），三周期各自预热；
+  指标源码不含顶层可变状态，重算与追加历史都不依赖前一次运行。
+- Stoch 保留原 KDJ 规则：K 为 RSV，D 为 K 的 m 周期均值，J = 3K - 2D；
+  三线从 D 就绪时同时输出，J 可超出 0~100。D 依赖对 K 序列再平滑，目前仍在指标源码内维护窗口。
+- BOLL 使用总体标准差；FastK/WMSR/KDJ/StochRSI 的随机窗口统一走 `ta.stoch`（零幅窗口输出 50，
+  WMSR 由 `ta.stoch - 100` 得到 -50）；ROC 的零基期留空。
+- STC 用 `ta.macd(close, fast, slow, 1)[0]` 取 DIF，两次 `ta.stoch` 做随机化，`derive` 自递推
+  按 `previous + factor × (raw − previous)` 平滑；DIF 从首根有效值起算，STC 从 `2 × cycle − 2` 起输出。
+- 参考线由脚本绘制，坐标轴使用实际 Plot 范围，不保留原生固定范围和主题 token 通道。
+- SuperTrend 默认 ATR 周期 10、倍数 3；`ta.atr` 以首个完整 TR 窗口均值初始化，之后 Wilder 平滑。
+  `ta.supertrend(multiplier, atrPeriod)` 返回趋势值与方向两个 Series，-1 为上涨、1 为下跌；保留旧 core
+  的上涨初始方向与严格突破判断，不宣称与 Pine 的初始化完全相同。各参数组合独立缓存，历史取值不重置状态。
+  发布脚本只声明输入并用两条 `LineBR` 分别输出上涨和下跌区间，非当前方向与预热阶段留空。
+  删除旧 SuperTrend 定义、专属 calculator、Worker 映射及静态身份；ATR 在均线与通道批次完成迁移。
+- MACD 默认 12/26/9，`ta.macd(source, fastLength, slowLength, signalLength)` 返回 DIF、DEA、未翻倍柱体三个
+  Series。内部 EMA 沿用旧 MACD 的首个有效值初始化，通用 `ta.ema` 仍以完整窗口均值初始化。
+  脚本使用 Columns 输出 `2 * (DIF - DEA)`，按正负与增减绘制四色，DIF/DEA 使用 LineBR。
+  整体三图元不增加逐线开关；删除原生 MACD 定义、calculator、专用 scale、Worker 映射和静态身份。
+  旧 calculator 仅当输入总长度达到慢周期才输出并回填至首根，这一依赖未来长度的行为不迁移：TA 从首个有效
+  输入逐根输出，NaN 留空并在下一有效值重新初始化，追加历史不改写已有前缀。
+  原生 MACD 曾声明分时与五日分时支持；迁移脚本沿用当前框架的 K 线视图边界，跨视图支持另行实现。
+
+- AO 用中位价 (high+low)/2 的快慢 SMA 之差，fast >= slow 时留空；CCI 用当前窗口的平均绝对偏差，
+  偏差为零输出 0；HMA 复用 `ta.hma`（半周期向下取整、平方根四舍五入）；KST 四组 ROC 平滑固定
+  10/10/10/15、权重 1~4，信号为 KST 的 signalPeriod SMA；DMA 的 DIF 为两均线差、AMA 为 DIF 的 p3 SMA，
+  各线按自身预热起点输出。删除对应原生定义、calculator、专用 scale、Worker 映射、静态身份与目录元数据。
+
+## 验证边界
+
+本次均线与通道迁移采用公式及现有 TA 的语义，不以旧 Core 实现为数值契约。EXPMA 使用
+完整窗口均值初始化的 `ta.ema`；DEMA、TEMA、T3 的有效起点分别为 2、3、6 层 EMA 的完整预热。
+TRIMA 用两个 SMA 窗口组合，周期 1 直接等于源序列。MA 五条线独立设置周期和显隐，GMMA
+固定短期 3/5/8/10/12/15、长期 30/35/40/45/50/60，按组显隐。VMA 是成交量 SMA。
+ENE 是 SMA 的百分比通道；Keltner 是 EMA 加减 Wilder ATR 倍数，各线独立预热。
+DPO 为 `close[floor(period/2)+1] - SMA(close, period)`，不读取未来。
+Pivot 明确按前一根图表 K 线计算经典 PP/R1–R3/S1–S3，不隐式假定图表周期是日线。
+Ichimoku 的转换线和基准线采用区间高低中点，Span A/B 用正向 Plot offset，迟行线用负向
+Plot offset；云带填充引用相同偏移的两条先行线，计算本身不读取未来行情。
+Fib 用 `ta.highestbars` / `ta.lowestbars` 取窗口高低点及其偏移：偏移更大（更接近 0）的一侧
+表示极值更新，方向据此判定；上涨段从高点向下回撤，下跌段从低点向上反弹，7 条线全部使用
+`plot.StepLine`。颜色改用固定 `Color`，不迁移原生 `palette` / `fib` token。
+FRAMA 的 period 仍要求偶数且不小于 4；前半段窗口取 `ta.highest/lowest(close, half).at(half)`，
+后半段取当前窗口，全窗口取 `period`；alpha 使用 Ehlers 分形维数公式并截断到 `[0.01, 1]`，
+顶层 `frama` 状态每轮重算都从第一根重建，追加历史不依赖上一轮运行。
+ALMA 直接调用 `ta.alma(close, period, offset, sigma)`，采用 Pine 默认 `floor=false`；SMMA 直接调用
+`ta.rma(close, period)`，两者都不再保留原生 `show*` 展示开关。
+ZLEMA 用 `derive` 构造零滞后源 `close + (close − close[lag])`，lag 取 `floor((period − 1) / 2)`，
+历史不足时退化为 close，再交给 `ta.ema`；不把 ZLEMA 提升为 TA 原语。
+KAMA 用 `derive` 构造绝对变化序列，`ta.sum` 求波动和，效率比决定快慢平滑系数，顶层 `kama`
+状态逐 bar 递推。VIDYA 用 `ta.cmo(close, cmoPeriod)` 的绝对值缩放基础 EMA 系数，同样以顶层
+状态递推；CMO 平盘时按 0 处理。LSMA 直接调用 `ta.linreg(close, period, 0)`，TA 新增的
+`cmo` / `linreg` 与 Pine 的 `ta.cmo` / `ta.linreg` 对齐。
+Fisher 用 `derive` 构造中位价，`ta.highest` / `ta.lowest` 取窗口极值，顶层 `value` / `fisher`
+状态递推，`signal` 输出上一根 Fisher。StochRSI 用 `ta.rsi` 得到 RSI，再用 `ta.highest` /
+`ta.lowest` 做随机窗口，`ta.sma` 平滑 K/D；窗口极值相等时输出 50。
+
+Core 删除本批指标的定义、计算器、专用坐标轴、Worker 映射、契约与目录元数据。相关测试用例
+直接删除，不换用另一个待迁移指标继续断言；混合测试文件保留独立的其他用例。足迹图 ATR 行高
+属于足迹内部布局算法，保留末端振幅计算并收回足迹模块，不依赖已删除的指标计算器。
+
+宿主应用与 QuickJS VM 使用不同的全局作用域。根类型检查分别检查 runtime 专用配置和
+应用配置，避免把 VM 中的 `close`、`time`、`defineLibrary` 等全局误当成宿主模块变量。
+发布脚本通过真实 VM 测试数值、预热、空输入、显隐和重算隔离；编辑器测试逐份检查内置源码。
+
+## 约束
+
+- 不做双写、不加运行期分支；迁移窗口内原生与脚本是**不同指标**共存，不是同一指标两份实现。
+- 每片都必须通过 `pnpm test:packages` 与 `pnpm type-check`。

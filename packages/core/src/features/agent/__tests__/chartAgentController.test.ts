@@ -126,7 +126,7 @@ function createFixture() {
     sourceId: 'fixture',
     symbol: 'BTCUSDT',
     name: 'Bitcoin',
-    assetClass: 'crypto' as const,
+    instrumentType: 'crypto' as const,
     exchange: 'BINANCE',
     capabilities: {
       bars: { periods: ['daily'] as const, adjustments: ['none'] as const },
@@ -177,7 +177,7 @@ function createFixture() {
       id: 'fixture',
       displayName: 'Fixture',
       capabilities: {
-        assetClasses: ['crypto'],
+        instrumentTypes: ['crypto'],
         bars: { periods: ['daily'], adjustments: ['none'] },
         timeShare: true,
         timeShareRange: { maxTradingDays: 5 },
@@ -501,6 +501,7 @@ describe('createChartAgentController', () => {
           { tradingDate: '2026-09-01', price: 10 },
           { tradingDate: '2026-09-02', price: 12 },
         ],
+        style: { stroke: AGENT_DRAWING_COLOR_VALUES[0] },
         labels: { line: { 0: { text: '初始趋势', position: 'center' } }, area: {} },
       },
       { signal, progress: () => undefined },
@@ -564,7 +565,12 @@ describe('createChartAgentController', () => {
     await expect(
       create.execute(
         fixture.controller,
-        { kind: 'horizontal-line', paneId: 'main', anchors: [{ price: 9 }] },
+        {
+          kind: 'horizontal-line',
+          paneId: 'main',
+          anchors: [{ price: 9 }],
+          style: { stroke: AGENT_DRAWING_COLOR_VALUES[0] },
+        },
         { signal, progress: () => undefined },
       ),
     ).resolves.toMatchObject({ kind: 'horizontal-line', anchors: [{ timestamp: null, price: 9 }] })
@@ -623,7 +629,7 @@ describe('createChartAgentController', () => {
       keyword: '600519',
       limit: 20,
       sourceIds: undefined,
-      assetClasses: undefined,
+      instrumentTypes: undefined,
       signal: undefined,
     })
   })
@@ -635,7 +641,7 @@ describe('createChartAgentController', () => {
       sourceId: 'fixture',
       symbol: '600519',
       name: '贵州茅台',
-      assetClass: 'stock' as const,
+      instrumentType: 'stock' as const,
       exchange: 'SH',
       capabilities: {},
     }
@@ -668,7 +674,7 @@ describe('createChartAgentController', () => {
       symbol: 'BTCUSDT',
       sourceId: 'fixture',
       exchange: 'BINANCE',
-      assetClass: 'crypto' as const,
+      instrumentType: 'crypto' as const,
       period: 'daily' as const,
       adjustment: 'none' as const,
       barAggregation: 'original' as const,

@@ -10,15 +10,17 @@
 
 {{include:_performance.md}}
 
+{{include:_script.md}}
+
 {{include:_data-sources.md}}
 
 ## 🚀 Quick Start
 
-{{include:_usage-vue.md}}
+{{include:_product-vue.md}}
 
 ## 🎨 Custom Tooltip
 
-`KlineChart` exposes `#kline-tooltip` and `#marker-tooltip` slots for custom tooltip rendering. When a slot is provided, the default tooltip content is replaced entirely, giving you full control over display content and styling.
+`KlineChart` exposes the `#kline-tooltip` slot for custom tooltip rendering. When the slot is provided, the default tooltip content is replaced entirely, giving you full control over display content and styling.
 
 Positioning and drag stay owned by the chart: with `tooltipPosition === 'adaptive'`, a custom `#kline-tooltip` is also draggable; double-click resets. With `tooltipPosition === 'none'` (default), the data tooltip is hidden entirely.
 
@@ -37,7 +39,7 @@ Positioning and drag stay owned by the chart: with `tooltipPosition === 'adaptiv
     <div class="custom-tooltip">
       <div class="custom-tooltip__title">
         <span>{{ hoverData.stockCode }}</span>
-        <span>{{ formatTimestamp(hoverData.timestamp, { timeZone: 'Asia/Shanghai' }) }}</span>
+        <span>{{ formatTimeInTimeZone(hoverData.timestamp, { timeZone: 'Asia/Shanghai' }) }}</span>
       </div>
       <div class="custom-tooltip__price"
            :style="{ color: hoverData.close >= hoverData.open ? upColor : downColor }">
@@ -52,7 +54,7 @@ Positioning and drag stay owned by the chart: with `tooltipPosition === 'adaptiv
 </KlineChart>
 
 <script setup lang="ts">
-  import { formatTimestamp } from '@363045841yyt/klinechart-core'
+  import { formatTimeInTimeZone } from '@363045841yyt/klinechart'
 </script>
 
 <style scoped>
@@ -77,12 +79,6 @@ Positioning and drag stay owned by the chart: with `tooltipPosition === 'adaptiv
 </style>
 ```
 
-### `#marker-tooltip`
-
-| Slot Prop              | Type                                                            | Description                     |
-| ---------------------- | --------------------------------------------------------------- | ------------------------------- |
-| `marker`               | `MarkerEntity \| CustomMarkerEntity \| null`                    | Hovered marker data             |
-
 {{include:_docs.md}}
 
 {{include:_props.md}}
@@ -91,4 +87,4 @@ Positioning and drag stay owned by the chart: with `tooltipPosition === 'adaptiv
 
 {{include:_whatsnew.md}}
 
-{{include:_license.md}}
+{{include:_product-license.md}}

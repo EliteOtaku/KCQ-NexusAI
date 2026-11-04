@@ -1,5 +1,4 @@
 /** 图表视图唯一事实来源：视图标识、分类、主序列渲染能力与工作区映射。 */
-import type { SymbolSpec } from '../../../../controllers/types.js'
 import { FIVE_DAY_TIME_SHARE_PERIOD, isTimeSharePeriod } from '../../../../controllers/types.js'
 import {
   type ChartDataView,
@@ -11,7 +10,6 @@ import {
 export {
   type ChartDataView,
   ChartDataViewId,
-  ChartWorkspaceId,
   isTimeShareDataView,
   resolveChartWorkspaceId,
 } from '../../../../foundation/types/chartView.js'
@@ -32,7 +30,9 @@ export interface ChartViewDefinition {
  * 主序列渲染类型：同一主序列可选的画法。
  * - `candlestick`：蜡烛图，实体 + 影线，需要 OHLC。
  * - `hollow-candlestick`：涨跌实体均为空心边框，保留影线，需要 OHLC。
- * - `ohlc-bar`：美式 OHLC 柱，只有横线不含实体，需要 OHLC。
+ * - `ohlc-bar`：美国线，高低价竖线 + 左开盘/右收盘短横线，需要 OHLC。
+ * - `high-low`：实体以 K 线宽度覆盖 high 到 low，保留原始区间与涨跌颜色。
+ * - `footprint`：按逐笔成交展示每根 K 线内的价格档位分布。
  * - `line`：只连收盘价折线。
  * - `area`：收盘价折线 + 底部填充。
  * 蜡烛与 OHLC 柱依赖 OHLC；折线与面积只需收盘价，因此分时只用后两者。
@@ -41,6 +41,8 @@ export type PrimaryRendererType =
   | 'candlestick'
   | 'hollow-candlestick'
   | 'ohlc-bar'
+  | 'high-low'
+  | 'footprint'
   | 'line'
   | 'area'
 
@@ -131,9 +133,4 @@ export function resolveChartDataView(period: string | undefined): ChartDataView 
   return period === FIVE_DAY_TIME_SHARE_PERIOD
     ? ChartDataViewId.FiveDayTimeShare
     : ChartDataViewId.TimeShare
-}
-
-/** 由主品种规格推导目标数据视图。 */
-export function resolveChartDataViewForSpec(spec: SymbolSpec | null | undefined): ChartDataView {
-  return resolveChartDataView(spec?.period)
 }

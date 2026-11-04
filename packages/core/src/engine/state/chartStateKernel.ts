@@ -1,4 +1,5 @@
 /** Chart 业务状态的 composition root：组合全部子状态并暴露派生信号。 */
+import { createFootprintState } from './footprintState.js'
 
 import type { SymbolInfo, SymbolSpec } from '../../controllers/types.js'
 import { type ChartSettings, normalizeSettings } from '../../foundation/config/chartSettings.js'
@@ -26,7 +27,10 @@ import {
 } from '../chartModel/index.js'
 import { symbolSpecIdentityKey } from '../data/symbolIdentity.js'
 import type { DrawingToolId } from '../drawing/index.js'
-import { getRegisteredIndicatorDefinition } from '../indicators/indicatorDefinitionRegistry.js'
+import {
+  getRegisteredIndicatorDefinition,
+  resolveCanonicalIndicatorId,
+} from '../indicators/indicatorDefinitionRegistry.js'
 import type { IndicatorMetadata } from '../indicators/indicatorMetadata.js'
 import { selectLayoutSettings } from '../layout/impl/layoutSettings.js'
 import {
@@ -34,7 +38,6 @@ import {
   type LayoutDocument,
   type LayoutWorkspaces,
 } from '../layout/index.js'
-import type { CustomMarkerEntity, MarkerEntity } from '../marker/registry.js'
 import { PaneManager } from '../pane/index.js'
 import { MAIN_PANE_ID, type PaneSpec } from '../pane/types.js'
 import { SCALE_X_STRATEGIES } from '../scale/index.js'
@@ -53,7 +56,6 @@ import {
   type InteractionStateModule,
 } from './interactionState.js'
 import { createMainPriceAxisState, type MainPriceAxisStateModule } from './mainPriceAxisState.js'
-import { createMarkerState, type MarkerStateModule } from './markerState.js'
 import { createOptionsState, type OptionsStateModule } from './optionsState.js'
 import { createPaneState, type PaneStateModule } from './paneState.js'
 import { createRendererState, type RendererStateModule } from './rendererState.js'
@@ -183,6 +185,7 @@ export interface ChartStateKernelDeps {
 }
 
 export class ChartStateKernel extends StateKernel {
+  readonly footprint: import('./footprintState.js').FootprintStateModule
   readonly options: OptionsStateModule
   readonly zoom: ZoomStateModule
   readonly data: DataStateModule
@@ -200,7 +203,6 @@ export class ChartStateKernel extends StateKernel {
   readonly dataManager: DataManagerStateModule
   readonly comparison: ComparisonStateModule
   readonly indicator: IndicatorStateModule
-  readonly marker: MarkerStateModule
   readonly renderer: RendererStateModule
 
   readonly zoomLevel$: ReadonlySignal<number>
@@ -228,7 +230,8 @@ export class ChartStateKernel extends StateKernel {
     this.options = createOptionsState(deps.initialOptions)
 
     // ── Data view state（缩放宽度需按视图派生）──
-    this.mode = createChartModel()
+    this.settings = createSettingsState(deps.initialSettings)
+    this.mode = createChartModel(this.settings.readonly.settings)
 
     // ── Zoom state ──
     this.zoom = createZoomState({
@@ -271,9 +274,6 @@ export class ChartStateKernel extends StateKernel {
     // ── Indicator state ──
     this.indicator = createIndicatorState()
 
-    // ── Marker business state ──
-    this.marker = createMarkerState()
-
     // ── Viewport state (now owned by kernel) ──
     this.viewport = createViewportState({
       options$: this.optionsForViewport$,
@@ -300,7 +300,11 @@ export class ChartStateKernel extends StateKernel {
 
     // ── Settings state（用户偏好 SSOT，含 theme light|dark|auto）──
     // K 线形态由 settings.klineShape 直接派生，不再镜像进 mode 主序列偏好。
-    this.settings = createSettingsState(deps.initialSettings)
+    this.footprint = createFootprintState({
+      data: this.data,
+      settings$: this.settings.readonly.settings,
+      dataView$: this.mode.readonly.dataView,
+    })
     this.mainPriceAxis = createMainPriceAxisState(
       this.settings.readonly.settings.peek().mainPriceAxisRangeMode ?? PRICE_AXIS_RANGE_MODE.AUTO,
     )
@@ -340,8 +344,8 @@ export class ChartStateKernel extends StateKernel {
         if (instance.role !== 'main' || instance.source === 'mode') continue
         const definition = getRegisteredIndicatorDefinition(instance.indicatorId)
         if (definition && supportsIndicatorDataView(definition, dataView)) {
-          // 对外统一使用规范 ID（displayName），与实例目录的 definitionId 同一身份空间。
-          ids.add(definition.displayName)
+          // 对外统一使用规范 ID，与实例目录的 definitionId 同一身份空间。
+          ids.add(resolveCanonicalIndicatorId(definition))
         }
       }
       return Object.freeze([...ids])
@@ -415,8 +419,6 @@ export class ChartStateKernel extends StateKernel {
       comparisonActive: this.comparison.readonly.active,
       // Indicator
       subPanes: this.indicator.readonly.subPanes,
-      // Marker
-      customMarkers: this.marker.readonly.customMarkers,
     }
 
     // ── Flat actions bag for framework adapters ──
@@ -468,11 +470,6 @@ export class ChartStateKernel extends StateKernel {
           this.mode.actions.setDataView(view, lastBarPeriod)
           this.indicator.actions.setActiveWorkspace(workspaceId)
           this.pane.actions.setActiveWorkspace(workspaceId)
-          if (this.pane.readonly.paneSpecs.peek().length === 0) {
-            this.pane.actions.commitLayout({ main: 1 }, [
-              { id: 'main', ratio: 1, visible: true, role: 'price' },
-            ])
-          }
           this.indicator.actions.replaceModeInstances(modeInstances)
         })
       },
@@ -498,11 +495,6 @@ export class ChartStateKernel extends StateKernel {
         this.interaction.actions.setRightAxisHover(paneId),
       updateTooltip: (pos: { x: number; y: number }, placement: 'right-bottom' | 'left-bottom') =>
         this.interaction.actions.updateTooltip(pos, placement),
-      updateMarkerHover: (
-        markerId: string | null,
-        markerData: MarkerEntity | null,
-        customMarkerData: CustomMarkerEntity | null,
-      ) => this.interaction.actions.updateMarkerHover(markerId, markerData, customMarkerData),
       resetInteraction: () => this.interaction.actions.reset(),
       setComparisonColors: (colors: ReadonlyMap<string, string>) =>
         this.comparison.actions.setColors(colors),
@@ -513,8 +505,6 @@ export class ChartStateKernel extends StateKernel {
       replaceMainIndicators: (instances: ReadonlyArray<IndicatorInstanceSpec>) =>
         this.indicator.actions.replaceAllMain(instances),
       clearMainIndicators: () => this.indicator.actions.clearMain(),
-      // customMarkers 变更须走 Chart.update/clear/registerCustomMarkers：
-      // 同步 clearPositionCache + scheduleDraw。勿在此暴露仅写 state 的 flat actions。
     }
     this.actions.setDataView(ChartDataViewId.KLine)
   }
@@ -529,21 +519,20 @@ export class ChartStateKernel extends StateKernel {
 
   /** 返回两个视图工作区的用户配置快照，排除由 mode 管理的系统实例。 */
   snapshotViewWorkspaces(): LayoutWorkspaces {
-    const indicatorWorkspaces = this.indicator.readonly.workspaces.peek()
+    const indicatorWorkspaces = this.indicator.readonly.configurations.peek()
     const paneWorkspaces = this.pane.readonly.workspaces.peek()
     const snapshot = (workspaceId: ChartWorkspaceId) => {
       const pane = paneWorkspaces[workspaceId]
       return {
-        instances: indicatorWorkspaces[workspaceId]
-          .filter((instance) => instance.source !== 'mode')
-          .map(({ source: _source, params, ...instance }) => ({
-            ...instance,
-            params: { ...params },
-          })),
-        paneRatios: { ...pane.paneRatios },
-        paneSpecs: pane.paneSpecs.map((spec) => ({
-          ...spec,
-          ...(spec.capabilities ? { capabilities: { ...spec.capabilities } } : {}),
+        instances: indicatorWorkspaces[workspaceId].map((instance) => ({
+          ...instance,
+          params: { ...instance.params },
+        })),
+        paneSpecs: pane.paneSpecs.map(({ id, ratio, visible, minHeightPx }) => ({
+          id,
+          ratio,
+          visible,
+          minHeightPx,
         })),
         paneScaleTypes: Object.fromEntries(pane.paneScaleTypes),
       }
@@ -582,7 +571,6 @@ export class ChartStateKernel extends StateKernel {
   createLayout(): LayoutDocument {
     const workspace = () => ({
       instances: [],
-      paneRatios: { [MAIN_PANE_ID]: 1 },
       paneSpecs: [{ id: MAIN_PANE_ID, ratio: 1 }],
       paneScaleTypes: {},
     })
@@ -608,13 +596,14 @@ export class ChartStateKernel extends StateKernel {
         document.panePriceAxisModes,
         document.panePriceAxisRanges,
       )
-      this.drawing.actions.restoreDocument(document.drawings ?? [], [])
+      this.drawing.actions.commitDocument(document.drawings ?? [], [])
       this.dataManager.actions.restoreViewportSnapshots(document.viewport ?? {})
       this.actions.setDataView(this.mode.readonly.dataView.peek())
     })
   }
 
   dispose(): void {
+    this.footprint.dispose()
     this.options.dispose()
     this.zoom.dispose()
     this.data.dispose()
@@ -628,7 +617,6 @@ export class ChartStateKernel extends StateKernel {
     this.dataManager.dispose()
     this.comparison.dispose()
     this.indicator.dispose()
-    this.marker.dispose()
     this.renderer.dispose()
   }
 }

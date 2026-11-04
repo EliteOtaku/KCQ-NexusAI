@@ -5,14 +5,20 @@ import {
   createSubState,
   type ReadonlySignal,
 } from '../../foundation/reactivity/signal.js'
-import type { CustomMarkerEntity, MarkerEntity } from '../marker/registry.js'
+import type { DrawingDragCursor } from '../drawing/handles/types.js'
 
 /**
  * 指针悬停的绘图拖拽目标，与命中结果的目标类型一致，`none` 表示没有悬停在任何可拖拽图元上：
- * `anchor` 圆形锚点、`vertical-handle` 线段中点手柄、`all` 线身（可整体拖拽）。
- * 宿主按目标类型决定光标：手柄 → ns-resize，线身 → move，锚点 → default（显式回到默认箭头）。
+ * `anchor` 锚点、`line-handle` 线段中点手柄、`all` 线身（可整体拖拽）。
+ * 光标不在这里推导：命中结果自带 {@link DrawingDragCursor}，宿主直接透传。
  */
-export type DrawingHoverTarget = 'none' | 'anchor' | 'vertical-handle' | 'all'
+export type DrawingHoverTarget = 'none' | 'anchor' | 'line-handle' | 'all'
+
+/** 绘图悬停命中：目标语义 + 该目标拖动时使用的光标。 */
+export interface DrawingHoverHit {
+  readonly target: DrawingHoverTarget
+  readonly cursor: DrawingDragCursor
+}
 
 export interface InteractionSnapshot {
   crosshairPos: { x: number; y: number } | null
@@ -22,8 +28,6 @@ export interface InteractionSnapshot {
   activePaneId: string | null
   tooltipPos: { x: number; y: number }
   tooltipAnchorPlacement: 'right-bottom' | 'left-bottom'
-  hoveredMarkerData: MarkerEntity | null
-  hoveredCustomMarker: CustomMarkerEntity | null
   isDragging: boolean
   isResizingPaneBoundary: boolean
   isHoveringPaneBoundary: boolean
@@ -31,6 +35,8 @@ export interface InteractionSnapshot {
   isHoveringRightAxis: boolean
   /** 指针悬停的绘图拖拽目标；没有悬停在任何可拖拽图元上时为 `none`。 */
   drawingHoverTarget: DrawingHoverTarget
+  /** 悬停目标对应的光标；没有悬停任何目标时为 null，宿主直接透传。 */
+  drawingHoverCursor: DrawingDragCursor | null
 }
 
 export type DragMode = 'none' | 'pan' | 'resize-separator' | 'scale-price' | 'explore'
@@ -48,14 +54,13 @@ export function createIdleInteractionSnapshot(): InteractionSnapshot {
     activePaneId: null,
     tooltipPos: { x: 0, y: 0 },
     tooltipAnchorPlacement: 'right-bottom',
-    hoveredMarkerData: null,
-    hoveredCustomMarker: null,
     isDragging: false,
     isResizingPaneBoundary: false,
     isHoveringPaneBoundary: false,
     hoveredPaneBoundaryId: null,
     isHoveringRightAxis: false,
     drawingHoverTarget: 'none',
+    drawingHoverCursor: null,
   }
 }
 
@@ -64,6 +69,16 @@ export interface InteractionDeps {
   scrollLeftLogical$: ReadonlySignal<number>
   dpr$: ReadonlySignal<number>
   scheduleDraw: (level?: unknown) => void
+}
+
+/** 快照字段清单从空态派生，新增字段时无需再维护第二份列表。 */
+const INTERACTION_SNAPSHOT_KEYS = Object.keys(createIdleInteractionSnapshot()) as ReadonlyArray<
+  keyof InteractionSnapshot
+>
+
+/** 快照是否逐字段相等；引用相等即视为未变化。 */
+function sameInteractionSnapshot(left: InteractionSnapshot, right: InteractionSnapshot): boolean {
+  return INTERACTION_SNAPSHOT_KEYS.every((key) => left[key] === right[key])
 }
 
 export interface RangeSelectionState {
@@ -90,15 +105,13 @@ export function createInteractionState(_deps: InteractionDeps) {
     hoveredRightAxisPaneId: null as string | null,
     tooltipPos: { x: 0, y: 0 },
     tooltipAnchorPlacement: 'right-bottom' as 'right-bottom' | 'left-bottom',
-    hoveredMarkerData: null as MarkerEntity | null,
-    hoveredCustomMarker: null as CustomMarkerEntity | null,
-    hoveredMarkerId: null as string | null,
-    hoveredDrawingTarget: 'none' as DrawingHoverTarget,
+    /** 实时绘图悬停命中：目标语义与光标一起写入，快照直接透传。 */
+    hoveredDrawing: null as DrawingHoverHit | null,
     /**
-     * 图元拖拽会话期间冻结的绘图悬停目标。拖拽中指针会移出锚点，若继续实时命中，
+     * 图元拖拽会话期间冻结的绘图悬停命中。拖拽中指针会移出锚点，若继续实时命中，
      * 光标会被重算成 `none` 并落回十字线；因此拖拽期间沿用按下时认定的目标。
      */
-    drawingDragTarget: null as DrawingHoverTarget | null,
+    drawingDragHover: null as DrawingHoverHit | null,
     rangeSelection: Object.freeze({
       startTimestamp: null,
       endTimestamp: null,
@@ -114,6 +127,8 @@ export function createInteractionState(_deps: InteractionDeps) {
     const dragMode = readonly.dragMode()
     const hoveredSep = readonly.hoveredSeparatorUpperPaneId()
     const hoveredRight = readonly.hoveredRightAxisPaneId()
+    // 拖拽期间沿用按下时冻结的命中，否则指针离开锚点会被实时命中重算成 none（光标随之落回十字线）。
+    const drawingHover = readonly.drawingDragHover() ?? readonly.hoveredDrawing()
 
     const next: InteractionSnapshot = {
       crosshairPos,
@@ -123,38 +138,17 @@ export function createInteractionState(_deps: InteractionDeps) {
       activePaneId: readonly.activePaneId(),
       tooltipPos: readonly.tooltipPos(),
       tooltipAnchorPlacement: readonly.tooltipAnchorPlacement(),
-      hoveredMarkerData: readonly.hoveredMarkerData(),
-      hoveredCustomMarker: readonly.hoveredCustomMarker(),
       isDragging: readonly.isDragging(),
       isResizingPaneBoundary: dragMode === 'resize-separator',
       isHoveringPaneBoundary: hoveredSep !== null,
       hoveredPaneBoundaryId: hoveredSep,
       isHoveringRightAxis: hoveredRight !== null,
-      // 拖拽期间沿用按下时冻结的目标，否则指针离开锚点会被实时命中重算成 none（光标随之落回十字线）。
-      drawingHoverTarget: readonly.drawingDragTarget() ?? readonly.hoveredDrawingTarget(),
+      drawingHoverTarget: drawingHover?.target ?? 'none',
+      drawingHoverCursor: drawingHover?.cursor ?? null,
     }
 
-    if (_cachedSnapshot) {
-      const c = _cachedSnapshot
-      if (
-        c.crosshairPos === next.crosshairPos &&
-        c.crosshairIndex === next.crosshairIndex &&
-        c.crosshairPrice === next.crosshairPrice &&
-        c.hoveredIndex === next.hoveredIndex &&
-        c.activePaneId === next.activePaneId &&
-        c.tooltipPos === next.tooltipPos &&
-        c.tooltipAnchorPlacement === next.tooltipAnchorPlacement &&
-        c.hoveredMarkerData === next.hoveredMarkerData &&
-        c.hoveredCustomMarker === next.hoveredCustomMarker &&
-        c.isDragging === next.isDragging &&
-        c.isResizingPaneBoundary === next.isResizingPaneBoundary &&
-        c.isHoveringPaneBoundary === next.isHoveringPaneBoundary &&
-        c.hoveredPaneBoundaryId === next.hoveredPaneBoundaryId &&
-        c.isHoveringRightAxis === next.isHoveringRightAxis &&
-        c.drawingHoverTarget === next.drawingHoverTarget
-      ) {
-        return _cachedSnapshot
-      }
+    if (_cachedSnapshot && sameInteractionSnapshot(_cachedSnapshot, next)) {
+      return _cachedSnapshot
     }
     _cachedSnapshot = next
     return next
@@ -171,6 +165,27 @@ export function createInteractionState(_deps: InteractionDeps) {
         to: Math.max(selection.startTimestamp, selection.endTimestamp),
       })
     }),
+  }
+
+  /** 清空全部瞬时交互信号；reset 与 dispose 共用同一份清单，避免两处漏改。 */
+  function clearTransientSignals(): void {
+    batch(() => {
+      signals.crosshairPos.set(null)
+      signals.crosshairPrice.set(null)
+      signals.crosshairIndex.set(null)
+      signals.hoveredIndex.set(null)
+      signals.activePaneId.set(null)
+      signals.isDragging.set(false)
+      signals.dragMode.set('none')
+      signals.hoveredSeparatorUpperPaneId.set(null)
+      signals.hoveredRightAxisPaneId.set(null)
+      signals.tooltipPos.set({ x: 0, y: 0 })
+      signals.tooltipAnchorPlacement.set('right-bottom')
+      signals.hoveredDrawing.set(null)
+      signals.rangeSelection.set(
+        Object.freeze({ startTimestamp: null, endTimestamp: null, isDragging: false }),
+      )
+    })
   }
 
   return {
@@ -236,9 +251,10 @@ export function createInteractionState(_deps: InteractionDeps) {
         })
       },
 
-      /** 图元拖拽会话期间冻结绘图悬停目标；`null` 表示未拖拽，目标按实时命中推导。 */
-      setDrawingDragTarget(target: DrawingHoverTarget | null) {
-        signals.drawingDragTarget.set(target)
+      /** 图元拖拽会话期间冻结绘图悬停命中；`null` 表示未拖拽，命中按实时推导。 */
+      setDrawingDragHover(hit: DrawingHoverHit | null) {
+        if (signals.drawingDragHover.peek() === hit) return
+        signals.drawingDragHover.set(hit)
       },
 
       setDragMode(mode: DragMode) {
@@ -254,13 +270,22 @@ export function createInteractionState(_deps: InteractionDeps) {
       },
 
       /**
-       * 设置绘图悬停目标（none / 锚点 / 线段中点手柄 / 线身），宿主据此切换光标。
-       * 拖拽会话冻结目标期间丢弃实时命中结果，防止指针离开锚点后光标在拖拽中途回落。
+       * 设置实时绘图悬停命中（目标 + 光标），宿主据此切换光标。
+       * 拖拽会话冻结期间丢弃实时命中结果，防止指针离开锚点后光标在拖拽中途回落。
        */
-      setDrawingTargetHover(target: DrawingHoverTarget) {
-        if (signals.drawingDragTarget.peek() !== null) return
-        if (signals.hoveredDrawingTarget.peek() === target) return
-        signals.hoveredDrawingTarget.set(target)
+      setDrawingHover(hit: DrawingHoverHit | null) {
+        if (signals.drawingDragHover.peek() !== null) return
+        const prev = signals.hoveredDrawing.peek()
+        if (prev === hit) return
+        // 命中是每次 hover 新建的对象，值相同就不写，避免快照无谓变动。
+        if (
+          prev !== null &&
+          hit !== null &&
+          prev.target === hit.target &&
+          prev.cursor === hit.cursor
+        )
+          return
+        signals.hoveredDrawing.set(hit)
       },
 
       /**
@@ -279,18 +304,6 @@ export function createInteractionState(_deps: InteractionDeps) {
           if (prevPlacement !== placement) {
             signals.tooltipAnchorPlacement.set(placement)
           }
-        })
-      },
-
-      updateMarkerHover(
-        markerId: string | null,
-        markerData: MarkerEntity | null,
-        customMarkerData: CustomMarkerEntity | null,
-      ) {
-        batch(() => {
-          signals.hoveredMarkerId.set(markerId)
-          signals.hoveredMarkerData.set(markerData)
-          signals.hoveredCustomMarker.set(customMarkerData)
         })
       },
 
@@ -335,50 +348,12 @@ export function createInteractionState(_deps: InteractionDeps) {
       },
 
       reset() {
-        batch(() => {
-          signals.crosshairPos.set(null)
-          signals.crosshairPrice.set(null)
-          signals.crosshairIndex.set(null)
-          signals.hoveredIndex.set(null)
-          signals.activePaneId.set(null)
-          signals.isDragging.set(false)
-          signals.dragMode.set('none')
-          signals.hoveredSeparatorUpperPaneId.set(null)
-          signals.hoveredRightAxisPaneId.set(null)
-          signals.tooltipPos.set({ x: 0, y: 0 })
-          signals.tooltipAnchorPlacement.set('right-bottom')
-          signals.hoveredMarkerData.set(null)
-          signals.hoveredCustomMarker.set(null)
-          signals.hoveredMarkerId.set(null)
-          signals.hoveredDrawingTarget.set('none')
-          signals.rangeSelection.set(
-            Object.freeze({ startTimestamp: null, endTimestamp: null, isDragging: false }),
-          )
-        })
+        clearTransientSignals()
       },
     },
 
     dispose() {
-      batch(() => {
-        signals.crosshairPos.set(null)
-        signals.crosshairPrice.set(null)
-        signals.crosshairIndex.set(null)
-        signals.hoveredIndex.set(null)
-        signals.activePaneId.set(null)
-        signals.isDragging.set(false)
-        signals.dragMode.set('none')
-        signals.hoveredSeparatorUpperPaneId.set(null)
-        signals.hoveredRightAxisPaneId.set(null)
-        signals.tooltipPos.set({ x: 0, y: 0 })
-        signals.tooltipAnchorPlacement.set('right-bottom')
-        signals.hoveredMarkerData.set(null)
-        signals.hoveredCustomMarker.set(null)
-        signals.hoveredMarkerId.set(null)
-        signals.hoveredDrawingTarget.set('none')
-        signals.rangeSelection.set(
-          Object.freeze({ startTimestamp: null, endTimestamp: null, isDragging: false }),
-        )
-      })
+      clearTransientSignals()
     },
   }
 }

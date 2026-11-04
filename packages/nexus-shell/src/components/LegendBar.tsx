@@ -97,7 +97,7 @@ export function LegendBar() {
     if (ctrl === null) return
     const stash = stashed.find((item) => item.key === key)
     if (stash !== undefined) {
-      ctrl.addIndicator(stash.definitionId, stash.role, stash.params)
+      ctrl.addIndicator(stash.definitionId, stash.params)
       setStashed((prev) => prev.filter((item) => item.key !== key))
       return
     }

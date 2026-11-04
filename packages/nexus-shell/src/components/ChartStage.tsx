@@ -6,8 +6,10 @@ import {
   createChartController,
   DrawingInteractionController,
 } from '@363045841yyt/klinechart-core/controllers'
+import { MarketDataContext } from '@363045841yyt/klinechart-core/market-data'
 import { type RefObject, useEffect, useRef, useState } from 'react'
 import { SHELL_LABELS } from '../shell/labels'
+import { createMockDataSource } from '../shell/mockData'
 import { useNexusShell } from '../shell/NexusShellContext'
 import { ChartPointerBridge } from '../shell/pointerBridge'
 import { ChartContextMenu, type ContextMenuState } from './ChartContextMenu'
@@ -27,7 +29,11 @@ export function ChartStage() {
     let cleanup = () => {}
 
     void (async () => {
+      // 演示数据源经统一行情上下文注册，与真实数据源共用路由与缓存。
+      const marketData = new MarketDataContext()
+      marketData.registerDataSource(createMockDataSource())
       const ctrl = await createChartController({
+        marketDataContext: marketData,
         container: host,
         // 初值取壳持久化主题（B4-05）；后续切换经 setTheme 同步引擎。
         theme: shell.theme,

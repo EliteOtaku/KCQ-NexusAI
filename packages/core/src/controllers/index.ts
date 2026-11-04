@@ -13,12 +13,16 @@ export type {
 } from '../features/agent/index.js'
 export { getRegisteredChartTools } from '../features/agent/index.js'
 export type { RegisteredChartTool } from '../foundation/agent/chartToolRegistry.js'
+export {
+  type ChartDataView,
+  ChartDataViewId,
+  isTimeShareDataView,
+} from '../foundation/types/chartView.js'
 export type {
   RendererBackend,
   RendererBackendRuntime,
   RendererBackendStatus,
 } from '../rendering/render/rendererHost.js'
-
 export { createChartController } from './chart/index.js'
 export {
   allIndicatorDefinitions,
@@ -36,7 +40,6 @@ export type {
   ChartMountOptions,
   ChartViewport,
   CreateDrawingInput,
-  CustomDataSource,
   DataSourceParams,
   DrawingChartAdapter,
   DrawingChartViewport,
@@ -84,7 +87,6 @@ export type {
 // Heatmap controller (depth pipeline rendering half)
 export { createHeatmapController } from '../components/orderBookHeatmap/index.js'
 export type {
-  AssetClass,
   BarAggregation,
   BarCapability,
   BarDataSource,
@@ -100,11 +102,20 @@ export type {
   InstrumentCatalog,
   InstrumentDescriptor,
   InstrumentSearchQuery,
+  InstrumentType,
   KLineAdjustment,
   KLinePeriod,
   LiveBar,
-  LiveBarsFrame,
-  LiveBarsStatus,
+  LiveFrame,
+  LiveQuote,
+  RealtimeChannel,
+  RealtimeConnection,
+  RealtimeConnectionFactory,
+  RealtimeConnectionRequest,
+  RealtimeStatus,
+  RealtimeSubscription,
+  RealtimeSubscriptionPool,
+  RealtimeSubscriptionRequest,
   LoadedTimeRange,
   MarketDataCacheStats,
   MarketDataErrorCode,
@@ -134,18 +145,19 @@ export type {
 export {
   ALIGNED_BAR_AGGREGATION,
   BAR_AGGREGATIONS,
-  BarsLiveSource,
+  createRealtimeSubscriptionPool,
+  realtimePoolFor,
+  realtimeSubscriptionPool,
   baostockMarketDataProvider,
   binanceMarketDataProvider,
+  createMockDataSource,
   DataBuffer,
   DepthConnector,
   dataSourceRegistry,
   EUROPE_TRADITIONAL_BAR_AGGREGATION,
-  finshareMarketDataProvider,
   gotdxMarketDataProvider,
   MarketDataProviderRegistry,
   marketDataProviderRegistry,
-  mockMarketDataProvider,
   mt5MarketDataProvider,
   ORIGINAL_BAR_AGGREGATION,
   RealtimeBarsConnector,
@@ -173,15 +185,8 @@ export {
   type IndicatorDefinitionConfig,
   registerIndicatorDefinition,
 } from '../engine/indicators/indicatorDefinitionRegistry.js'
-export type {
-  IndicatorType,
-  IndicatorTypeRegistry,
-} from '../engine/indicators/indicatorMetadata.js'
-export {
-  BUILTIN_INDICATOR_TYPES,
-  getBuiltinIndicatorTypeLabel,
-  getBuiltinIndicatorTypeOrder,
-} from '../engine/indicators/indicatorMetadata.js'
+// 选择器可在运行时注册脚本后刷新目录。
+export { onIndicatorDefinitionChanged } from '../engine/indicators/indicatorDefinitionRegistry.js'
 export { loadBuiltinIndicators } from '../engine/indicators/registerBuiltins.js'
 export type {
   LayoutApi,
@@ -203,6 +208,7 @@ export type {
   LegendOptions,
   LegendPatch,
   LegendRow,
+  LegendRowText,
   LegendTemplateContext,
   LegendText,
   LegendTimeshareRow,

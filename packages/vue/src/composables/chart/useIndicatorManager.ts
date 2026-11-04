@@ -103,14 +103,12 @@ export function useIndicatorManager(
   function getDefaultParams(
     indicatorId: SubIndicatorType,
   ): Record<string, number | boolean | string> {
-    if (indicatorId === 'VOLUME') return {}
     // 静态目录即可给出默认参数，无需加载指标实现。
     const defaults = getIndicatorDescriptor(indicatorId)?.defaultParams
     return defaults ? ({ ...defaults } as Record<string, number | boolean | string>) : {}
   }
 
   function isSubPaneIndicator(id: string): boolean {
-    if (id === 'VOLUME') return true
     const def = getIndicatorDescriptor(id)
     return !!def && def.category !== 'main'
   }
@@ -126,7 +124,7 @@ export function useIndicatorManager(
   }
 
   async function addSubPane(
-    indicatorId: SubIndicatorType = 'VOLUME',
+    indicatorId: SubIndicatorType,
     params?: Record<string, number | boolean | string>,
   ): Promise<boolean> {
     const controller = ctrl.value
@@ -137,7 +135,7 @@ export function useIndicatorManager(
     const mergedParams = params ?? getDefaultParams(indicatorId)
     const loaded = await loadIndicator(controller, indicatorId)
     if (!loaded || subPanes.value.length >= maxSubPanes) return false
-    return loaded.addIndicator(indicatorId, 'sub', mergedParams) !== null
+    return loaded.addIndicator(indicatorId, mergedParams) !== null
   }
 
   function removeSubPane(paneId: string): void {
@@ -182,13 +180,13 @@ export function useIndicatorManager(
 
     // 角色判断只读静态目录；写入前才加载实现。
     const def = getIndicatorDescriptor(indicatorId)
-    const isMain = def && (def.category === 'main' || def.allowMainPane)
+    const isMain = def?.category === 'main'
     if (isMain) {
       const existingIndicator = mainActiveIndicators.value.find((id) => id === indicatorId)
       if (active && !existingIndicator) {
         const c = await loadIndicator(controller, indicatorId)
         if (!c || mainActiveIndicators.value.includes(indicatorId)) return
-        c.addIndicator(indicatorId, 'main', indicatorParams.value[indicatorId])
+        c.addIndicator(indicatorId, indicatorParams.value[indicatorId])
       } else if (!active && existingIndicator) {
         controller.removeIndicator(indicatorId)
       }
@@ -203,7 +201,7 @@ export function useIndicatorManager(
 
         const loaded = await loadIndicator(controller, indicatorId)
         if (!loaded || subPanes.value.some((p) => p.indicatorId === indicatorId)) return
-        const paneId = loaded.addIndicator(indicatorId, 'sub', indicatorParams.value[indicatorId])
+        const paneId = loaded.addIndicator(indicatorId, indicatorParams.value[indicatorId])
         if (!paneId && subPanes.value.length > 0) {
           const lastPane = subPanes.value[subPanes.value.length - 1]
           await switchSubIndicator(lastPane.id, indicatorId as SubIndicatorType)

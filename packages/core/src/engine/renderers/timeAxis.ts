@@ -9,6 +9,7 @@ import {
   isMinutePeriod,
   isTimeSharePeriod,
 } from '../../foundation/types/chartPeriod.js'
+import { ChartDataViewId } from '../../foundation/types/chartView.js'
 import type { KLineData } from '../../foundation/types/price.js'
 import { getMarketSessionTimeFormatter } from '../../foundation/utils/dateFormat.js'
 import {
@@ -22,7 +23,7 @@ import {
   minuteOfDayToTimestamp,
   resolveTimestampSessionSlot,
 } from '../../foundation/utils/timeShareAxisLabels.js'
-import type { Layer } from '../../rendering/scene/types.js'
+import type { ContextLayer } from '../../rendering/scene/types.js'
 import { LAYER_PANE_GLOBAL } from '../../rendering/scene/types.js'
 import { createKLineSlotGrid, slotWorldX } from '../viewport/slotGrid.js'
 import { paintAxisLabels, registerAxisLabel } from './impl/labels/index.js'
@@ -35,13 +36,17 @@ function formatTradingDateLabel(tradingDate: string): string {
   return tradingDate.slice(5)
 }
 
-/** 分时/普通 K 线共用的十字线时间文本：分时走市场时段 HH:mm。 */
+/**
+ * 分时/普通 K 线共用的十字线时间文本。
+ *
+ * 分时走市场时段 HH:mm；其余周期在日期前带周几，日期与周几使用同一显示时区。
+ */
 function formatCrosshairTime(context: RenderContext, timestamp: number): string {
   return isTimeSharePeriod(context.period)
     ? getMarketSessionTimeFormatter(
         context.marketSession?.timeZone ?? ASHARE_MARKET_SESSION.timeZone,
       ).formatAxisTime(timestamp)
-    : context.displayTimeFormatter.formatDate(timestamp)
+    : context.displayTimeFormatter.formatDateWithWeekday(timestamp)
 }
 
 /**
@@ -51,7 +56,7 @@ function formatCrosshairTime(context: RenderContext, timestamp: number): string 
 export function resolveCrosshairTimestamp(context: RenderContext, index: number): number | null {
   const k = (context.data as KLineData[])[index]
   if (k) return k.timestamp
-  return context.getTimestampAtLogicalIndex?.(index) ?? null
+  return context.getTimestampAtLogicalIndex(index)
 }
 
 /**
@@ -76,8 +81,9 @@ function collectTimeAxisTicks(
   const textColor = colors.text.secondary
   const fontSize = 12
 
-  if (context.fiveDayTimeShareGeometry) {
-    for (const day of context.fiveDayTimeShareGeometry.days) {
+  if (context.dataView === ChartDataViewId.FiveDayTimeShare && context.timeShareGeometry) {
+    for (const day of context.timeShareGeometry.days) {
+      if (day.tradingDate === undefined) continue
       const screenX = day.labelX - scrollLeft
       if (screenX < 0 || screenX > width) continue
       surface.register({
@@ -185,7 +191,7 @@ function collectTimeAxisTicks(
     rangeStart: range.start,
     rangeEnd: range.end,
     kind: isMinuteData ? 'day' : 'month',
-    getTimestamp: (idx) => context.getTimestampAtLogicalIndex?.(idx) ?? null,
+    getTimestamp: context.getTimestampAtLogicalIndex,
     dateKeyOf: (ts) => displayTimeFormatter.formatDate(ts),
   })
   for (const boundary of futureBoundaries) {
@@ -219,7 +225,7 @@ function collectTimeAxisTicks(
     offset += step
   ) {
     const index = klineData.length - 1 + offset
-    if (context.getTimestampAtLogicalIndex?.(index) != null) continue
+    if (context.getTimestampAtLogicalIndex(index) !== null) continue
     const centerX = context.kLineCenters[index - range.start]
     if (centerX === undefined) continue
     const screenX = centerX - scrollLeft
@@ -310,7 +316,7 @@ export interface TimeAxisLayerOptions {
  * 时间轴 Layer。时间轴渲染到 xAxisCanvas，由 ChartRenderer 直接调度。
  * @param options 时间轴高度与十字线读取器
  */
-export function createTimeAxisLayer(options: TimeAxisLayerOptions): Layer<RenderContext> {
+export function createTimeAxisLayer(options: TimeAxisLayerOptions): ContextLayer<RenderContext> {
   return {
     id: makePluginLayerId('timeAxis'),
     role: 'background',

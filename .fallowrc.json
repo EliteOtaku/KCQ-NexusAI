@@ -5,7 +5,18 @@
     "packages/core/src/engine/state/index.ts",
     "packages/vue/src/index.ts",
     "packages/react/src/index.ts",
-    "packages/angular/src/index.ts"
+    "packages/angular/src/index.ts",
+    "packages/vue/preview/main.ts",
+    "packages/script/src/quickjs/runtime/library.ts",
+    "packages/script/src/quickjs/runtime/series.ts",
+    "packages/script/src/quickjs/runtime/request.ts",
+    "packages/script/src/quickjs/runtime/rolling.ts",
+    "packages/script/src/quickjs/runtime/indicator.ts",
+    "packages/script/src/quickjs/runtime/drawing.ts",
+    "packages/script/src/quickjs/runtime/ta.ts",
+    "packages/script/src/quickjs/runtime/pivot.ts",
+    "packages/script/src/quickjs/runtime/plotKind.ts",
+    "examples/scripts/drawing-line.ts"
   ],
   "ignorePatterns": [
     "**/dist/**",
@@ -20,14 +31,89 @@
     "packages/react/preview/**",
     "scripts/lint/stylelint-plugin-klc.mjs"
   ],
-  "ignoreDependencies": ["~icons", "postcss-html"],
+  "ignoreDependencies": [
+    "~icons",
+    "postcss-html",
+    "@arethetypeswrong/cli",
+    "@babel/plugin-proposal-decorators",
+    "@babel/plugin-transform-typescript",
+    "@babel/plugin-transform-react-jsx",
+    "@babel/preset-react",
+    "@babel/preset-typescript",
+    "@iconify-json/tabler",
+    "@vue/test-utils",
+    "npm-run-all2",
+    "typedoc"
+  ],
   "rules": {
     "unused-files": "warn",
     "unused-exports": "warn",
     "unused-types": "warn",
     "unused-dependencies": "warn",
+    "unused-class-members": "warn",
+    "boundary-violation": "error",
+    "policy-violation": "off",
     "css-dead-surface": "off",
     "css-selector-complexity": "off"
+  },
+  "health": {
+    "thresholdOverrides": [
+      {
+        "files": [
+          "packages/script/src/__tests__/**",
+          "packages/script/src/**/__tests__/**",
+          "packages/script/scripts/__tests__/**"
+        ],
+        "maxCyclomatic": 30,
+        "maxCognitive": 60,
+        "maxCrap": 100,
+        "reason": "参考实现与表驱动断言属于测试基础设施，不进运行时复杂度预算；产品代码仍按原阈值"
+      }
+    ]
+  },
+  "rulePacks": [],
+  "boundaries": {
+    "zones": [
+      { "name": "plot-contracts", "patterns": ["packages/plot-contracts/**"] },
+      { "name": "script", "patterns": ["packages/script/**"] },
+      { "name": "core", "patterns": ["packages/core/**"] },
+      { "name": "script-chart", "patterns": ["packages/script-chart/**"] },
+      { "name": "agent-runtime", "patterns": ["packages/agent-runtime/**"] },
+      { "name": "vue", "patterns": ["packages/vue/**"] },
+      { "name": "react", "patterns": ["packages/react/**"] },
+      { "name": "angular", "patterns": ["packages/angular/**"] },
+      { "name": "mobile", "patterns": ["packages/mobile/**"] },
+      { "name": "desktop-electron", "patterns": ["packages/desktop-electron/**"] },
+      { "name": "examples", "patterns": ["examples/**"] }
+    ],
+    "rules": [
+      { "from": "plot-contracts", "allow": [] },
+      { "from": "script", "allow": ["plot-contracts"] },
+      { "from": "core", "allow": ["plot-contracts"] },
+      { "from": "script-chart", "allow": ["plot-contracts", "script", "core"] },
+      { "from": "agent-runtime", "allow": ["core"] },
+      {
+        "from": "vue",
+        "allow": ["core", "script", "script-chart", "agent-runtime", "plot-contracts"]
+      },
+      { "from": "react", "allow": ["core", "vue"] },
+      { "from": "angular", "allow": ["core"] },
+      { "from": "mobile", "allow": ["core", "react"] },
+      { "from": "desktop-electron", "allow": ["core", "script-chart", "agent-runtime", "vue"] },
+      {
+        "from": "examples",
+        "allow": [
+          "plot-contracts",
+          "script",
+          "script-chart",
+          "core",
+          "agent-runtime",
+          "vue",
+          "react",
+          "angular"
+        ]
+      }
+    ]
   },
   "duplicates": {
     "ignorePatterns": ["**/__tests__/**"]

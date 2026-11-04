@@ -1,31 +1,14 @@
 /** 分时几何与价格轴计算的纯函数集合。 */
-import type { TimeShareRange } from '@/data/provider/types.js'
-import {
-  ASHARE_MARKET_SESSION,
-  type MarketSessionConfig,
-  resolveMarketSessionSlots,
-  resolveSessionSlotPhysicalGrid,
-} from '@/foundation/utils/timeShareAxisLabels.js'
+import { resolveSessionSlotPhysicalGrid } from '@/foundation/utils/timeShareAxisLabels.js'
 import { calcKBarWidthPx } from '../../../viewport/klineConfig.js'
 
-export type TimeShareBaselineInput = {
-  preClose?: number | null
-  firstPrice?: number | null
-}
-
-export function resolveTimeShareBaseline(input: TimeShareBaselineInput): number | null {
-  const candidates = [input.preClose]
-  for (const v of candidates) {
-    if (typeof v === 'number' && Number.isFinite(v) && v !== 0) return v
-  }
-  return null
-}
-
-/** 五日分时全窗口固定使用第一交易日的昨收作为基准。 */
-export function resolveFiveDayTimeShareBaseline(
-  range: TimeShareRange | null | undefined,
-): number | null {
-  return resolveTimeShareBaseline({ preClose: range?.days[0]?.preClose })
+/**
+ * 昨收基准只接受正的有限数；无效值统一返回 null。
+ * 五日视图由数据层直接提供第一交易日昨收，这里不再区分视图。
+ */
+export function resolveTimeShareBaseline(preClose: number | null | undefined): number | null {
+  if (typeof preClose !== 'number' || !Number.isFinite(preClose) || preClose <= 0) return null
+  return preClose
 }
 
 export type TimeSharePriceRange = {
@@ -37,9 +20,10 @@ export type TimeSharePriceRange = {
 const TIME_SHARE_RANGE_PADDING_RATIO = 0.1
 const TIME_SHARE_FLAT_PADDING_RATIO = 0.0001
 
-/** 从可见价格与均价的极值生成带留白的 Y 轴范围；无有效值时返回 null。 */
+/** 可见价格、均价与有效昨收共同决定自动范围，保证 0% 基准不会被裁出；无有效行情返回 null。 */
 export function computeTimeSharePriceRange(
   prices: ReadonlyArray<number | undefined | null>,
+  preClose?: number | null,
 ): TimeSharePriceRange | null {
   let minPrice = Infinity
   let maxPrice = -Infinity
@@ -49,6 +33,12 @@ export function computeTimeSharePriceRange(
     maxPrice = Math.max(maxPrice, price)
   }
   if (!Number.isFinite(minPrice)) return null
+
+  const baseline = resolveTimeShareBaseline(preClose)
+  if (baseline !== null) {
+    minPrice = Math.min(minPrice, baseline)
+    maxPrice = Math.max(maxPrice, baseline)
+  }
 
   const span = maxPrice - minPrice
   // 最小区间只用于完全平盘，不能扩大已有的小幅波动。
@@ -62,27 +52,13 @@ export function computeTimeSharePriceRange(
   }
 }
 
-/** A 股默认全天 1 分钟槽位数（兼容旧导出） */
-export const ASHARE_TIMESHARE_SESSION_SLOTS = resolveMarketSessionSlots(ASHARE_MARKET_SESSION)
-
-/**
- * 全天交易槽位数：以 marketSession 为 SSOT，不因 arrivedCount 放大。
- * @deprecated 优先用 resolveMarketSessionSlots(config)
- */
-export function resolveTimeShareSessionSlots(
-  arrivedCount: number,
-  marketSession: MarketSessionConfig = ASHARE_MARKET_SESSION,
-): number {
-  void arrivedCount
-  return resolveMarketSessionSlots(marketSession)
-}
-
 export type TimeShareXLayoutInput = {
   arrivedCount: number
   sessionSlots: number
   totalWidth: number
   dpr: number
-  slotIndices?: ReadonlyArray<number>
+  /** 每个点所在的全局槽位；null 表示时间戳无法解析，不能参与绘制。 */
+  slotIndices?: ReadonlyArray<number | null>
 }
 
 export type TimeShareXLayout = {
@@ -98,6 +74,7 @@ export type TimeShareXLayout = {
 
 /**
  * 分时 X 布局：优先使用固定整数物理间距，已到达点按 slot 索引落位。
+ * 无槽位的点沿用前一有效落点，只为维持数据索引对齐，不参与绘制。
  */
 export function computeTimeShareXLayout(input: TimeShareXLayoutInput): TimeShareXLayout | null {
   const { arrivedCount, sessionSlots, totalWidth, dpr, slotIndices } = input
@@ -106,20 +83,28 @@ export function computeTimeShareXLayout(input: TimeShareXLayoutInput): TimeShare
   const grid = resolveSessionSlotPhysicalGrid(totalWidth, sessionSlots, dpr)
   const step = grid ? grid.unitPx / dpr : totalWidth / sessionSlots
   const centers: number[] = new Array(arrivedCount)
-  const centerPxValues: number[] = new Array(arrivedCount)
+  const centerPxValues: Array<number | null> = new Array(arrivedCount)
   const lastIndexByCenterPx = new Map<number, number>()
+  let previousCenter = 0
   for (let i = 0; i < arrivedCount; i++) {
-    const slotIndex = slotIndices?.[i] ?? i
+    const slotIndex = slotIndices?.[i]
+    if (slotIndex === null) {
+      centers[i] = previousCenter
+      centerPxValues[i] = null
+      continue
+    }
+    const resolvedSlot = slotIndex === undefined ? i : slotIndex
     const centerPx = grid
-      ? grid.offsetPx + slotIndex * grid.unitPx + Math.floor(grid.unitPx / 2)
-      : Math.round((slotIndex + 0.5) * step * dpr)
+      ? grid.offsetPx + resolvedSlot * grid.unitPx + Math.floor(grid.unitPx / 2)
+      : Math.round((resolvedSlot + 0.5) * step * dpr)
     centerPxValues[i] = centerPx
     centers[i] = centerPx / dpr
+    previousCenter = centers[i]!
     lastIndexByCenterPx.set(centerPx, i)
   }
 
   const barVisible = centerPxValues.map(
-    (centerPx, index) => lastIndexByCenterPx.get(centerPx) === index,
+    (centerPx, index) => centerPx !== null && lastIndexByCenterPx.get(centerPx) === index,
   )
   const kWidthPx = grid?.unitPx ?? 1
   const barWidth = calcKBarWidthPx(kWidthPx) / dpr
@@ -127,8 +112,4 @@ export function computeTimeShareXLayout(input: TimeShareXLayoutInput): TimeShare
   return { step, offset: (grid?.offsetPx ?? 0) / dpr, centers, barWidth, barVisible, kWidthPx }
 }
 
-export {
-  computeTimeShareTimeLabelIndices,
-  TIMESHARE_MIN_LABEL_SPACING_PX,
-  type TimeShareTimeLabelInput,
-} from '@/foundation/utils/timeShareAxisLabels.js'
+export { computeTimeShareTimeLabelIndices } from '@/foundation/utils/timeShareAxisLabels.js'

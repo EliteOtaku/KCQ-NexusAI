@@ -6,8 +6,13 @@ import {
   lookupInstrumentsBySymbol,
   searchInstruments,
 } from '@/data/provider/impl/instrumentSearch.js'
-import type { KLineAdjustment, KLinePeriod, TradingDate } from '@/data/provider/types.js'
-import { BAR_AGGREGATIONS, KNOWN_ASSET_CLASS_VALUES } from '@/data/provider/types.js'
+import type { TradingDate } from '@/data/provider/types.js'
+import {
+  BAR_AGGREGATIONS,
+  KLINE_ADJUSTMENTS,
+  KLINE_PERIODS,
+  KNOWN_INSTRUMENT_TYPES,
+} from '@/data/provider/types.js'
 import type { PaneSpec } from '@/engine/pane/types.js'
 // 副作用导入：加载对比原语模块以执行其 @Tool 注册。
 import '@/engine/data/comparisonCommands.js'
@@ -54,32 +59,12 @@ const InstrumentLookupToolParameters = Type.Object({
 const INDICATOR_QUERY_MAX_LIMIT = 2000
 /** GoTDX V1 /bars 接口单页最大返回条数。 */
 const MARKET_BARS_QUERY_MAX_LIMIT = 798
-const KLINE_PERIOD_VALUES = [
-  '1min',
-  '5min',
-  '15min',
-  '30min',
-  '60min',
-  '4h',
-  'daily',
-  'weekly',
-  'monthly',
-  'quarterly',
-  'yearly',
-] as const satisfies ReadonlyArray<KLinePeriod>
-const KLINE_ADJUSTMENT_VALUES = [
-  'qfq',
-  'hfq',
-  'splits',
-  'none',
-] as const satisfies ReadonlyArray<KLineAdjustment>
-
-// Type.Enum 保留 as const 数组的字面量联合推断；Type.Union(values.map(...)) 在 typebox 1.x 下推断为 never。
-const KLinePeriodToolParameter = Type.Enum(KLINE_PERIOD_VALUES)
-const KLineAdjustmentToolParameter = Type.Enum(KLINE_ADJUSTMENT_VALUES)
+// Type.Enum 保留清单的字面量联合推断；Type.Union(values.map(...)) 在 typebox 1.x 下推断为 never。
+const KLinePeriodToolParameter = Type.Enum(KLINE_PERIODS)
+const KLineAdjustmentToolParameter = Type.Enum(KLINE_ADJUSTMENTS)
 const BarAggregationToolParameter = Type.Enum(BAR_AGGREGATIONS)
 // unknown 只描述数据源未归一化状态，禁止作为工具输入的路由筛选条件。
-const AssetClassToolParameter = Type.Enum(KNOWN_ASSET_CLASS_VALUES)
+const InstrumentTypeToolParameter = Type.Enum(KNOWN_INSTRUMENT_TYPES)
 const TradingDateToolParameter = Type.String({ pattern: '^\\d{4}-\\d{2}-\\d{2}$' })
 
 const IndicatorQueryToolParameters = Type.Object(
@@ -100,7 +85,7 @@ const BarsQueryToolParameters = Type.Object(
     limit: Type.Integer({ minimum: 1, maximum: MARKET_BARS_QUERY_MAX_LIMIT }),
     sourceId: Type.Optional(Type.String({ minLength: 1 })),
     exchange: Type.Optional(Type.String({ minLength: 1 })),
-    assetClass: Type.Optional(AssetClassToolParameter),
+    instrumentType: Type.Optional(InstrumentTypeToolParameter),
   },
   { additionalProperties: false },
 )
@@ -112,7 +97,7 @@ const TimeShareQueryToolParameters = Type.Object({
   tradingDate: TradingDateToolParameter,
   sourceId: Type.Optional(Type.String({ minLength: 1 })),
   exchange: Type.Optional(Type.String({ minLength: 1 })),
-  assetClass: Type.Optional(AssetClassToolParameter),
+  instrumentType: Type.Optional(InstrumentTypeToolParameter),
 })
 
 const TimeShareRangeQueryToolParameters = Type.Object({
@@ -121,7 +106,7 @@ const TimeShareRangeQueryToolParameters = Type.Object({
   days: Type.Integer({ minimum: 1 }),
   sourceId: Type.Optional(Type.String({ minLength: 1 })),
   exchange: Type.Optional(Type.String({ minLength: 1 })),
-  assetClass: Type.Optional(AssetClassToolParameter),
+  instrumentType: Type.Optional(InstrumentTypeToolParameter),
 })
 
 const DRAWING_KIND_VALUES = [
@@ -184,6 +169,19 @@ const DrawingStyleToolParameters = Type.Partial(
     fontSize: Type.Number({ exclusiveMinimum: 0 }),
   }),
 )
+/** 创建时的完整样式：stroke 必填，其余字段按需覆盖；更新 patch 仍沿用可选样式。 */
+const DrawingCreateStyleToolParameters = Type.Object({
+  stroke: AgentDrawingColorToolParameter,
+  strokeWidth: Type.Optional(Type.Number({ exclusiveMinimum: 0 })),
+  strokeStyle: Type.Optional(
+    Type.Union([Type.Literal('solid'), Type.Literal('dashed'), Type.Literal('dotted')]),
+  ),
+  fill: Type.Optional(AgentDrawingColorToolParameter),
+  fillOpacity: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
+  pointRadius: Type.Optional(Type.Number({ exclusiveMinimum: 0 })),
+  textColor: Type.Optional(AgentDrawingColorToolParameter),
+  fontSize: Type.Optional(Type.Number({ exclusiveMinimum: 0 })),
+})
 const DrawingLabelToolParameters = Type.Object(
   {
     text: Type.String({ description: '标签文本。使用字面量 \\n 作为唯一换行控制码。' }),
@@ -208,7 +206,7 @@ const DrawingCreateToolParameters = Type.Object({
   kind: DrawingKindToolParameter,
   paneId: Type.String({ minLength: 1 }),
   anchors: Type.Array(DrawingAnchorToolParameters, { minItems: 1, maxItems: 3 }),
-  style: Type.Optional(DrawingStyleToolParameters),
+  style: DrawingCreateStyleToolParameters,
   labels: Type.Optional(DrawingLabelsToolParameters),
   visible: Type.Optional(Type.Boolean()),
   locked: Type.Optional(Type.Boolean()),
@@ -661,7 +659,7 @@ class ChartAgentControllerImpl implements ChartAgentController {
     name: 'instruments_query_name',
     label: 'Query instrument name',
     description:
-      "Look up security names by an exact symbol through the active market-data sources. Optionally restrict the lookup to sourceIds. Returns a Markdown table of every exact match with all instrument fields; never infer a name from a partial match. When the table contains more than one row, do not pick a candidate yourself: call ask_user with one option per row, where value is that row's id, label is its name, and description lists its source, exchange, and assetClass; wait for the user to choose before continuing.",
+      "Look up security names by an exact symbol through the active market-data sources. Optionally restrict the lookup to sourceIds. Returns a Markdown table of every exact match with all instrument fields; never infer a name from a partial match. When the table contains more than one row, do not pick a candidate yourself: call ask_user with one option per row, where value is that row's id, label is its name, and description lists its source, exchange, and instrumentType; wait for the user to choose before continuing.",
     parameters: InstrumentLookupToolParameters,
     safety: 'read-only',
     executionMode: 'parallel',
@@ -690,7 +688,7 @@ class ChartAgentControllerImpl implements ChartAgentController {
       sourceId: input.sourceId,
       symbol: input.symbol,
       exchange: input.exchange,
-      assetClass: input.assetClass,
+      instrumentType: input.instrumentType,
       period: input.period,
       adjustment: input.adjustment,
       barAggregation: input.barAggregation,
@@ -738,7 +736,7 @@ class ChartAgentControllerImpl implements ChartAgentController {
       sourceId: input.sourceId,
       symbol: input.symbol,
       exchange: input.exchange,
-      assetClass: input.assetClass,
+      instrumentType: input.instrumentType,
       tradingDate: input.tradingDate as TradingDate,
       signal: context?.signal,
     })
@@ -768,7 +766,7 @@ class ChartAgentControllerImpl implements ChartAgentController {
       sourceId: input.sourceId,
       symbol: input.symbol,
       exchange: input.exchange,
-      assetClass: input.assetClass,
+      instrumentType: input.instrumentType,
       endTradingDate: input.endTradingDate as TradingDate,
       days: input.days,
       signal: context?.signal,
@@ -850,13 +848,10 @@ class ChartAgentControllerImpl implements ChartAgentController {
     input: Static<typeof DrawingUpdateToolParameters>,
   ): Promise<ChartAgentDrawingSnapshot | null> {
     const patch = input.patch
+    const { anchors, ...rest } = patch
     const drawing = this.dependencies.drawingCommands.updateFromInput(input.drawingId, {
-      ...(patch.anchors === undefined ? {} : { anchors: parseDrawingAnchors(patch.anchors) }),
-      ...(patch.style === undefined ? {} : { style: patch.style }),
-      ...(patch.labels === undefined ? {} : { labels: patch.labels }),
-      ...(patch.visible === undefined ? {} : { visible: patch.visible }),
-      ...(patch.locked === undefined ? {} : { locked: patch.locked }),
-      ...(patch.zIndex === undefined ? {} : { zIndex: patch.zIndex }),
+      ...rest,
+      ...(anchors === undefined ? {} : { anchors: parseDrawingAnchors(anchors) }),
     })
     return drawing ? projectDrawing(drawing) : null
   }

@@ -54,14 +54,20 @@
     </div>
 
     <div v-if="showActions" class="tool-card__actions">
-      <button v-if="tool.canLocate" type="button" @click="$emit('locate', tool.id)">
+      <button
+        v-if="tool.canLocate"
+        class="agent-quiet-button"
+        type="button"
+        @click="emit('locate', tool.id)"
+      >
         <IconFocusCentered aria-hidden="true" />
         {{ text.locate }}
       </button>
       <button
         v-if="tool.status === 'succeeded' && tool.undoToken"
+        class="agent-quiet-button"
         type="button"
-        @click="$emit('undo')"
+        @click="emit('undo')"
       >
         <IconArrowBackUp aria-hidden="true" />
         {{ text.undo }}
@@ -71,6 +77,7 @@
 </template>
 
 <script setup lang="ts">
+  import LoadingSpinner from '@vue-src/components/common/LoadingSpinner.vue'
   import { computed } from 'vue'
   import IconAlertTriangle from '~icons/tabler/alert-triangle'
   import IconArrowBackUp from '~icons/tabler/arrow-back-up'
@@ -81,12 +88,11 @@
   import IconFocusCentered from '~icons/tabler/focus-centered'
   import IconRotateClockwise2 from '~icons/tabler/rotate-clockwise-2'
   import IconShieldCheck from '~icons/tabler/shield-check'
-  import LoadingSpinner from '../../../components/LoadingSpinner.vue'
   import type { ToolCallView } from '../agent-contracts.js'
   import { type AgentLocale, getAgentCopy } from '../agent-copy.js'
 
   const props = defineProps<{ tool: ToolCallView; locale: AgentLocale }>()
-  defineEmits<{ locate: [toolCallId: string]; undo: [] }>()
+  const emit = defineEmits<{ locate: [toolCallId: string]; undo: [] }>()
 
   const text = computed(() => getAgentCopy(props.locale))
   const statusLabel = computed(
@@ -284,22 +290,9 @@
     gap: 5px;
   }
 
-  button {
-    min-height: 28px;
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 0 8px;
-    border: 1px solid var(--agent-border);
-    border-radius: 4px;
-    color: var(--agent-text);
-    background: var(--agent-input);
-    font: inherit;
-    font-size: 11px;
-    cursor: pointer;
-  }
-
   button:hover {
     background: var(--agent-hover);
   }
 </style>
+
+<style scoped src="./agent-quiet-button.css"></style>

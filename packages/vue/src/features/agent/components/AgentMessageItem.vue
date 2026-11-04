@@ -93,7 +93,7 @@
           type="button"
           :disabled="regenerateDisabled"
           :aria-label="text.regenerate"
-          @click="$emit('regenerate')"
+          @click="emit('regenerate')"
         >
           <IconRefresh aria-hidden="true" />
         </button>
@@ -133,7 +133,7 @@
     editDisabled?: boolean
     editMessage?: EditMessageAction
   }>()
-  defineEmits<{ regenerate: [] }>()
+  const emit = defineEmits<{ regenerate: [] }>()
   const { status: copyStatus, copy } = useMessageCopy(() => props.message.content)
   const text = computed(() => getAgentCopy(props.locale))
   const {
@@ -197,8 +197,9 @@
 
 <style scoped>
   .message__editor { position: relative; padding-bottom: 32px; }
-  /* BaseTextarea 负责自增高；编辑态贴合气泡，无内边距与边框。 */
-  .message__edit-input {
+  /* BaseTextarea 负责自增高；编辑态贴合气泡，无内边距与边框。
+     覆盖必须带父类：primitive 默认值同为无层的单类规则，只靠加载顺序会翻转。 */
+  .message__editor .message__edit-input {
     --base-textarea-padding-block: 0px;
     --base-textarea-border: 0px;
 
@@ -211,7 +212,6 @@
     font-size: 13px;
     line-height: 1.52;
   }
-  .message__edit-input:focus-visible { box-shadow: none; outline: none; }
   .message__editor-actions {
     position: absolute;
     right: 0;

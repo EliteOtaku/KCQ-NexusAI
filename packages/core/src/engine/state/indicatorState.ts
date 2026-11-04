@@ -5,11 +5,34 @@ import {
   getRegisteredIndicatorDefinition,
   resolveIndicatorDefinitionId,
 } from '../indicators/indicatorDefinitionRegistry.js'
+import {
+  createIndicatorInstanceId,
+  createMainIndicatorInstanceId,
+} from '../indicators/instances/api/instanceIdentity.js'
 import type { LayoutWorkspaces } from '../layout/index.js'
 import { deepFreezeSnapshot } from './immutable.js'
 
 /** 指标实例所在的图表区域。 */
 export type IndicatorInstanceRole = 'main' | 'sub'
+
+/** 实例归属属于用户配置；无需等待指标定义即可恢复主副图位置。 */
+export interface IndicatorInstanceConfig {
+  /** 用户持久化配置不携带模式实例的运行时来源。 */
+  readonly source?: never
+  readonly instanceId: string
+  readonly indicatorId: string
+  readonly paneId: string
+  readonly role: IndicatorInstanceRole
+  readonly ordinal: number
+  readonly hidden?: boolean
+  readonly params: Readonly<Record<string, unknown>>
+}
+
+/** 系统实例由图表模式拥有，不进入用户布局文档。 */
+type StoredIndicatorInstance =
+  | IndicatorInstanceConfig
+  | (IndicatorInstanceSpec & { readonly source: 'mode' })
+
 export type IndicatorInstanceSource = 'user' | 'mode'
 
 /** 统一的指标实例业务状态；主图固定 paneId 为 main。 */
@@ -28,9 +51,9 @@ export interface IndicatorInstanceSpec {
   readonly params: Readonly<Record<string, unknown>>
 }
 
-/** 写入指标状态时可省略实例身份，供 mode 等内部状态构建使用。 */
-export type IndicatorInstanceInput = Omit<IndicatorInstanceSpec, 'instanceId' | 'ordinal'> &
-  Partial<Pick<IndicatorInstanceSpec, 'instanceId' | 'ordinal'>>
+/** 写入指标状态必须提供已分配的实例身份，序号可由状态入口补齐。 */
+export type IndicatorInstanceInput = Omit<IndicatorInstanceSpec, 'ordinal'> &
+  Partial<Pick<IndicatorInstanceSpec, 'ordinal'>>
 
 /** 副图投影使用的只读结构。 */
 export interface SubPaneSpec {
@@ -48,9 +71,9 @@ export type SubPaneInput = Omit<SubPaneSpec, 'instanceId' | 'ordinal'> &
   Partial<Pick<SubPaneSpec, 'instanceId' | 'ordinal'>>
 
 /** 冻结统一指标实例，隔离调用方对参数对象的修改。 */
-function snapshotInstance(entry: IndicatorInstanceInput): IndicatorInstanceSpec {
+function snapshotInstance(entry: IndicatorInstanceInput): StoredIndicatorInstance {
   const snapshot = {
-    instanceId: entry.instanceId ?? `legacy:${entry.paneId}`,
+    instanceId: entry.instanceId,
     indicatorId: entry.indicatorId,
     paneId: entry.paneId,
     role: entry.role,
@@ -114,25 +137,43 @@ function calculationInstancesEqual(
 
 /** 创建指标实例状态，主图和副图共享 instances 这一唯一数据源。 */
 export function createIndicatorState() {
-  const { signals, readonly } = createSubState({
+  const { signals, readonly: stored } = createSubState({
     activeWorkspace: ChartWorkspaceId.KLine as ChartWorkspaceId,
     workspaces: Object.freeze({
-      kline: Object.freeze([]) as ReadonlyArray<IndicatorInstanceSpec>,
-      timeshare: Object.freeze([]) as ReadonlyArray<IndicatorInstanceSpec>,
-    }) as Readonly<Record<ChartWorkspaceId, ReadonlyArray<IndicatorInstanceSpec>>>,
-    instances: Object.freeze([]) as ReadonlyArray<IndicatorInstanceSpec>,
+      kline: Object.freeze([]) as ReadonlyArray<StoredIndicatorInstance>,
+      timeshare: Object.freeze([]) as ReadonlyArray<StoredIndicatorInstance>,
+    }) as Readonly<Record<ChartWorkspaceId, ReadonlyArray<StoredIndicatorInstance>>>,
     configRevision: 0,
     favoriteIndicatorIds: Object.freeze<string[]>([]),
   })
+  const workspaces = stored.workspaces
+  const instances = computed(() => workspaces()[stored.activeWorkspace()])
+  const configurations = computed(() =>
+    Object.freeze({
+      kline: Object.freeze(
+        stored
+          .workspaces()
+          .kline.filter((entry): entry is IndicatorInstanceConfig => !('source' in entry)),
+      ),
+      timeshare: Object.freeze(
+        stored
+          .workspaces()
+          .timeshare.filter((entry): entry is IndicatorInstanceConfig => !('source' in entry)),
+      ),
+    }),
+  )
+  const readonly = { ...stored, workspaces, instances, configurations }
+  /** Action 在 batch 内直接读取原始配置，不读取尚未重算的派生快照。 */
+  const currentInstances = () =>
+    stored.workspaces.peek()[stored.activeWorkspace.peek()]
 
   /** 写入不可变实例快照。 */
   const write = (instances: ReadonlyArray<IndicatorInstanceInput>) => {
-    const previous = readonly.instances.peek()
+    const previous = currentInstances()
     const next = Object.freeze(instances.map(snapshotInstance))
     batch(() => {
-      signals.instances.set(next)
       const workspaceId = readonly.activeWorkspace.peek()
-      signals.workspaces.set(Object.freeze({ ...readonly.workspaces.peek(), [workspaceId]: next }))
+      signals.workspaces.set(Object.freeze({ ...stored.workspaces.peek(), [workspaceId]: next }))
       if (!calculationInstancesEqual(previous, next)) {
         signals.configRevision.set(signals.configRevision.peek() + 1)
       }
@@ -173,12 +214,12 @@ export function createIndicatorState() {
 
   /** 写入或更新主图实例，新实例始终位于副图实例之前。 */
   const upsertMain = (id: string, params: Record<string, number | boolean | string>) => {
-    const prev = readonly.instances.peek()
+    const prev = currentInstances()
     const index = findMainIndex(prev, id)
     const existing = index < 0 ? undefined : prev[index]
     const next = [...prev]
     const entry = snapshotInstance({
-      instanceId: `main:${id}`,
+      instanceId: existing ? existing.instanceId : createMainIndicatorInstanceId(id),
       indicatorId: id,
       paneId: 'main',
       role: 'main',
@@ -217,34 +258,24 @@ export function createIndicatorState() {
       /** 切换视图工作区；实例、参数和排序均不跨工作区同步。 */
       setActiveWorkspace(workspaceId: ChartWorkspaceId) {
         if (signals.activeWorkspace.peek() === workspaceId) return
-        const next = readonly.workspaces.peek()[workspaceId]
         batch(() => {
           signals.activeWorkspace.set(workspaceId)
-          signals.instances.set(next)
           signals.configRevision.set(signals.configRevision.peek() + 1)
         })
       },
       /** 用已校验的持久快照恢复两个工作区的用户指标。 */
       restoreWorkspaces(workspaces: LayoutWorkspaces) {
-        // 快照可能来自规范 ID 之前的版本；恢复时统一解析为展示名
-        const normalizeInstanceId = (entry: IndicatorInstanceInput): IndicatorInstanceInput => ({
-          ...entry,
-          indicatorId: resolveIndicatorDefinitionId(entry.indicatorId) ?? entry.indicatorId,
-        })
+        // 系统实例由模式拥有，替换用户配置时不能顺带删除。
+        const restore = (workspaceId: ChartWorkspaceId) => Object.freeze([
+          ...stored.workspaces.peek()[workspaceId].filter((entry) => 'source' in entry),
+          ...workspaces[workspaceId].instances.map(snapshotInstance),
+        ])
         const next = Object.freeze({
-          kline: Object.freeze(
-            workspaces.kline.instances.map((entry) => snapshotInstance(normalizeInstanceId(entry))),
-          ),
-          timeshare: Object.freeze(
-            workspaces.timeshare.instances.map((entry) =>
-              snapshotInstance(normalizeInstanceId(entry)),
-            ),
-          ),
+          kline: restore(ChartWorkspaceId.KLine),
+          timeshare: restore(ChartWorkspaceId.TimeShare),
         })
-        const activeInstances = next[readonly.activeWorkspace.peek()]
         batch(() => {
           signals.workspaces.set(next)
-          signals.instances.set(activeInstances)
           signals.configRevision.set(signals.configRevision.peek() + 1)
         })
       },
@@ -254,7 +285,7 @@ export function createIndicatorState() {
       },
       /** 按 indicatorId 删除主图实例。 */
       removeMain(id: string) {
-        const prev = readonly.instances.peek()
+        const prev = currentInstances()
         if (findMainIndex(prev, id) < 0) return
         write(
           prev.filter(
@@ -266,12 +297,12 @@ export function createIndicatorState() {
       },
       /** 仅更新已存在主图实例的参数。 */
       setMainParams(id: string, params: Record<string, number | boolean | string>) {
-        if (findMainIndex(readonly.instances.peek(), id) < 0) return
+        if (findMainIndex(currentInstances(), id) < 0) return
         upsertMain(id, params)
       },
       /** 隐藏或显示指标实例；隐藏只影响绘制，图例保留并置灰，不参与计算与参数比较。 */
       setIndicatorHidden(instanceId: string, hidden: boolean) {
-        const prev = readonly.instances.peek()
+        const prev = currentInstances()
         const index = prev.findIndex((instance) => instance.instanceId === instanceId)
         const current = index < 0 ? undefined : prev[index]
         if (!current || current.source === 'mode' || Boolean(current.hidden) === hidden) return
@@ -281,9 +312,9 @@ export function createIndicatorState() {
       },
       /** 整体替换主图实例，保留副图实例。 */
       replaceAllMain(instances: ReadonlyArray<IndicatorInstanceSpec>) {
-        const retained = readonly.instances
-          .peek()
-          .filter((instance) => instance.role === 'sub' || instance.source === 'mode')
+        const retained = currentInstances().filter(
+          (instance) => instance.role === 'sub' || instance.source === 'mode',
+        )
         write([
           ...retained.filter((instance) => instance.role === 'main'),
           ...instances.map((entry) => ({ ...entry, role: 'main' as const, paneId: 'main' })),
@@ -293,14 +324,14 @@ export function createIndicatorState() {
       /** 清空全部主图实例。 */
       clearMain() {
         write(
-          readonly.instances
-            .peek()
-            .filter((instance) => instance.role === 'sub' || instance.source === 'mode'),
+          currentInstances().filter(
+            (instance) => instance.role === 'sub' || instance.source === 'mode',
+          ),
         )
       },
       /** 整体替换当前 mode 所需的系统实例，保留用户指标实例。 */
       replaceModeInstances(instances: ReadonlyArray<IndicatorInstanceInput>) {
-        const current = readonly.instances.peek()
+        const current = currentInstances()
         const userInstances = current.filter((instance) => instance.source !== 'mode')
         write([
           ...instances.map((entry) => ({ ...entry, source: 'mode' as const })),
@@ -309,10 +340,16 @@ export function createIndicatorState() {
       },
       /** 按 paneId 新增或替换副图实例。 */
       upsertSub(entry: SubPaneInput) {
-        const prev = readonly.instances.peek()
+        const prev = currentInstances()
         const index = findSubIndex(prev, entry.paneId)
         if (index >= 0 && prev[index]!.source === 'mode') return
-        const nextEntry = snapshotInstance({ ...entry, role: 'sub' })
+        const instanceId =
+          entry.instanceId === undefined
+            ? index < 0
+              ? createIndicatorInstanceId()
+              : prev[index]!.instanceId
+            : entry.instanceId
+        const nextEntry = snapshotInstance({ ...entry, instanceId, role: 'sub' })
         if (index < 0) write([...prev, nextEntry])
         else if (subInstanceEqual(prev[index]!, nextEntry)) return
         else {
@@ -323,20 +360,20 @@ export function createIndicatorState() {
       },
       /** 按 paneId 删除副图实例。 */
       removeSub(paneId: string) {
-        const prev = readonly.instances.peek()
+        const prev = currentInstances()
         const entry = prev.find((instance) => instance.role === 'sub' && instance.paneId === paneId)
         if (!entry || entry.source === 'mode') return
         write(prev.filter((instance) => !(instance.role === 'sub' && instance.paneId === paneId)))
       },
       /** 替换已存在副图实例绑定的指标和参数。 */
       replaceSub(entry: SubPaneInput) {
-        const prev = readonly.instances.peek()
+        const prev = currentInstances()
         const index = findSubIndex(prev, entry.paneId)
         if (index < 0 || prev[index]!.source === 'mode') return
         const next = [...prev]
         next[index] = snapshotInstance({
           ...entry,
-          instanceId: entry.instanceId ?? prev[index]!.instanceId,
+          instanceId: prev[index]!.instanceId,
           ordinal: entry.ordinal ?? prev[index]!.ordinal,
           role: 'sub',
           hidden: entry.hidden ?? prev[index]!.hidden,
@@ -345,7 +382,7 @@ export function createIndicatorState() {
       },
       /** 替换已存在副图实例的完整参数。 */
       setSubParams(paneId: string, params: Readonly<Record<string, unknown>>) {
-        const prev = readonly.instances.peek()
+        const prev = currentInstances()
         const index = findSubIndex(prev, paneId)
         if (index < 0 || prev[index]!.source === 'mode') return
         const current = prev[index]!
@@ -356,9 +393,9 @@ export function createIndicatorState() {
       /** 清空全部副图实例。 */
       clearSub() {
         write(
-          readonly.instances
-            .peek()
-            .filter((instance) => instance.role === 'main' || instance.source === 'mode'),
+          currentInstances().filter(
+            (instance) => instance.role === 'main' || instance.source === 'mode',
+          ),
         )
       },
     },
@@ -367,11 +404,10 @@ export function createIndicatorState() {
         signals.activeWorkspace.set(ChartWorkspaceId.KLine)
         signals.workspaces.set(
           Object.freeze({
-            kline: Object.freeze([]) as ReadonlyArray<IndicatorInstanceSpec>,
-            timeshare: Object.freeze([]) as ReadonlyArray<IndicatorInstanceSpec>,
+            kline: Object.freeze([]) as ReadonlyArray<StoredIndicatorInstance>,
+            timeshare: Object.freeze([]) as ReadonlyArray<StoredIndicatorInstance>,
           }),
         )
-        signals.instances.set(Object.freeze([]))
         signals.favoriteIndicatorIds.set(Object.freeze([]))
       })
     },
