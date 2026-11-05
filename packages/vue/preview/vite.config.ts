@@ -69,7 +69,7 @@ export default defineConfig({
     exclude: ['@363045841yyt/klinechart-core'],
   },
   server: {
-    // 固定端口：5173 归 cloudtradeagent WebUI，5273 归 nexus-shell，KCQ preview 独占 5175 避免混抢
+    // 固定端口：5173 归 cloudtradeagent WebUI，KCQ preview 独占 5175 避免混抢
     host: '0.0.0.0',
     port: 5175,
     strictPort: true,
