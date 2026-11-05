@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { Type, type Static } from 'typebox'
+import { type Static, Type } from 'typebox'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   createCanvasGetContextMock,
@@ -10,18 +10,6 @@ import {
 import { loadBuiltinIndicators } from '../../engine/indicators/registerBuiltins'
 import { getRegisteredChartTools, Tool } from '../../foundation/agent/chartToolRegistry'
 import { createChartController } from '../chart/index'
-import type { KLineData } from '../types'
-
-function createBars(length = 30): KLineData[] {
-  return Array.from({ length }, (_, index) => ({
-    timestamp: (index + 1) * 60_000,
-    open: index + 1,
-    high: index + 2,
-    low: index,
-    close: index + 1,
-    volume: 100,
-  }))
-}
 
 const hostInputSchema = Type.Object({ value: Type.Number() })
 
@@ -44,7 +32,7 @@ async function mountController() {
   Object.defineProperty(container, 'clientWidth', { value: 800, configurable: true })
   Object.defineProperty(container, 'clientHeight', { value: 600, configurable: true })
   document.body.appendChild(container)
-  const ctrl = await createChartController({ container, data: createBars() })
+  const ctrl = await createChartController({ container })
   return {
     ctrl,
     cleanup: () => {
